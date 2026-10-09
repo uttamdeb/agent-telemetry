@@ -15,6 +15,19 @@ Covers **Claude Code · Claude Desktop · Codex · GitHub Copilot · Cursor · o
 
 ---
 
+## Preview
+
+<table>
+  <tr>
+    <th>Menu bar companion</th>
+    <th>Usage dashboard</th>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/macos-menu-bar.png" width="300" alt="AgentTelemetry menu bar popover with today's token and spend totals and display settings"></td>
+    <td><img src="docs/screenshots/dashboard-overview.png" width="640" alt="AgentTelemetry dashboard showing token trends and usage breakdowns by tool and model"></td>
+  </tr>
+</table>
+
 ## Quick start
 
 ```bash
