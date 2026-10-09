@@ -13,6 +13,11 @@ with big Codex logs), then caches; later refreshes are incremental. If asked to 
 dashboard", check `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:7878/api/data`
 first — it may already be up.
 
+`--data-dir PATH` moves `.usage_cache.json`, `.peers.json`, and `.peers/` into a writable
+directory; omitting it keeps the checkout-local paths. Native local clients use `/api/health`
+for readiness only and `/api/summary` for today's token count and estimated spend. Health
+must never include analytics records or project names.
+
 ## Layout
 
 | File | Role |

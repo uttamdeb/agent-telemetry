@@ -1117,7 +1117,12 @@ async function pwaDisable(){
 /* Refresh interval, in ms. 15s is the historical default; 0 = manual only. */
 const POLL_KEY="aiu.poll";
 const POLL_CHOICES=[["15000","15s"],["60000","1m"],["300000","5m"],["0","Manual"]];
+const NATIVE_APP_MODE=new URLSearchParams(location.search).get("nativeApp")==="1";
 function pollMs(){
+  if(NATIVE_APP_MODE){
+    const seconds=Number(new URLSearchParams(location.search).get("nativePollSeconds"))||300;
+    return Math.max(60,seconds)*1000;
+  }
   try{ const v=localStorage.getItem(POLL_KEY); return v===null?15000:Math.max(0,+v||0); }
   catch(e){ return 15000; }
 }
@@ -2267,11 +2272,19 @@ setTimeout(loadStorage, 1200);
 /* Poll interval is user-configurable (Settings). The payload is ~1MB, so a
    tighter loop is real CPU and disk churn; 0 means "only when I press refresh". */
 let pollTimers=[];
+function clearPollTimers(){ pollTimers.forEach(clearInterval); pollTimers=[]; }
 function applyPollInterval(){
-  pollTimers.forEach(clearInterval); pollTimers=[];
+  clearPollTimers();
   const ms=pollMs();
-  if(!ms) return;
+  if(!ms || (NATIVE_APP_MODE && document.visibilityState==="hidden")) return;
   pollTimers.push(setInterval(()=>{ if(S.live) load(); }, ms));
   pollTimers.push(setInterval(()=>{ if(S.live) loadStorage(); }, Math.max(ms*8,120000)));
 }
 applyPollInterval();
+if(NATIVE_APP_MODE) document.addEventListener("visibilitychange",()=>{
+  applyPollInterval();
+  if(document.visibilityState==="visible"){
+    load();
+    loadStorage();
+  }
+});

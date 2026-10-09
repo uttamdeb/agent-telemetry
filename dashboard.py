@@ -15,14 +15,25 @@ Stdlib only. First run parses everything (one large Codex log makes that take a
 moment); results are cached, and subsequent refreshes are incremental & instant.
 """
 import os, re, sys, json, time, glob, threading, argparse, shutil, mimetypes, platform, subprocess
-import gzip, hmac, io, ipaddress, secrets, socket, uuid, urllib.parse, urllib.request, urllib.error
+import gzip, hmac, io, ipaddress, secrets, socket, uuid, signal, urllib.parse, urllib.request, urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import parser as P
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-CACHE_PATH = os.path.join(HERE, ".usage_cache.json")
+DATA_DIR = HERE
+CACHE_PATH = os.path.join(DATA_DIR, ".usage_cache.json")
 CACHE_VERSION = 53
+
+
+def _configure_data_dir(path):
+    """Keep mutable app state outside a packaged, potentially read-only bundle."""
+    global DATA_DIR, CACHE_PATH, PEERS_PATH, PEER_DIR
+    DATA_DIR = os.path.abspath(os.path.expanduser(path or HERE))
+    os.makedirs(DATA_DIR, exist_ok=True)
+    CACHE_PATH = os.path.join(DATA_DIR, ".usage_cache.json")
+    PEERS_PATH = os.path.join(DATA_DIR, ".peers.json")
+    PEER_DIR = os.path.join(DATA_DIR, ".peers")
 
 
 def _peer_cache_ok(version):
@@ -92,6 +103,9 @@ def _git(*args, timeout=10):
 
 
 def _version():
+    packaged_version = os.environ.get("AGENT_TELEMETRY_VERSION")
+    if packaged_version:
+        return {"git": False, "describe": packaged_version}
     try:
         return {"git": True, "commit": _git("rev-parse", "--short", "HEAD"),
                 "date": _git("log", "-1", "--format=%cs"),
@@ -426,6 +440,30 @@ def build_payload():
     # as refresh so a response is consistent and iteration cannot race an append.
     with _refresh_lock:
         return _build_payload_locked()
+
+
+def build_today_summary():
+    """Aggregate only today's usage records for the menu bar, not the full dashboard."""
+    today = time.strftime("%Y-%m-%d")
+    tokens = 0
+    spend = 0.0
+    with _refresh_lock:
+        with _lock:
+            items = list(_state["files"].items())
+        items += _peer_items()
+        for agg in _one_per_conversation(items):
+            source = agg["source"]
+            has_logged_cost = ((source == "opencode" and str(agg.get("path", "")).endswith(".db"))
+                               or source == "openclaw")
+            for _, bucket in _record_buckets(agg):
+                for key, row in bucket.items():
+                    date, model = key.split("\t", 1)
+                    if date != today:
+                        continue
+                    priced = _priced_usage(source, model, date, row, has_logged_cost)
+                    tokens += sum(int(priced.get(field) or 0) for field in ("in", "out", "cr", "cc"))
+                    spend += float(priced.get("cost") or 0)
+    return {"date": today, "tokens": tokens, "spend": round(spend, 2)}
 
 
 def _sum_usage(target, row):
@@ -1330,8 +1368,8 @@ def build_storage():
 # two devices connected both ways never count each other twice. Nothing is
 # encrypted: the code keeps others on the Wi-Fi from reading it, not from sniffing.
 # ---------------------------------------------------------------------------
-PEERS_PATH = os.path.join(HERE, ".peers.json")   # this install's id, sharing code, connections
-PEER_DIR = os.path.join(HERE, ".peers")          # the last copy pulled from each device
+PEERS_PATH = os.path.join(DATA_DIR, ".peers.json")   # this install's id, sharing code, connections
+PEER_DIR = os.path.join(DATA_DIR, ".peers")          # the last copy pulled from each device
 PEER_PORT = 7879
 PEER_PULL_EVERY = 60
 PEER_PROTO = 1
@@ -1794,7 +1832,7 @@ def _sync_peer(pid):
         _save_peer_cfg()
 
 
-def peer_puller():
+def peer_puller(stopping=None):
     while True:
         for pid in list(_peer_cfg()["peers"]):
             try:
@@ -1802,7 +1840,10 @@ def peer_puller():
                     _sync_peer(pid)
             except Exception as e:             # never let one bad pull stop the loop
                 sys.stderr.write(f"[devices] pulling {pid}: {e}\n")
-        time.sleep(PEER_PULL_EVERY)
+        if stopping is None:
+            time.sleep(PEER_PULL_EVERY)
+        elif stopping.wait(PEER_PULL_EVERY):
+            return
 
 
 def devices_status():
@@ -1946,6 +1987,19 @@ class Handler(BaseHTTPRequestHandler):
         route = self.path.split("?")[0]
         if route in ("/", "/index.html"):
             self._file("index.html", "text/html; charset=utf-8")
+        elif route == "/api/health":
+            self._send(200, json.dumps({
+                "service": "agent-telemetry",
+                "version": VERSION.get("describe") or VERSION.get("commit") or "development",
+                "ready": not bool(_meta.get("building")),
+                "building": bool(_meta.get("building")),
+            }))
+        elif route == "/api/summary":
+            try:
+                self._send(200, json.dumps(build_today_summary()))
+            except Exception as e:
+                import traceback; traceback.print_exc()
+                self._send(500, json.dumps({"error": str(e)}))
         elif route == "/chart.js":
             self._file("chart.umd.min.js", "application/javascript")
         elif route == "/manifest.json":
@@ -2073,9 +2127,12 @@ class Server(ThreadingHTTPServer):
         super().handle_error(request, client_address)
 
 
-def background_refresher(interval):
+def background_refresher(interval, stopping=None):
     while True:
-        time.sleep(interval)
+        if stopping is None:
+            time.sleep(interval)
+        elif stopping.wait(interval):
+            return
         try:
             refresh(verbose=False)
         except Exception as e:
@@ -2088,8 +2145,22 @@ def main():
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--interval", type=int, default=20,
                     help="seconds between background incremental refreshes")
+    ap.add_argument("--data-dir", help="directory for the usage cache and device-sharing state")
     ap.add_argument("--rebuild", action="store_true", help="ignore cache, full reparse")
     args = ap.parse_args()
+
+    try:
+        _configure_data_dir(args.data_dir)
+    except OSError as e:
+        ap.error(f"cannot use data directory: {e}")
+
+    stopping = threading.Event()
+
+    def _request_shutdown(signum, frame):
+        stopping.set()
+
+    signal.signal(signal.SIGTERM, _request_shutdown)
+    signal.signal(signal.SIGINT, _request_shutdown)
 
     if args.rebuild and os.path.exists(CACHE_PATH):
         os.remove(CACHE_PATH)
@@ -2098,14 +2169,18 @@ def main():
                      "incl. one large Codex log)...\n")
     refresh(verbose=True)
     sys.stderr.write(f"[init] {_meta['files']} files in {_meta['last_duration']:.1f}s\n")
+    if stopping.is_set():
+        with _refresh_lock, _lock:
+            save_cache()
+        return
 
-    threading.Thread(target=background_refresher, args=(args.interval,), daemon=True).start()
+    threading.Thread(target=background_refresher, args=(args.interval, stopping), daemon=True).start()
 
     # other devices: only if the user turned them on in Settings
     _load_mirrors()
     if _peer_cfg()["share"].get("on"):
         _share_start()
-    threading.Thread(target=peer_puller, daemon=True).start()
+    threading.Thread(target=peer_puller, args=(stopping,), daemon=True).start()
 
     BIND.update(host=args.host, port=args.port)
     srv = Server((args.host, args.port), Handler)
@@ -2113,8 +2188,16 @@ def main():
     sys.stderr.write(f"\n  ✦ AgentTelemetry live at  {url}  ·  {DEVICE['name']}\n")
     sys.stderr.write(f"    refreshing every {args.interval}s · Ctrl-C to stop\n\n")
     try:
-        srv.serve_forever()
-    except KeyboardInterrupt:
+        srv.timeout = 0.5
+        while not stopping.is_set():
+            srv.handle_request()
+    finally:
+        stopping.set()
+        _share_stop()
+        srv.server_close()
+        with _refresh_lock, _lock:
+            if not save_cache():
+                sys.stderr.write("[shutdown] cache flush failed; see the cache error above\n")
         sys.stderr.write("\nbye\n")
 
 

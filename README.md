@@ -30,7 +30,17 @@ Then open **http://127.0.0.1:7878**. That's it — no `pip install`, no setup.
 > you're running *right now* shows up within seconds.
 
 Options: `python3 dashboard.py --port 9000` · `--rebuild` (ignore cache, full re-parse) ·
-`--interval 20` (background refresh seconds). Or `./run.sh [flags]`.
+`--interval 20` (background refresh seconds) · `--data-dir /path/to/state` (store the
+cache and optional device-sharing files outside the checkout). Without `--data-dir`, current
+checkout behavior is unchanged. Or `./run.sh [flags]`.
+
+## macOS menu bar app
+
+The native SwiftUI wrapper and source-build instructions are in [`macos/AgentTelemetryMac`](macos/AgentTelemetryMac/README.md). It keeps the existing dashboard and parser, bundles a pinned Python runtime, and offers an icon or compact token/spend menu-bar display. A prebuilt, notarized release is not included yet.
+
+Local app integrations can use `GET /api/health` for a small readiness response that contains
+no usage data, and `GET /api/summary` for today's token total and API-equivalent estimated
+spend. Both are read-only; they follow the dashboard's existing host and origin rules.
 
 > `--rebuild` deletes the cache, and with it every session whose log has since been deleted
 > from disk (see [Storage](#storage--what-these-logs-cost-you-in-disk)). Copy
