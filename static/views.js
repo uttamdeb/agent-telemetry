@@ -1141,6 +1141,9 @@ async function loadNativeSettings(){
     if(!r.ok) throw new Error("Could not read native app status.");
     const state=await r.json();
     if(!box.isConnected) return;
+    const signature=JSON.stringify(state);
+    if(box.dataset.nativeState===signature) return;
+    box.dataset.nativeState=signature;
     if(!state.supported){ box.innerHTML='<div class="stg-hint">Native menu apps support macOS and Windows. Use the browser dashboard on this OS.</div>'; return; }
     box.innerHTML=`<label class="stg-field"><input type="checkbox" id="nativeAppToggle" ${state.requested?"checked":""} ${state.installed||state.running?"":"disabled"}> ${esc(state.label)}</label>
       <div class="stg-hint">${!state.installed?"Install once with <code>python install.py</code>; it selects the app for your OS.":state.running?(state.requested?"Running":"Closing…"):(state.requested?"Waiting for the app to start…":"Off")}</div>
@@ -1151,12 +1154,14 @@ async function loadNativeSettings(){
       toggle.disabled=true;
       toggle.dataset.busy="1";
       const msg=document.getElementById("nativeAppMsg");
+      msg.textContent=""; msg.className="stg-msg";
       try{
         const response=await fetch("/api/native",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({enabled})});
         const result=await response.json();
         if(!response.ok) throw new Error(result.error||"Could not change the native app.");
         await loadNativeSettings();
       }catch(e){ toggle.checked=!enabled; toggle.disabled=false; delete toggle.dataset.busy; msg.textContent=e.message; msg.className="stg-msg err"; }
+      finally{ if(toggle.isConnected){ toggle.disabled=false; delete toggle.dataset.busy; } }
     };
   }catch(e){ if(box.isConnected) box.innerHTML='<div class="stg-msg err">'+esc(e.message)+'</div>'; }
 }
