@@ -60,6 +60,8 @@ class Popover:
         self.busy = False
         self.warning = False
         self.error = None
+        self.layout_key = None
+        self.last_interval = None
         self.anchor = (0, 0, 0, 0)
         self.work = (0, 0, 1920, 1080)
         self.dismissed_at = 0
@@ -138,23 +140,28 @@ class Popover:
         busy = bool(self.tray.queue.unfinished_tasks)
         # Routine clock polling should not disable buttons/focus every second.
         busy = busy and self.tray.pending_ui > 0
-        changed = force or snapshot != self.snapshot or busy != self.busy
+        changed = force or snapshot != self.snapshot or busy != self.busy or self.last_interval != self.tray.monitor.interval
         self.snapshot, self.busy = snapshot, busy
+        self.last_interval = self.tray.monitor.interval
         if not changed:
             return
         status = snapshot["status"]
         self.warning = snapshot["stale"] or not (status in ("Monitoring on", "Monitoring off", "Using existing dashboard")
             or status.startswith(("Starting", "Stopping", "History imported")))
-        self.geometry = layout(self.expanded, snapshot["stale"], self.warning,
-                               int((self.work[3] - self.work[1]) / self.scale))
+        max_height = int((self.work[3] - self.work[1]) / self.scale)
+        key = (self.expanded, snapshot["stale"], self.warning, self.scale, max_height)
+        geometry_changed = key != self.layout_key
+        self.layout_key = key
+        self.geometry = layout(self.expanded, snapshot["stale"], self.warning, max_height)
         details, settings, dashboard, footer = (self.geometry[k] for k in ("details", "settings", "dashboard", "footer"))
-        self._place(2, 244, 19, 50, 28)
-        self._place(9, 14, details, 282, 32)
-        self._place(12, 244, details - 29, 52, 24, self.warning)
-        self.place_settings()
-        self._place(1, 14, dashboard, 282, 30)
-        self._place(3, 14, footer, 101, 26)
-        self._place(8, 126, footer, 170, 26)
+        if geometry_changed:
+            self._place(2, 244, 19, 50, 28)
+            self._place(9, 14, details, 282, 32)
+            self._place(12, 244, details - 29, 52, 24, self.warning)
+            self.place_settings()
+            self._place(1, 14, dashboard, 282, 30)
+            self._place(3, 14, footer, 101, 26)
+            self._place(8, 126, footer, 170, 26)
         requested = snapshot["requested"]
         closing = self.tray.quitting
         w.enable_window(self.controls[2], not closing and not busy)
@@ -179,7 +186,7 @@ class Popover:
             w.send(self.combo, 0x14e, selection, 0)
         tokens, spend = figures(snapshot)
         w.set_text(self.window, "AgentTelemetry — Today: %s tokens, estimated spend %s — %s" % (tokens, spend, status))
-        if w.is_visible(self.window):
+        if geometry_changed and w.is_visible(self.window):
             self.reposition()
         w.invalidate(self.window, None, False)
         for handle in self.controls.values():
@@ -433,7 +440,7 @@ class Popover:
                 return 0
             if message == 6 and wparam & 0xffff == 0 and window == self.window:
                 # Owned dropdown windows do not count as leaving the popover.
-                if not lparam or w.get_ancestor(lparam, 3) != self.window:
+                if not lparam or w.get_ancestor(lparam, 3) != w.get_ancestor(self.window, 3):
                     self.hide()
                 return 0
             if message == 0x10:

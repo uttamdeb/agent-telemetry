@@ -247,7 +247,7 @@ class Tray:
                 else:
                     self.update_icon()
                 if not wparam:
-                    self.popover.update(force=True)
+                    self.popover.update(force=bool(lparam & 2))
             elif message == 0x8003:
                 self.popover.hide()
                 message_box(window, "The panel could not be drawn. See the local tray.log for details.",

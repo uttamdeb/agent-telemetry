@@ -179,4 +179,3 @@ def dpi_for_monitor(monitor):
     except (AttributeError, OSError):
         pass  # OS capability fallback, never a swallowed parser error.
     return 96
-

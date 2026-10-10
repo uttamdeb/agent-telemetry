@@ -160,6 +160,16 @@ def main():
             app.monitor.summary["tokens"] += 1
             panel.update()
             assert panel.controls == handles and w.get_focus() == handles[9]
+            # Clock/data refreshes must not dismiss an open dropdown or steal focus.
+            w.set_focus(panel.combo)
+            w.send(panel.combo, 0x14f, 1, 0)  # CB_SHOWDROPDOWN
+            pump()
+            assert w.send(panel.combo, 0x157, 0, 0), "Dropdown did not open"
+            app.monitor.summary["tokens"] += 1
+            panel.update()
+            pump()
+            assert w.is_visible(panel.window) and w.send(panel.combo, 0x157, 0, 0), "Refresh dismissed the dropdown"
+            w.send(panel.combo, 0x14f, 0, 0)
             # Both themes and realistic DPI scales, collapsed and expanded.
             panel.work = (0, 0, 2400, 1600)
             panel.anchor = (2000, 1540, 2032, 1572)

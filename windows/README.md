@@ -13,6 +13,10 @@ shortcut and launches the tray app. `--no-launch` leaves it closed. Later, use t
 System tray app**. If Windows hides the icon in the overflow area, open the taskbar's
 hidden-icons arrow or choose to show AgentTelemetry in taskbar settings.
 
+To update an existing installation, Quit AgentTelemetry and let any owned backend
+finish saving, then run `python install.py` from the updated checkout. The installer
+replaces only application files; usage history and tray preferences stay in place.
+
 Click either mouse button on the branded chart icon for a native popover matching the
 macOS layout: a monitoring switch, Today token/spend cards, **Details & settings**,
 Open dashboard, Refresh and Quit. Expand settings for icon/numbers display, shared
