@@ -24,3 +24,5 @@ jobs:
         run: python install.py --no-launch
       - if: runner.os == 'macOS'
         run: swift build --package-path macos/AgentTelemetryMac
+      - if: runner.os == 'macOS'
+        run: python tests/run_mac_native.py

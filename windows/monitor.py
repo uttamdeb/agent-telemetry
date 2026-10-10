@@ -46,8 +46,12 @@ class Monitor:
         if token:
             headers["X-AgentTelemetry-Control"] = token
         request = urllib.request.Request(self.url + path, raw, headers)
-        with self.opener.open(request, timeout=timeout) as response:
-            return json.load(response)
+        try:
+            with self.opener.open(request, timeout=timeout) as response:
+                return json.load(response)
+        except urllib.error.HTTPError as error:
+            error.close()
+            raise
 
     def _probe(self):
         try:
@@ -187,6 +191,8 @@ def import_ledger(source, destination):
     stage = Path(tempfile.mkdtemp(prefix=".telemetry-import-", dir=str(destination.parent)))
     try:
         shutil.copy2(str(cache), str(stage / cache.name))
+        if os.name != "nt":
+            os.chmod(stage / cache.name, 0o600)
         for name in (".peers.json", ".peers"):
             path = source / name
             if path.is_file():

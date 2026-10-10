@@ -1,5 +1,9 @@
 # GitHub release draft: AgentTelemetry for macOS 0.1.0
 
+Historical draft, superseded by AgentTelemetry v2.0.0's combined source release and
+OS-aware installer. No `macos-v0.1.0` release was published. The old preview path below
+is historical; public notarized installer distribution still requires signing credentials.
+
 **Proposed tag:** `macos-v0.1.0`
 
 **Status:** Hold for owner-authored commit, Developer ID signing, and notarization.

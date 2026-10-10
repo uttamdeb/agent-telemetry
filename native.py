@@ -49,14 +49,19 @@ def status():
     heartbeat = _read("native-status.json")
     control = _read("native-control.json")
     command = manifest.get("command")
+    entry = manifest.get("entry")
     installed = (manifest.get("platform") == sys.platform and isinstance(command, list)
                  and bool(command) and all(isinstance(x, str) for x in command)
-                 and Path(manifest.get("entry") or "__missing_native_app__").exists())
+                 and isinstance(entry, str) and bool(entry) and Path(entry).exists())
     stamp = heartbeat.get("time")
     running = (isinstance(stamp, (int, float)) and 0 <= time.time() - stamp < 15
                and heartbeat.get("generation") == control.get("generation"))
+    requested_at = control.get("requested_at")
+    failed = (control.get("enabled") is True and not running and isinstance(requested_at, (int, float))
+              and time.time() - requested_at > 20)
     return {"supported": sys.platform in ("darwin", "win32"), "installed": bool(installed),
             "running": bool(running), "requested": control.get("enabled") is True,
+            "error": "The app has not responded. Try opening it manually or reinstalling." if failed else None,
             "label": "Menu bar app" if sys.platform == "darwin" else "System tray app"}
 
 
@@ -74,7 +79,7 @@ def action(enabled):
                     raise ValueError("The native app is closing. Wait for it to finish before launching again.")
                 return current
             generation = uuid.uuid4().hex
-            _write("native-control.json", {"enabled": True, "generation": generation})
+            _write("native-control.json", {"enabled": True, "generation": generation, "requested_at": time.time()})
             command = _read("native-install.json")["command"] + ["--native-generation", generation]
             try:
                 subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,

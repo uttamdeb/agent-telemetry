@@ -156,7 +156,7 @@ final class BackendController: ObservableObject {
             Task { await refreshSummary() }
             return
         }
-        guard status != .starting, status != .stopping else { return }
+        guard status != .starting, status != .stopping, !isStopping else { return }
 
         lifecycle += 1
         let attempt = lifecycle
@@ -188,11 +188,8 @@ final class BackendController: ObservableObject {
         pendingStop = after
         status = .stopping
         process.terminate() // SIGTERM lets dashboard.py flush its durable ledger.
-        let pid = process.processIdentifier
-        Task {
-            try? await Task.sleep(nanoseconds: 15_000_000_000)
-            if process.isRunning { _ = kill(pid, SIGKILL) }
-        }
+        // A large initial parse may take longer than 15 seconds. Never force-kill
+        // it before its SIGTERM handler can flush the durable ledger.
     }
 
     func refreshNow() {
@@ -483,11 +480,7 @@ final class BackendController: ObservableObject {
         guard stopOwnedProcess, ownsProcess, let process, process.isRunning else { return }
         isStopping = true
         process.terminate()
-        let pid = process.processIdentifier
-        Task {
-            try? await Task.sleep(nanoseconds: 15_000_000_000)
-            if process.isRunning { _ = kill(pid, SIGKILL) }
-        }
+        // Keep the app/process alive until the ledger has been flushed.
     }
 
     private func processDidExit(status exitStatus: Int32) {

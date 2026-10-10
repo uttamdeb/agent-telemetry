@@ -24,6 +24,9 @@ def copy_windows_payload(destination):
     (destination / "windows").mkdir()
     for name in ("tray.py", "monitor.py"):
         shutil.copy2(str(ROOT / "windows" / name), str(destination / "windows" / name))
+    forbidden = {".usage_cache.json", ".peers.json", ".peers", "server.log"}
+    if any(path.name in forbidden for path in destination.rglob("*")):
+        raise ValueError("Refusing to install a payload containing personal telemetry.")
 
 
 def install_windows():

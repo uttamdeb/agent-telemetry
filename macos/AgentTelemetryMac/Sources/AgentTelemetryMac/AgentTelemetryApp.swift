@@ -38,7 +38,10 @@ struct AgentTelemetryApp: App {
     }
 
     private func openDashboard() {
-        backend.start(openDashboard: { openWindow(id: "dashboard") })
+        backend.start(openDashboard: {
+            openWindow(id: "dashboard")
+            NSApp.activate(ignoringOtherApps: true)
+        })
     }
 
     private func quit() {

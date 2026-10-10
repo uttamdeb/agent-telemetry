@@ -18,6 +18,46 @@ directory; omitting it keeps the checkout-local paths. Native local clients use 
 for readiness only and `/api/summary` for today's token count and estimated spend. Health
 must never include analytics records or project names.
 
+## Native clients and installation (v2.0)
+
+`python3 install.py` (macOS) / `python install.py` (Windows) detects the OS and installs
+the corresponding native client for this user; `--no-launch` opts out of opening it.
+macOS requires Swift/macOS SDK for source building and bundles hash-pinned CPython.
+Windows uses Python `ctypes` and native Win32 APIs, with the installed `pythonw.exe`;
+no third-party GUI dependency. Linux stays on the existing browser workflow.
+
+- `native.py` owns the installed-client manifest, launch/quit requests and heartbeat
+  protocol in the separate **AgentTelemetryNative** application-support directory.
+  Do not put those files into the ledger directory: import requires an empty destination.
+- `windows/tray.py` owns Win32 UI and its serialized worker queue;
+  `windows/monitor.py` owns testable backend attachment, ownership, stale summaries and import.
+- `macos/AgentTelemetryMac` owns SwiftUI/AppKit UI, app-owned Python and WKWebView.
+  `NativeControl.swift` handles the same heartbeat/control-file protocol as Windows.
+- Web Settings uses `GET/POST /api/native` to launch/quit the installed client. Its
+  running status requires a live matching heartbeat. A pending/failed launch is not running.
+  Both clients attach to port 7878. Closing a client never terminates an attached backend.
+- Windows gracefully shuts down only its owned backend using `POST /api/shutdown`,
+  JSON/same-origin CSRF validation **and** a random `AGENT_TELEMETRY_CONTROL_TOKEN`
+  supplied only in that child's environment. Never expose this token in health, data,
+  logs or release assets. Standalone services have no token and reject this endpoint.
+- Open at Login and automatic monitoring are optional and off by default. The
+  explicit installer/web launch starts monitoring for that launch without changing defaults.
+- Keep backend, parser and ledger schema identical across clients. No cache-version bump
+  for UI/installation-only changes; no `--rebuild` for routine upgrades.
+- Combine `@Published` emits in `willSet`: render the incoming summary/status, not an
+  immediate reread. Check lifecycle/cancellation **after** every readiness await.
+- Keep last successful figures but mark failures stale and retry. Preserve the WebView's
+  current query/hash across polling changes and app-owned backend restarts.
+- Packaging must traverse nested Mach-O files with NUL-delimited filenames, sign them
+  before their app container, verify signatures and never bundle user data. The Windows
+  install payload also uses an explicit allowlist. Local ad-hoc macOS builds are not
+  a notarized public installer; signed distribution has a separate credential gate.
+
+Checks: `python3 -m unittest discover -s tests`, `node tests/test_frontend.js`,
+`swift build --package-path macos/AgentTelemetryMac`, `python3 tests/run_mac_native.py`,
+and on Windows `python windows/tray.py --self-test` plus `python install.py --no-launch`.
+CI runs backend/frontend checks on Linux, macOS and Windows and native checks on their OS.
+
 ## Layout
 
 | File | Role |

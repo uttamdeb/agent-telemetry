@@ -47,13 +47,44 @@ Options: `python3 dashboard.py --port 9000` · `--rebuild` (ignore cache, full r
 cache and optional device-sharing files outside the checkout). Without `--data-dir`, current
 checkout behavior is unchanged. Or `./run.sh [flags]`.
 
-## macOS menu bar app
+## Install the menu bar / system tray app
 
-The native SwiftUI wrapper and source-build instructions are in [`macos/AgentTelemetryMac`](macos/AgentTelemetryMac/README.md). It keeps the existing dashboard and parser, bundles a pinned Python runtime, and offers an icon or compact token/spend menu-bar display. A prebuilt, notarized release is not included yet.
+From your checkout, run **`python3 install.py` on macOS** or **`python install.py` on Windows**.
+The installer detects the OS, installs its matching native client for the current user and
+opens it. Use `--no-launch` to install without opening. Linux keeps the browser dashboard.
+
+| Platform | Native client | Installation requirements |
+| --- | --- | --- |
+| macOS 13+ | SwiftUI/AppKit menu item, token/spend popover and embedded dashboard | Python to run the installer; Swift 5.8+ and a macOS SDK to build the app. The app then uses its bundled Python. |
+| Windows 10/11 | Native notification-area icon/menu, token/spend totals and dashboard in your browser | Standard Python 3.8+ including `pythonw.exe`. No pip packages or separate GUI toolkit. |
+
+After installation, **web Settings → Menu bar / system tray** has a toggle to launch or
+quit the native app. Status reflects the app's heartbeat, not just a launch attempt. You
+can also open **AgentTelemetry.app** in `~/Applications` or **AgentTelemetry** from the
+Windows Start menu. The app's **Open at Login** and **Start monitoring when app opens**
+options are separate and off by default. Opening from the installer or web toggle starts
+monitoring for that launch. No dashboard setting is required to open an app manually.
+
+Both clients reuse a dashboard already running on port 7878 and stop only a backend they
+started. A web/native app using a custom dashboard port is not supported by the native
+clients. Failure shows stale figures explicitly, and retries can recover. Import existing
+data before first app-owned monitoring if you need archived history: importing validates
+and copies the ledger without overwriting existing app data or changing the originals.
+For that flow, install with `--no-launch`, open the app manually and choose Import before
+Start monitoring. A default install attaches safely when the old dashboard is still running.
+
+Read the [macOS guide](macos/AgentTelemetryMac/README.md) and
+[Windows guide](windows/README.md) for paths, controls and development checks. macOS
+source builds are ad-hoc signed local builds; a prebuilt Developer ID signed/notarized
+installer is not supplied. The backend remains stdlib-only and no runtime update checks
+are added. The macOS packaging step downloads a hash-pinned Python runtime explicitly.
 
 Local app integrations can use `GET /api/health` for a small readiness response that contains
 no usage data, and `GET /api/summary` for today's token total and API-equivalent estimated
 spend. Both are read-only; they follow the dashboard's existing host and origin rules.
+`GET /api/native` reports local app status. `POST /api/native` requires the same CSRF guard
+as all writes. `POST /api/shutdown` additionally requires the owning Windows client's
+per-process control token; a normal standalone dashboard cannot be stopped by that route.
 
 > `--rebuild` deletes the cache, and with it every session whose log has since been deleted
 > from disk (see [Storage](#storage--what-these-logs-cost-you-in-disk)). Copy

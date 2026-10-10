@@ -7,11 +7,13 @@ import threading
 import unittest
 from unittest.mock import patch
 import urllib.error
+import http.client
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import install
 import native as N
+import dashboard as D
 from windows.monitor import Monitor, import_ledger
 
 
@@ -66,6 +68,48 @@ class NativeTests(unittest.TestCase):
         with patch.object(N.subprocess, "Popen", side_effect=OSError("fixture")):
             with self.assertRaises(ValueError): N.action(True)
         self.assertFalse(N.status()["requested"])
+
+    def test_malformed_manifest_and_unresponsive_launch_are_visible(self):
+        N._write("native-install.json", {"platform": sys.platform, "command": ["fixture"], "entry": 42})
+        self.assertFalse(N.status()["installed"])
+        N._write("native-control.json", {"enabled": True, "generation": "fixture", "requested_at": 0})
+        self.assertIn("not responded", N.status()["error"])
+
+    def test_http_native_and_owned_shutdown_require_csrf_and_owner_token(self):
+        server = D.Server(("127.0.0.1", 0), D.Handler)
+        server.stopping = threading.Event()
+        self.addCleanup(server.server_close)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(server.shutdown)
+        with patch.dict(D.BIND, {"host": "127.0.0.1", "port": server.server_port}), \
+             patch.dict(D.os.environ, {"AGENT_TELEMETRY_CONTROL_TOKEN": "fixture-owner"}):
+            def post(path, headers):
+                connection = http.client.HTTPConnection("127.0.0.1", server.server_port)
+                connection.request("POST", path, '{}', headers)
+                response = connection.getresponse()
+                result = response.status
+                response.read()
+                connection.close()
+                return result
+            self.assertEqual(post("/api/native", {"Content-Type": "text/plain"}), 403)
+            self.assertEqual(post("/api/native", {"Content-Type": "application/json", "Origin": "https://example.invalid"}), 403)
+            self.assertEqual(post("/api/shutdown", {"Content-Type": "application/json"}), 403)
+            self.assertFalse(server.stopping.is_set())
+            self.assertEqual(post("/api/shutdown", {"Content-Type": "application/json", "X-AgentTelemetry-Control": "fixture-owner"}), 200)
+            self.assertTrue(server.stopping.is_set())
+
+    def test_summary_deduplicates_only_within_device_and_excludes_reasoning(self):
+        today = __import__("time").strftime("%Y-%m-%d")
+        row = {"in": 750000, "out": 100000, "cr": 200000, "cc": 50000, "cc5": 50000, "reason": 40000}
+        aggregate = {"source": "codex", "records": {today + "\tGemini 4 Argon": row}}
+        archived = copy.deepcopy(aggregate)
+        archived["archived"] = True
+        peer = copy.deepcopy(aggregate)
+        peer["_device"] = "fixture-peer"
+        with patch.dict(D._state, {"files": {"/live/rollout.jsonl": aggregate, "/archive/rollout.jsonl": archived}}), \
+             patch.object(D, "_peer_items", return_value=[("/peer/rollout.jsonl", peer)]):
+            self.assertEqual(D.build_today_summary(), {"date": today, "tokens": 2200000, "spend": 5.24})
 
     def test_payload_allowlist_excludes_personal_data(self):
         with tempfile.TemporaryDirectory() as repository:
@@ -127,8 +171,12 @@ class MonitorTests(unittest.TestCase):
         with patch.object(self.monitor, "_request", return_value=first):
             self.monitor.refresh()
         self.assertEqual(self.monitor.snapshot()["tokens"], 100)
-        with patch.object(self.monitor, "_request", side_effect=urllib.error.HTTPError("fixture", 503, "fixture", {}, None)):
-            self.monitor.refresh(parse=True)
+        error = urllib.error.HTTPError("fixture", 503, "fixture", {}, None)
+        try:
+            with patch.object(self.monitor, "_request", side_effect=error):
+                self.monitor.refresh(parse=True)
+        finally:
+            error.close()
         failed = self.monitor.snapshot()
         self.assertEqual(failed["tokens"], 100)
         self.assertTrue(failed["stale"])
@@ -142,6 +190,21 @@ class MonitorTests(unittest.TestCase):
         with patch.object(self.monitor, "_request") as request:
             self.assertTrue(self.monitor.stop())
             request.assert_not_called()
+
+    def test_owned_stop_uses_token_and_waits_without_force_kill(self):
+        from unittest.mock import Mock
+        process = Mock()
+        process.poll.return_value = None
+        self.monitor.process, self.monitor.token = process, "fixture-own"
+        def shutdown(*args, **kwargs):
+            process.poll.return_value = 0
+            return {"ok": True}
+        with patch.object(self.monitor, "_request", side_effect=shutdown) as request:
+            self.assertTrue(self.monitor.stop())
+            request.assert_called_once_with("/api/shutdown", {}, "fixture-own", timeout=2)
+        process.kill.assert_not_called()
+        process.terminate.assert_not_called()
+        self.assertIsNone(self.monitor.process)
 
     def test_legacy_summary_does_not_add_reasoning_and_filters_date(self):
         self.monitor.legacy = True

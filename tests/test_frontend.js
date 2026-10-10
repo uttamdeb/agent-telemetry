@@ -53,4 +53,10 @@ run(`S.metric='messages';`);assert.equal(run(`deviceDistribution(deviceData)[0].
 run(`S.metric='cost';`);assert.equal(run(`deviceDistribution(deviceData)[0].value`),4);
 run(`S.devs=new Set(['Mac']);`);assert.equal(run(`deviceDistribution(deviceData).length`),1);
 assert.equal(run(`deviceDistribution(deviceData)[0].value`),1);
-console.log('Frontend regression checks passed: pricing, precision, scope, model contributions, Optimize and device distribution.');
+const nativePoll=views.slice(views.indexOf('const NATIVE_APP_MODE='),views.indexOf('function setPollMs('));
+for(const [value,expected] of [['60',60000],['300',300000],['Infinity',300000],['-1',300000],['100000000000',86400000]]){
+  const fixture=vm.createContext({URLSearchParams,location:{search:'?nativeApp=1&nativePollSeconds='+value}});
+  vm.runInContext(nativePoll,fixture);
+  assert.equal(vm.runInContext('pollMs()',fixture),expected);
+}
+console.log('Frontend regression checks passed: pricing, precision, scope, model contributions, Optimize, device distribution and bounded native polling.');

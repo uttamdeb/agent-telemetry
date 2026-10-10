@@ -17,7 +17,20 @@ First run parses your logs (~30–60s if you have large Codex logs) and caches t
 result; later refreshes are incremental.
 
 Useful flags: `--port 9000`, `--rebuild` (ignore cache, full re-parse),
-`--interval 20` (background refresh seconds).
+`--interval 20` (background refresh seconds), `--data-dir PATH` (state outside the checkout).
+`--rebuild` deletes archived history too: back up the durable ledger before using it.
+
+## Native clients
+
+`python3 install.py` on macOS / `python install.py` on Windows installs the matching
+client and launches it; `--no-launch` leaves it closed. Windows requires a standard
+Python installation with `pythonw.exe`; its UI uses stdlib ctypes/Win32. macOS source
+builds require Swift and a macOS SDK and bundle hash-pinned CPython. See the
+[macOS](macos/AgentTelemetryMac/README.md) and [Windows](windows/README.md) guides.
+
+The web Settings menu has a native-app launch/quit toggle. Keep its running state
+based on a heartbeat. Open at Login and automatic monitoring remain explicit opt-ins.
+Never kill a backend the client did not launch or overwrite imported usage history.
 
 **[AGENTS.md](AGENTS.md) is the architecture guide.** It is written for coding agents
 but it is the fastest orientation for humans too — read it before changing anything
@@ -42,7 +55,7 @@ These are not style preferences. A PR that breaks one will be asked to change.
 
 1. **Standard library only, and offline.** No third-party runtime dependencies, ever.
    If you need a JS library, vendor it — the page must work with no network.
-2. **Never commit `.usage_cache.json`** (or `server.log`). They contain the author's
+2. **Never commit `.usage_cache.json`, `server.log`, `.peers.json` or `.peers/`.** They contain the author's
    own prompts, project names and costs. A fresh clone must start empty.
 3. **Never hardcode a path.** Everything derives at runtime from `HOME` /
    `%APPDATA%` / `%LOCALAPPDATA%` / `$XDG_*`. Someone on another OS must see their
@@ -55,6 +68,9 @@ These are not style preferences. A PR that breaks one will be asked to change.
    crash indistinguishable from "the user doesn't have this tool". Log to stderr.
 6. **Attribute by tool, not by model.** A Claude model used inside Copilot counts
    under Copilot.
+7. **Owner-only commits.** No `Co-authored-by` trailer.
+8. **Every write endpoint uses `_csrf_ok()`.** Native shutdown also requires an
+   unexposed per-process ownership token. Never weaken the host/origin checks.
 
 ## Things that bite
 
@@ -86,6 +102,22 @@ python3 -m unittest discover -s tests -v
 
 For frontend accounting and filter changes, also run `node tests/test_frontend.js`.
 Node is a development check only; the dashboard remains stdlib-only.
+
+For native changes, also run the actual OS checks:
+
+```bash
+# macOS: compile the full app and reproduce display/lifecycle/navigation regressions
+swift build --package-path macos/AgentTelemetryMac
+python3 tests/run_mac_native.py
+# Windows: actual Win32 window, GDI icon and popup-menu handles; safe install without launch
+python windows/tray.py --self-test
+python install.py --no-launch
+```
+
+The Windows self-test reports whether Explorer accepted the icon; a headless handle
+test alone does not prove a visible tray item. CI covers all three operating systems.
+Use temporary ledgers/mock servers for automated tests and retain the failure/recovery
+checks. Full signed/notarized macOS packaging remains a separate distribution check.
 
 Then verify representative logs and the UI. At minimum:
 

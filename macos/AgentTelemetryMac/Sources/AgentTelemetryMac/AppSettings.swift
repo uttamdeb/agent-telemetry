@@ -39,7 +39,8 @@ final class AppSettings: ObservableObject {
         self.defaults = defaults
         let savedDisplay = defaults.string(forKey: Key.menuBarDisplay)
         menuBarDisplay = MenuBarDisplay(rawValue: savedDisplay ?? "") ?? .numbers
-        refreshIntervalSeconds = defaults.object(forKey: Key.refreshInterval) as? Int ?? 300
+        let savedInterval = defaults.object(forKey: Key.refreshInterval) as? Int ?? 300
+        refreshIntervalSeconds = [60, 300, 900].contains(savedInterval) ? savedInterval : 300
         startMonitoringAutomatically = defaults.bool(forKey: Key.autoStart)
         openAtLogin = SMAppService.mainApp.status == .enabled
     }

@@ -13,7 +13,9 @@ vulnerability:
 1. **Nothing leaves the machine unless you ask.** No telemetry, no analytics, no API
    keys. Chart.js is vendored precisely so the page never fetches from a CDN. The only
    network use is opt-in: the **Check for updates** button (a `git fetch`, on click),
-   and **Your devices**, which you turn on in Settings (below).
+   and **Your devices**, which you turn on in Settings (below). The explicitly invoked
+   macOS source-build installer downloads a SHA-256-pinned Python runtime; this is an
+   installation step, not background telemetry or a runtime update check.
 2. **It binds to `127.0.0.1` by default** and has **no authentication whatsoever**.
    It trusts anything that can reach its port.
 
@@ -57,10 +59,24 @@ who can watch the network sees what is sent. Share only on a network you trust, 
 *New code* if the code leaks. Pairing codes and the copies pulled from your other
 devices sit in `.peers.json` and `.peers/` (0600, gitignored).
 
-**`~/.claude/settings.json` is the only file outside its own cache that this app
-writes.** The ⚙ settings panel edits Claude Code's `cleanupPeriodDays` there. The
+**The settings panel can write `~/.claude/settings.json`.** It edits Claude Code's `cleanupPeriodDays` there. The
 write is read-modify-write (other keys are preserved), atomic via `os.replace`, and
 leaves a `.bak`. Writes are rejected cross-site — see below.
+
+**Native apps keep their own local state.** The OS-aware installer copies app files to
+the current user's Applications/Programs directory and registers a launch command in
+AgentTelemetryNative application support. Control files, heartbeat and tray preferences
+live there, separately from the durable ledger. `POST /api/native` uses the existing
+JSON/same-origin CSRF guard and accepts only a boolean, not a path or shell command.
+Its command comes from the user-local installed manifest. That manifest is within the
+same-user filesystem trust boundary; somebody who can alter it can already execute code
+as that user. Open at Login is opt-in (macOS login item / Windows HKCU Run entry).
+
+**Windows shutdown verifies ownership.** `POST /api/shutdown` requires the existing
+CSRF checks and a random control token known only to the client and the Python process
+it started. The token is never sent in public responses. Standalone processes reject
+this route. Quitting a client attached to somebody else's local dashboard just detaches.
+Shutdown flushes the ledger; the Windows client does not force-kill a slow save.
 
 **Log retention is a destructive setting.** `cleanupPeriodDays` controls when Claude
 Code deletes your transcripts. Anything that can change it can cause data loss, which

@@ -1120,8 +1120,9 @@ const POLL_CHOICES=[["15000","15s"],["60000","1m"],["300000","5m"],["0","Manual"
 const NATIVE_APP_MODE=new URLSearchParams(location.search).get("nativeApp")==="1";
 function pollMs(){
   if(NATIVE_APP_MODE){
-    const seconds=Number(new URLSearchParams(location.search).get("nativePollSeconds"))||300;
-    return Math.max(60,seconds)*1000;
+    const raw=Number(new URLSearchParams(location.search).get("nativePollSeconds"));
+    const seconds=Number.isFinite(raw)&&raw>0?Math.min(86400,Math.max(60,raw)):300;
+    return seconds*1000;
   }
   try{ const v=localStorage.getItem(POLL_KEY); return v===null?15000:Math.max(0,+v||0); }
   catch(e){ return 15000; }
@@ -1141,20 +1142,21 @@ async function loadNativeSettings(){
     const state=await r.json();
     if(!box.isConnected) return;
     if(!state.supported){ box.innerHTML='<div class="stg-hint">Native menu apps support macOS and Windows. Use the browser dashboard on this OS.</div>'; return; }
-    box.innerHTML=`<label class="stg-field"><input type="checkbox" id="nativeAppToggle" ${state.requested?"checked":""} ${state.installed?"":"disabled"}> ${esc(state.label)}</label>
+    box.innerHTML=`<label class="stg-field"><input type="checkbox" id="nativeAppToggle" ${state.requested?"checked":""} ${state.installed||state.running?"":"disabled"}> ${esc(state.label)}</label>
       <div class="stg-hint">${!state.installed?"Install once with <code>python install.py</code>; it selects the app for your OS.":state.running?(state.requested?"Running":"Closing…"):(state.requested?"Waiting for the app to start…":"Off")}</div>
       <div class="stg-note">Launch or quit the native menu app. Open at Login is a separate, optional setting inside that app. Quitting stops only a backend started by the native app.</div>
-      <div id="nativeAppMsg" class="stg-msg"></div>`;
+      <div id="nativeAppMsg" class="stg-msg">${esc(state.error||"")}</div>`;
     document.getElementById("nativeAppToggle").onchange=async event=>{
       const toggle=event.target, enabled=toggle.checked;
       toggle.disabled=true;
+      toggle.dataset.busy="1";
       const msg=document.getElementById("nativeAppMsg");
       try{
         const response=await fetch("/api/native",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({enabled})});
         const result=await response.json();
         if(!response.ok) throw new Error(result.error||"Could not change the native app.");
         await loadNativeSettings();
-      }catch(e){ toggle.checked=!enabled; toggle.disabled=false; msg.textContent=e.message; msg.className="stg-msg err"; }
+      }catch(e){ toggle.checked=!enabled; toggle.disabled=false; delete toggle.dataset.busy; msg.textContent=e.message; msg.className="stg-msg err"; }
     };
   }catch(e){ if(box.isConnected) box.innerHTML='<div class="stg-msg err">'+esc(e.message)+'</div>'; }
 }
@@ -1237,7 +1239,7 @@ function renderSettings(cfg){
     if(!document.getElementById("nativeAppBox")){ clearInterval(nativeSettingsTimer); return; }
     // Do not replace controls or their errors while a user is operating them.
     const toggle=document.getElementById("nativeAppToggle");
-    if(toggle?.disabled || document.getElementById("nativeAppMsg")?.textContent) return;
+    if(toggle?.dataset.busy || document.getElementById("nativeAppMsg")?.classList.contains("err")) return;
     loadNativeSettings();
   },4000);
   const msgEl=document.getElementById("stgMsg");

@@ -406,6 +406,10 @@ def main():
     arguments.add_argument("--native-generation")
     arguments.add_argument("--self-test", action="store_true")
     options = arguments.parse_args()
+    if not options.self_test:
+        native.support_dir().mkdir(parents=True, exist_ok=True)
+        # pythonw has no console streams; keep failures inspectable locally.
+        sys.stderr = open(native.support_dir() / "tray.log", "a", encoding="utf-8", buffering=1)
     # Single instance per Windows session; the OS closes the mutex on process exit.
     mutex = create_mutex(None, False, "Local\\AgentTelemetryTray")
     if not mutex:

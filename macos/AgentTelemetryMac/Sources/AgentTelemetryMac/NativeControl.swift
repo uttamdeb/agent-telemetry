@@ -26,6 +26,12 @@ final class NativeControl: ObservableObject {
         do {
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true,
                                                      attributes: [.posixPermissions: 0o700])
+            if Bundle.main.bundleURL.pathExtension == "app" {
+                let path = Bundle.main.bundleURL.path
+                try write("native-install.json", ["platform": "darwin", "entry": path,
+                    "command": ["/usr/bin/open", "-a", path, "--args"],
+                    "version": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "development"])
+            }
             if generation == nil {
                 generation = UUID().uuidString
                 try write("native-control.json", ["enabled": true, "generation": generation!])
