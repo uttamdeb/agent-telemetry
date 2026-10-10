@@ -89,6 +89,7 @@ header.top{display:flex;align-items:flex-start;justify-content:space-between;gap
   flex-wrap:wrap;padding-top:22px;padding-bottom:16px;background:var(--surface);
   border-bottom:0}
 .brand{display:flex;align-items:center;gap:10px}
+.brand-copy{min-width:0}
 .brand h1{font-size:19px;font-weight:660;margin:0;letter-spacing:-.2px}
 .brand-mark-wrap{position:relative;width:32px;height:32px;flex:none}
 .brand-mark{display:block;width:32px;height:32px;border-radius:8px}
