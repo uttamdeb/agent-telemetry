@@ -110,7 +110,7 @@ function renderCalendar(byDay, maxV, onClick){
     const q=v/(maxV||1);
     return q>.6?ramp[6]:q>.3?ramp[5]:q>.12?ramp[4]:q>.03?ramp[2]:ramp[1]; };
   const W = mL+weeks.length*step+8, H = mT+7*step+6;
-  let s=`<svg width="${W}" height="${H}" role="img" aria-label="activity calendar">`;
+  let s=`<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMinYMin meet" role="img" aria-label="activity calendar">`;
   let lastM=-1;
   weeks.forEach((wk,wi)=>{ const m=wk[0].getMonth();
     if(m!==lastM){ lastM=m;

@@ -153,7 +153,7 @@
           <div class="head"><div><h3>Highlights</h3><div class="hint" id="hlHint">notable moments in the selected range</div></div></div>
           <div class="hl" id="highlights"></div>
         </div>
-        <div class="card col-12">
+        <div class="card col-6">
           <div class="head">
             <div><h3>Activity calendar</h3><div class="hint" id="calHint">last 12 months · click a day to zoom to it</div></div>
             <div class="cal-legend">Less
@@ -164,6 +164,18 @@
               <span class="cell" style="background:var(--seq-6)"></span>More</div>
           </div>
           <div class="cal-wrap" id="calWrap"></div>
+        </div>
+        <div class="card col-6">
+          <div class="head">
+            <div><h3>When you work</h3><div class="hint" id="hmHint">tokens by local hour × weekday · darker means more</div></div>
+            <div class="heatmap-legend" aria-label="Token intensity: low to high"><span>Low</span>
+              <span class="cell" style="background:var(--seq-0)"></span>
+              <span class="cell" style="background:var(--seq-2)"></span>
+              <span class="cell" style="background:var(--seq-3)"></span>
+              <span class="cell" style="background:var(--seq-5)"></span>
+              <span class="cell" style="background:var(--seq-6)"></span><span>High</span></div>
+          </div>
+          <div class="hm-wrap" id="heatmap"></div>
         </div>
         <div class="card col-8">
           <div class="head">
@@ -180,18 +192,6 @@
         <div class="card col-4">
           <div class="head"><div><h3>Share by tool</h3><div class="hint">of the selected range</div></div></div>
           <div id="toolShare"></div>
-        </div>
-        <div class="card col-7">
-          <div class="head">
-            <div><h3>When you work</h3><div class="hint" id="hmHint">tokens by local hour × weekday · darker means more</div></div>
-            <div class="heatmap-legend" aria-label="Token intensity: low to high"><span>Low</span>
-              <span class="cell" style="background:var(--seq-0)"></span>
-              <span class="cell" style="background:var(--seq-2)"></span>
-              <span class="cell" style="background:var(--seq-3)"></span>
-              <span class="cell" style="background:var(--seq-5)"></span>
-              <span class="cell" style="background:var(--seq-6)"></span><span>High</span></div>
-          </div>
-          <div class="hm-wrap" id="heatmap"></div>
         </div>
         <div class="card col-5">
           <div class="head"><div><h3>Token composition</h3><div class="hint">prompt · cache read/write · output · thinking</div></div></div>
