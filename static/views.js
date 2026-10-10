@@ -1116,20 +1116,45 @@ async function pwaDisable(){
 
 /* Refresh interval, in ms. 15s is the historical default; 0 = manual only. */
 const POLL_KEY="aiu.poll";
-const POLL_CHOICES=[["15000","15s"],["60000","1m"],["300000","5m"],["0","Manual"]];
+const POLL_CHOICES=[["15000","15s"],["60000","1m"],["300000","5m"],["900000","15m"],["0","Manual"]];
 const NATIVE_APP_MODE=new URLSearchParams(location.search).get("nativeApp")==="1";
+let sharedPollMs=null, syncRevision=null, syncBusy=false, syncNeedsLoad=false;
 function pollMs(){
-  if(NATIVE_APP_MODE){
-    const raw=Number(new URLSearchParams(location.search).get("nativePollSeconds"));
-    const seconds=Number.isFinite(raw)&&raw>0?Math.min(86400,Math.max(60,raw)):300;
-    return seconds*1000;
-  }
-  try{ const v=localStorage.getItem(POLL_KEY); return v===null?15000:Math.max(0,+v||0); }
+  if(sharedPollMs!==null) return sharedPollMs;
+  try{ const v=localStorage.getItem(POLL_KEY); return POLL_CHOICES.some(([ms])=>ms===v)?+v:15000; }
   catch(e){ return 15000; }
 }
-function setPollMs(v){
-  try{ localStorage.setItem(POLL_KEY,String(v)); }catch(e){}
-  applyPollInterval();
+function acceptRefreshSync(state){
+  if(![0,15,60,300,900].includes(state.seconds)||typeof state.revision!=="string") throw new Error("Invalid refresh settings.");
+  const changed=state.revision!==syncRevision;
+  if(changed) syncNeedsLoad=true;
+  sharedPollMs=state.seconds*1000; syncRevision=state.revision;
+  const seg=document.getElementById("pollSeg");
+  if(seg) [...seg.children].forEach(b=>b.classList.toggle("on",+b.dataset.ms===sharedPollMs));
+  return changed;
+}
+async function setPollMs(v){
+  const r=await fetch("/api/sync",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({seconds:v/1000})});
+  if(r.status===404){ // An attached older backend keeps its browser-only settings.
+    try{ localStorage.setItem(POLL_KEY,String(v)); }catch(e){}
+    applyPollInterval(); return;
+  }
+  const state=await r.json();
+  if(!r.ok) throw new Error(state.error||"Could not change the refresh interval.");
+  acceptRefreshSync(state);
+  if(S.live) syncNeedsLoad=!(await load());
+}
+async function pollRefreshSync(){
+  if(syncBusy) return;
+  syncBusy=true;
+  try{
+    const r=await fetch("/api/sync");
+    if(r.status===404){ if(S.live&&pollMs()&&Date.now()-lastFallbackLoad>=pollMs()){lastFallbackLoad=Date.now();await load();} return; }
+    if(!r.ok){ syncNeedsLoad=true; return; }
+    const changed=acceptRefreshSync(await r.json());
+    if((changed||syncNeedsLoad)&&S.live) syncNeedsLoad=!(await load());
+  }catch(e){ syncNeedsLoad=true; console.error("Refresh sync unavailable",e); }
+  finally{ syncBusy=false; }
 }
 
 let nativeSettingsTimer;
@@ -1210,13 +1235,15 @@ function renderSettings(cfg){
     <div class="stg-msg" id="pwaMsg"></div>
 
     <h2 class="stg-h stg-sec">Refresh interval</h2>
-    <div class="stg-note">How often the page re-fetches <code>/api/data</code> (about
-      ${fmtBytes(cfg.cache_bytes||0)} of JSON each time). Slower saves CPU and disk churn;
-      <b>Manual</b> updates only when you press <b>&#8635;</b>. The server keeps parsing
-      either way &mdash; this is just how often the browser asks.</div>
+    <div class="stg-note">Shared by all browser windows and the menu bar / tray app on this
+      dashboard. Figures update on the same clock; refreshing in either app updates both.
+      <b>Manual</b> waits for a refresh in any app. The server keeps parsing either way.
+      The native figures show today's usage across all tools and connected devices;
+      dashboard date ranges and filters still apply only to that dashboard.</div>
     <div class="seg" id="pollSeg" style="margin-top:14px">${
       POLL_CHOICES.map(([v,l])=>`<button data-ms="${v}"${
         String(pollMs())===v?' class="on"':''}>${l}</button>`).join("")}</div>
+    <div class="stg-msg" id="pollMsg"></div>
 
     <h2 class="stg-h stg-sec">Your devices</h2>
     <div id="devBox"><div class="stg-hint">Loading…</div></div>
@@ -1273,10 +1300,13 @@ function renderSettings(cfg){
     send(null,"Reset \u2014 Claude Code's default now applies."));
 
   const seg=document.getElementById("pollSeg");
-  if(seg) seg.addEventListener("click",e=>{
+  if(seg) seg.addEventListener("click",async e=>{
     const b=e.target.closest("button[data-ms]"); if(!b) return;
-    setPollMs(+b.dataset.ms);
-    [...seg.children].forEach(x=>x.classList.toggle("on",x===b));
+    const msg=document.getElementById("pollMsg"); msg.textContent="";
+    [...seg.children].forEach(x=>x.disabled=true);
+    try{ await setPollMs(+b.dataset.ms); [...seg.children].forEach(x=>x.classList.toggle("on",+x.dataset.ms===pollMs())); }
+    catch(error){ msg.textContent=error.message; msg.className="stg-msg err"; }
+    finally{ [...seg.children].forEach(x=>x.disabled=false); }
   });
 
   const cacheMsg=()=>document.getElementById("cacheMsg");
@@ -2144,14 +2174,21 @@ function setView(v){
 }
 
 /* ---------------- data ---------------- */
+let loadSequence=0;
 async function load(){
+  const sequence=++loadSequence;
   try{
-    const r=await fetch("/api/data"); RAW=await r.json();
+    const r=await fetch("/api/data");
+    if(!r.ok) throw new Error("Could not read dashboard data.");
+    const payload=await r.json();
+    if(sequence!==loadSequence) return false;
+    RAW=payload;
   }catch(e){
+    if(sequence!==loadSequence) return false;
     console.error(e);
     document.getElementById("statusText").innerHTML='<span style="color:var(--bad)">cannot reach /api/data — is dashboard.py running?</span>';
     document.getElementById("livedot").classList.add("off");
-    return;
+    return false;
   }
   // a render failure is a bug, not a dead server — say so, and let the headless
   // sweep see it (data-js-error) instead of reporting "cannot reach"
@@ -2176,10 +2213,12 @@ async function load(){
     for(const id of [...S.devs]) if(!devices().some(v=>v.id===id)) S.devs.delete(id);
     document.getElementById("pricingNote").textContent=RAW.pricing_note;
     renderAll();
+    return true;
   }catch(e){
     console.error(e);
     document.documentElement.dataset.jsError = "load: " + (e && e.message || e);
     document.getElementById("statusText").innerHTML='<span style="color:var(--bad)">display error — see the console</span>';
+    return false;
   }
 }
 async function loadStorage(){
@@ -2270,6 +2309,7 @@ document.getElementById("refreshBtn").addEventListener("click",async e=>{
 });
 document.getElementById("liveBtn").addEventListener("click",e=>{
   S.live=!S.live;
+  if(S.live) load();
   document.getElementById("livedot").classList.toggle("off",!S.live);
   e.currentTarget.title = S.live ? "Auto-refresh on — click to pause" : "Auto-refresh paused — click to resume";
   const st=document.getElementById("statusText"); st.textContent = st.textContent.replace(/^(Live|Paused)/, S.live?"Live":"Paused");
@@ -2314,16 +2354,16 @@ filtersFromURL(); syncSearchBoxes();
 if(location.hash && VIEW_TITLES[location.hash.slice(1)]) S.view=location.hash.slice(1);
 load().then(()=>{ if(S.view==="storage") loadStorage(); });
 setTimeout(loadStorage, 1200);
-/* Poll interval is user-configurable (Settings). The payload is ~1MB, so a
-   tighter loop is real CPU and disk churn; 0 means "only when I press refresh". */
-let pollTimers=[];
+/* The tiny shared clock is sampled each second. Full figures load only on a
+   changed tick; Manual still listens for another client's explicit refresh. */
+let pollTimers=[], lastFallbackLoad=Date.now();
 function clearPollTimers(){ pollTimers.forEach(clearInterval); pollTimers=[]; }
 function applyPollInterval(){
   clearPollTimers();
-  const ms=pollMs();
-  if(!ms || (NATIVE_APP_MODE && document.visibilityState==="hidden")) return;
-  pollTimers.push(setInterval(()=>{ if(S.live) load(); }, ms));
-  pollTimers.push(setInterval(()=>{ if(S.live) loadStorage(); }, Math.max(ms*8,120000)));
+  if(NATIVE_APP_MODE && document.visibilityState==="hidden") return;
+  pollTimers.push(setInterval(pollRefreshSync,1000));
+  pollTimers.push(setInterval(()=>{ if(S.live&&pollMs()) loadStorage(); },120000));
+  pollRefreshSync();
 }
 applyPollInterval();
 if(NATIVE_APP_MODE) document.addEventListener("visibilitychange",()=>{

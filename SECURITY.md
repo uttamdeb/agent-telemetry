@@ -71,6 +71,9 @@ JSON/same-origin CSRF guard and accepts only a boolean, not a path or shell comm
 Its command comes from the user-local installed manifest. That manifest is within the
 same-user filesystem trust boundary; somebody who can alter it can already execute code
 as that user. Open at Login is opt-in (macOS login item / Windows HKCU Run entry).
+The shared refresh preference also lives there. `POST /api/sync` uses the same CSRF guard
+and accepts only an integer from the supported interval list. Its GET response contains
+only the interval and an opaque display revision; usage snapshots remain in process memory.
 
 **Windows shutdown verifies ownership.** `POST /api/shutdown` requires the existing
 CSRF checks and a random control token known only to the client and the Python process

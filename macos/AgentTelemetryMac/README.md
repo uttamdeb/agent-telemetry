@@ -49,7 +49,7 @@ Build and notarize each architecture on a matching Mac. The current package scri
 
 ## Local development
 
-Run the web dashboard with `python3 dashboard.py` from the repository root for the existing standalone workflow. Build the native shell with `swift build --package-path macos/AgentTelemetryMac`. To create a DMG, use the package script above. The menu-bar app chooses icon or numbers in **Details & settings**; the five-minute default reduces background polling, and its embedded dashboard pauses polling while its window is hidden.
+Run the web dashboard with `python3 dashboard.py` from the repository root for the existing standalone workflow. Build the native shell with `swift build --package-path macos/AgentTelemetryMac`. To create a DMG, use the package script above. The menu-bar app chooses icon or numbers in **Details & settings**. Refresh is shared with the web dashboard: 15 seconds by default, 1/5/15 minutes, or Manual. Changing it in either app updates the other. A manual refresh signals all clients within about a second plus request time; figures come from one snapshot. Native totals represent unfiltered Today, including connected devices. Cadence changes never restart the backend or reload its WebView; the embedded dashboard pauses polling while hidden. Log parsing retains the backend's separate `--interval` (20s by default). Older attached backends retain independent polling until upgraded and restarted.
 
 Run `python3 tests/run_mac_native.py` from the repo root for isolated native display,
 failure/recovery, cancellation and navigation regression checks. Run the stdlib suite

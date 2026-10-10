@@ -188,11 +188,14 @@ struct StatusMenu: View {
             }
             .pickerStyle(.segmented)
 
-            Picker("Refresh interval", selection: $settings.refreshIntervalSeconds) {
+            Picker("Shared refresh", selection: $settings.refreshIntervalSeconds) {
+                Text("15 sec").tag(15)
                 Text("1 min").tag(60)
                 Text("5 min").tag(300)
                 Text("15 min").tag(900)
+                Text("Manual").tag(0)
             }
+            .disabled(!backend.isMonitoring || backend.changingInterval)
 
             Toggle("Open at login", isOn: loginBinding)
             Toggle("Start monitoring automatically", isOn: $settings.startMonitoringAutomatically)

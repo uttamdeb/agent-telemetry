@@ -4,7 +4,6 @@ import WebKit
 
 struct DashboardWebView: NSViewRepresentable {
     let url: URL
-    let refreshIntervalSeconds: Int
     var onNavigate: ((URL) -> Void)? = nil
 
     private var pageURL: URL {
@@ -12,7 +11,6 @@ struct DashboardWebView: NSViewRepresentable {
         var items = components.queryItems ?? []
         items.removeAll { $0.name == "nativeApp" || $0.name == "nativePollSeconds" }
         items.append(URLQueryItem(name: "nativeApp", value: "1"))
-        items.append(URLQueryItem(name: "nativePollSeconds", value: String(refreshIntervalSeconds)))
         components.queryItems = items
         return components.url ?? url
     }
@@ -28,15 +26,8 @@ struct DashboardWebView: NSViewRepresentable {
     }
 
     func updateNSView(_ view: WKWebView, context: Context) {
-        guard let current = view.url,
-              var components = URLComponents(url: current, resolvingAgainstBaseURL: false) else { return }
-        var items = components.queryItems ?? []
-        if items.first(where: { $0.name == "nativePollSeconds" })?.value == String(refreshIntervalSeconds) { return }
-        items.removeAll { $0.name == "nativeApp" || $0.name == "nativePollSeconds" }
-        items.append(URLQueryItem(name: "nativeApp", value: "1"))
-        items.append(URLQueryItem(name: "nativePollSeconds", value: String(refreshIntervalSeconds)))
-        components.queryItems = items
-        if let updated = components.url { view.load(URLRequest(url: updated)) }
+        // The page follows /api/sync itself. Changing cadence must not reload
+        // it or reset its filters, scroll position, drawers and table state.
     }
 
     final class Coordinator: NSObject, WKNavigationDelegate {

@@ -33,7 +33,7 @@ def toggle_login(python, entry):
 
 
 class Monitor:
-    def __init__(self, root, data_dir, python, interval=300, url="http://127.0.0.1:7878"):
+    def __init__(self, root, data_dir, python, interval=15, url="http://127.0.0.1:7878"):
         self.root, self.data_dir = Path(root), Path(data_dir)
         self.python, self.interval, self.url = str(python), interval, url
         self.process = None
@@ -46,6 +46,9 @@ class Monitor:
         self.stale = False
         self.legacy = False
         self.last_success = None
+        self.sync_revision = None
+        self.sync_supported = True
+        self.next_legacy_poll = 0
         self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
     def snapshot(self):
@@ -83,10 +86,62 @@ class Monitor:
             self.start(intent)
         elif operation in ("stop", "quit"):
             return self.stop(cancel=False)
-        elif operation == "interval" and self.process is not None and self._active(intent):
-            if self.stop(cancel=False) and self._active(intent):
-                self.start(intent)
         return False
+
+    def set_interval(self, seconds, intent=None):
+        intent = self.intent if intent is None else intent
+        if not self.is_current(intent):
+            return
+        if type(seconds) is not int or seconds not in (0, 15, 60, 300, 900):
+            raise ValueError("Invalid refresh interval")
+        try:
+            state = self._request("/api/sync", {"seconds": seconds})
+        except urllib.error.HTTPError as error:
+            if error.code != 404:
+                raise
+            if self.is_current(intent):
+                self.interval = seconds
+                self.sync_supported = False
+                self.next_legacy_poll = 0
+            return
+        if not self.is_current(intent):
+            return
+        self._accept_sync(state)
+        self.refresh(intent=intent)
+
+    def _accept_sync(self, state):
+        seconds, revision = state.get("seconds"), state.get("revision")
+        if type(seconds) is not int or seconds not in (0, 15, 60, 300, 900) or not isinstance(revision, str):
+            raise ValueError("Invalid refresh settings")
+        changed = revision != self.sync_revision
+        self.interval, self.sync_revision = seconds, revision
+        return changed
+
+    def sync(self, intent=None):
+        """Poll the tiny shared clock; fetch figures only when its tick changes."""
+        intent = self.intent if intent is None else intent
+        if not self._active(intent):
+            return
+        try:
+            if self.sync_supported and not self.legacy:
+                try:
+                    state = self._request("/api/sync")
+                except urllib.error.HTTPError as error:
+                    if error.code != 404:
+                        raise
+                    self.sync_supported = False
+                else:
+                    if self._active(intent):
+                        changed = self._accept_sync(state)
+                        if changed or self.stale:
+                            self.refresh(intent=intent)
+                    return
+            if self.interval and time.time() >= self.next_legacy_poll:
+                self.next_legacy_poll = time.time() + self.interval
+                self.refresh(intent=intent)
+        except (OSError, ValueError, KeyError, TypeError):
+            if self._active(intent):
+                self._state("Dashboard unavailable; showing the last successful refresh. Retrying…", True)
 
     def _request(self, path, body=None, token=None, timeout=10):
         headers = {"Origin": self.url}
@@ -142,7 +197,7 @@ class Monitor:
                 # Child parser diagnostics remain available locally, never in a release.
                 with open(self.data_dir / "server.log", "ab") as log:
                     self.process = subprocess.Popen([self.python, str(self.root / "dashboard.py"),
-                        "--host", "127.0.0.1", "--port", "7878", "--interval", str(self.interval),
+                        "--host", "127.0.0.1", "--port", "7878",
                         "--data-dir", str(self.data_dir)], cwd=str(self.root), env=environment,
                         stdin=subprocess.DEVNULL, stdout=log, stderr=log,
                         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
@@ -159,6 +214,8 @@ class Monitor:
                     if self.process is not None and health.get("pid") != self.process.pid:
                         raise ValueError("Another dashboard took port 7878. Stop monitoring and retry.")
                     self.legacy = bool(health.get("legacy"))
+                    self.sync_supported = True
+                    self.sync_revision = None
                     self.refresh(intent=intent)
                     return True
                 time.sleep(0.5)

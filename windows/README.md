@@ -15,7 +15,11 @@ hidden-icons arrow or choose to show AgentTelemetry in taskbar settings.
 
 Click either mouse button on its icon for the menu: today's tokens and estimated API
 spend, monitoring status, Open dashboard, Start/Stop, Refresh, icon/numbers display,
-1/5/15-minute refresh cadence, automatic monitoring, Open at Login, Import and Quit.
+shared 15-second/1/5/15-minute or Manual refresh cadence, automatic monitoring, Open at Login,
+Import and Quit. Web Settings and the tray update the same interval. A manual refresh in
+either app updates the others within about a second plus request time; all figures use
+the same snapshot. Native totals represent unfiltered Today, including connected devices.
+Changing cadence does not restart an owned backend; its log parsing still defaults to 20s.
 Open dashboard waits for backend readiness before opening the default browser; Stop
 cancels a pending open. Numbers also have text labels in the
 menu and tooltip; colour is never the only source of information.

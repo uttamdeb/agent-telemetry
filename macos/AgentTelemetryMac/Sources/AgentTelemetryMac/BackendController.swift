@@ -10,6 +10,11 @@ struct DailySummary: Decodable {
     static let empty = DailySummary(date: "", tokens: 0, spend: 0)
 }
 
+private struct RefreshSync: Decodable {
+    let seconds: Int
+    let revision: String
+}
+
 private struct HealthPayload: Decodable {
     let service: String
     let version: String
@@ -121,6 +126,11 @@ final class BackendController: ObservableObject {
     private var summaryTask: Task<Void, Never>?
     private var pendingDashboardOpen: (() -> Void)?
     private var pendingStop: (() -> Void)?
+    private var syncRevision: String?
+    private var sharedInterval: Int?
+    private var syncSupported = true
+    private var summaryRequest = 0
+    @Published private(set) var changingInterval = false
 
     private enum PortProbe {
         case unavailable
@@ -160,6 +170,9 @@ final class BackendController: ObservableObject {
 
         lifecycle += 1
         let attempt = lifecycle
+        syncSupported = true
+        syncRevision = nil
+        sharedInterval = nil
         status = .starting
         healthTask?.cancel()
         healthTask = Task { [weak self] in
@@ -222,15 +235,33 @@ final class BackendController: ObservableObject {
     }
 
     func refreshIntervalDidChange() {
-        summaryTask?.cancel()
-        summaryTask = nil
+        guard settings.refreshIntervalSeconds != sharedInterval else { return }
         guard isMonitoring else { return }
-        beginSummaryUpdates()
-
-        // The Python service reads its refresh cadence at launch. Restart only
-        // a process owned by this app; an existing dashboard remains untouched.
-        guard ownsProcess else { return }
-        stop { [weak self] in self?.start() }
+        if !syncSupported || isLegacyService { return }
+        guard !changingInterval else { return }
+        changingInterval = true
+        let seconds = settings.refreshIntervalSeconds
+        let attempt = lifecycle
+        Task {
+            defer { changingInterval = false }
+            var request = URLRequest(url: dashboardURL.appendingPathComponent("api/sync"))
+            request.httpMethod = "POST"
+            request.timeoutInterval = 10
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try? JSONEncoder().encode(["seconds": seconds])
+            do {
+                let (data, response) = try await session.data(for: request)
+                guard lifecycle == attempt, isMonitoring else { return }
+                guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+                    markSummaryStale(); return
+                }
+                try acceptSync(data)
+                await refreshSummary(force: true)
+            } catch {
+                guard lifecycle == attempt, isMonitoring else { return }
+                markSummaryStale()
+            }
+        }
     }
 
     private func connectOrLaunch(lifecycle attempt: Int) async {
@@ -287,7 +318,6 @@ final class BackendController: ObservableObject {
             backendDirectory.appendingPathComponent("dashboard.py").path,
             "--host", "127.0.0.1",
             "--port", "7878",
-            "--interval", String(settings.refreshIntervalSeconds),
             "--data-dir", supportDirectory.path
         ]
         child.environment = ProcessInfo.processInfo.environment.merging([
@@ -413,20 +443,55 @@ final class BackendController: ObservableObject {
             guard let self else { return }
             while !Task.isCancelled {
                 await self.refreshSummary()
-                try? await Task.sleep(nanoseconds: UInt64(self.settings.refreshIntervalSeconds) * 1_000_000_000)
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
         }
     }
 
-    private func refreshSummary() async {
+    @discardableResult
+    private func acceptSync(_ data: Data) throws -> Bool {
+        let state = try JSONDecoder().decode(RefreshSync.self, from: data)
+        guard [0, 15, 60, 300, 900].contains(state.seconds) else {
+            throw URLError(.cannotParseResponse)
+        }
+        let changed = state.revision != syncRevision
+        syncRevision = state.revision
+        sharedInterval = state.seconds
+        settings.refreshIntervalSeconds = state.seconds
+        return changed
+    }
+
+    private func refreshSummary(force: Bool = false) async {
         guard isReady || summaryStale else { return }
         let attempt = lifecycle
+        summaryRequest += 1
+        let requestID = summaryRequest
         do {
+            if syncSupported && !isLegacyService {
+                var syncRequest = URLRequest(url: dashboardURL.appendingPathComponent("api/sync"))
+                syncRequest.timeoutInterval = 10
+                let (data, response) = try await session.data(for: syncRequest)
+                guard !Task.isCancelled, lifecycle == attempt, summaryRequest == requestID else { return }
+                let code = (response as? HTTPURLResponse)?.statusCode
+                if code == 404 {
+                    syncSupported = false
+                } else {
+                    guard code == 200 else { markSummaryStale(); return }
+                    // Don't overwrite a picker change while its POST is pending.
+                    if changingInterval && !force { return }
+                    let changed = try acceptSync(data)
+                    if !changed && !summaryStale && !force && !summary.date.isEmpty { return }
+                }
+            }
+            if (!syncSupported || isLegacyService) && !force && !summary.date.isEmpty && !summaryStale {
+                guard settings.refreshIntervalSeconds > 0,
+                      Date().timeIntervalSince(lastSummaryUpdate ?? .distantPast) >= Double(settings.refreshIntervalSeconds) else { return }
+            }
             let endpoint = isLegacyService ? "api/data" : "api/summary"
             var request = URLRequest(url: dashboardURL.appendingPathComponent(endpoint))
             request.timeoutInterval = isLegacyService ? 8 : 10
             let (data, response) = try await session.data(for: request)
-            guard !Task.isCancelled, lifecycle == attempt else { return }
+            guard !Task.isCancelled, lifecycle == attempt, summaryRequest == requestID else { return }
             guard (response as? HTTPURLResponse)?.statusCode == 200 else {
                 markSummaryStale()
                 return
@@ -440,7 +505,7 @@ final class BackendController: ObservableObject {
             lastSummaryUpdate = Date()
             status = ownsProcess ? .running : .connectedToExisting
         } catch {
-            guard !Task.isCancelled, lifecycle == attempt else { return }
+            guard !Task.isCancelled, lifecycle == attempt, summaryRequest == requestID else { return }
             markSummaryStale()
         }
     }
@@ -464,7 +529,7 @@ final class BackendController: ObservableObject {
                 markSummaryStale()
                 return
             }
-            await refreshSummary()
+            await refreshSummary(force: true)
         } catch {
             guard !Task.isCancelled, lifecycle == attempt else { return }
             markSummaryStale()

@@ -9,7 +9,6 @@ struct DashboardWindow: View {
             if backend.isReady {
                 DashboardWebView(
                     url: backend.lastDashboardURL ?? backend.dashboardURL,
-                    refreshIntervalSeconds: settings.refreshIntervalSeconds,
                     onNavigate: { backend.lastDashboardURL = $0 }
                 )
             } else {

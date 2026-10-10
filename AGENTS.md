@@ -36,6 +36,15 @@ no third-party GUI dependency. Linux stays on the existing browser workflow.
 - Web Settings uses `GET/POST /api/native` to launch/quit the installed client. Its
   running status requires a live matching heartbeat. A pending/failed launch is not running.
   Both clients attach to port 7878. Closing a client never terminates an attached backend.
+- `GET/POST /api/sync` is the shared display clock/interval (0, 15, 60, 300, 900 seconds;
+  default 15). POST uses `_csrf_ok()`. Preferences live in AgentTelemetryNative;
+  ledger parsing still follows `--interval`. Clients sample the tiny clock once a second
+  and fetch figures only on changed ticks; Manual still listens for explicit refreshes.
+  HTTP data and summary share a serialized snapshot per tick, under the parser lock.
+  Manual refresh, cache actions and device actions invalidate it. Never save it in the ledger.
+  Retry failed payloads on the same tick and discard superseded async results. Changing
+  cadence must not restart a backend or reload a WebView. Older services use independent
+  polling until upgraded. Native figures represent unfiltered Today, including peers.
 - Windows gracefully shuts down only its owned backend using `POST /api/shutdown`,
   JSON/same-origin CSRF validation **and** a random `AGENT_TELEMETRY_CONTROL_TOKEN`
   supplied only in that child's environment. Never expose this token in health, data,

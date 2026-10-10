@@ -53,14 +53,72 @@ run(`S.metric='messages';`);assert.equal(run(`deviceDistribution(deviceData)[0].
 run(`S.metric='cost';`);assert.equal(run(`deviceDistribution(deviceData)[0].value`),4);
 run(`S.devs=new Set(['Mac']);`);assert.equal(run(`deviceDistribution(deviceData).length`),1);
 assert.equal(run(`deviceDistribution(deviceData)[0].value`),1);
-const nativePoll=views.slice(views.indexOf('const NATIVE_APP_MODE='),views.indexOf('function setPollMs('));
-for(const [value,expected] of [['60',60000],['300',300000],['Infinity',300000],['-1',300000],['100000000000',86400000]]){
-  const fixture=vm.createContext({URLSearchParams,location:{search:'?nativeApp=1&nativePollSeconds='+value}});
-  vm.runInContext(nativePoll,fixture);
-  assert.equal(vm.runInContext('pollMs()',fixture),expected);
+const syncCode=views.slice(views.indexOf('const POLL_KEY='),views.indexOf('let nativeSettingsTimer;'));
+for(const search of ['', '?nativeApp=1&nativePollSeconds=300']){
+  const fixture=vm.createContext({URLSearchParams,location:{search}, document, console});
+  vm.runInContext(syncCode,fixture);
+  assert.equal(vm.runInContext('pollMs()',fixture),15000);
+  assert.equal(vm.runInContext('acceptRefreshSync({seconds:60,revision:"tick"})',fixture),true);
+  assert.equal(vm.runInContext('pollMs()',fixture),60000);
+  assert.equal(vm.runInContext('acceptRefreshSync({seconds:60,revision:"tick"})',fixture),false);
+  assert.equal(vm.runInContext('acceptRefreshSync({seconds:0,revision:"manual"})',fixture),true);
+  assert.equal(vm.runInContext('pollMs()',fixture),0);
+  for(const seconds of [true,1,-1,Infinity,'60']){
+    assert.throws(()=>vm.runInContext(`acceptRefreshSync({seconds:${JSON.stringify(seconds)},revision:'bad'})`,fixture));
+    assert.equal(vm.runInContext('pollMs()',fixture),0);
+  }
 }
-console.log('Frontend regression checks passed: pricing, precision, scope, model contributions, Optimize, device distribution and bounded native polling.');
+console.log('Frontend regression checks passed: pricing, precision, scope, model contributions, Optimize, device distribution and shared refresh validation.');
 (async()=>{
+  let tick={seconds:15,revision:'first'}, loads=0, requested;
+  const clock=vm.createContext({URLSearchParams,location:{search:''},document,console,S:{live:true},
+    load:async()=>{loads++;return true},fetch:async(url,options)=>{requested=options; if(options){tick={seconds:JSON.parse(options.body).seconds,revision:'native-setting'};}return {ok:true,json:async()=>tick}}});
+  vm.runInContext(syncCode,clock);
+  await vm.runInContext('pollRefreshSync()',clock);
+  await vm.runInContext('pollRefreshSync()',clock);
+  assert.equal(loads,1,'Unchanged sync tick refetched the entire payload');
+  tick={seconds:0,revision:'manual'};
+  await vm.runInContext('pollRefreshSync()',clock);
+  await vm.runInContext('pollRefreshSync()',clock);
+  assert.equal(loads,2,'Manual mode updated without a new shared tick');
+  tick={seconds:0,revision:'tray-refreshed'};
+  await vm.runInContext('pollRefreshSync()',clock);
+  assert.equal(loads,3,'Native manual refresh did not update the browser');
+  await vm.runInContext('setPollMs(60000)',clock);
+  assert.equal(JSON.parse(requested.body).seconds,60);
+  assert.equal(vm.runInContext('pollMs()',clock),60000);
+  vm.runInContext('S.live=false',clock); tick={seconds:15,revision:'paused'};
+  await vm.runInContext('pollRefreshSync()',clock);
+  assert.equal(loads,4,'Paused dashboard updated its figures');
+  vm.runInContext('S.live=true',clock);
+  let failed=true;
+  clock.load=async()=>{loads++;if(failed){failed=false;return false;}return true};
+  await vm.runInContext('pollRefreshSync()',clock);
+  await vm.runInContext('pollRefreshSync()',clock);
+  await vm.runInContext('pollRefreshSync()',clock);
+  assert.equal(loads,6,'Failed payload did not retry on the same shared tick');
+  console.log('Browser follows shared ticks, tray refreshes, Manual and Pause; setting writes use the guarded API.');
+  // Execute the actual load function with delayed HTTP responses. A failed
+  // payload remains retryable; an older response must not replace newer data.
+  let resolveOld, pending=0, rendered=0;
+  const payload=token=>({records:[{date:'2026-10-10',in:token}],meta:{last_refresh:1,files:1},device:{},pricing_note:''});
+  const loadNodes={statusText:{},livedot:{classList:{add(){}}},coverage:{},devName:{},devOs:{},device:{},pricingNote:{}};
+  const loading=vm.createContext({console,Date,Set,S:{live:true,devs:new Set()},RAW:null,
+    document:{getElementById:id=>loadNodes[id],documentElement:{dataset:{}}},
+    fetch:async()=>{pending++;if(pending===1)return await new Promise(resolve=>{resolveOld=resolve});return {ok:true,json:async()=>payload(200)}},
+    devices:()=>[],renderVersion(){},fmtNum:value=>value,renderAll(){rendered++}});
+  vm.runInContext(views.slice(views.indexOf('let loadSequence='),views.indexOf('async function loadStorage()')),loading);
+  const oldLoad=vm.runInContext('load()',loading);
+  await vm.runInContext('load()',loading);
+  resolveOld({ok:true,json:async()=>payload(100)});
+  await oldLoad;
+  assert.equal(vm.runInContext('RAW.records[0].in',loading),200);
+  assert.equal(rendered,1,'Superseded payload rendered after a newer one');
+  loading.console={error(){}};
+  loading.fetch=async()=>({ok:false});
+  assert.equal(await vm.runInContext('load()',loading),false);
+  assert.equal(vm.runInContext('RAW.records[0].in',loading),200);
+  console.log('Actual dashboard load discards superseded results and retains data on HTTP failure.');
   let state={supported:true,installed:true,running:false,requested:false,label:'Menu bar app',error:null};
   const nodes={nativeAppToggle:{dataset:{}},nativeAppMsg:{}};
   const box={dataset:{},isConnected:true,set innerHTML(value){nodes.nativeAppToggle={dataset:{}};nodes.nativeAppMsg={};}};

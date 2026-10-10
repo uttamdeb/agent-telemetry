@@ -49,6 +49,31 @@ _lock = threading.Lock()
 _state = {"files": {}, "version": CACHE_VERSION}
 _cache_error = {"v": None}
 _meta = {"last_refresh": 0.0, "last_duration": 0.0, "files": 0, "building": False}
+_refresh_sync_lock = threading.Lock()
+_sync_manual = 0
+_sync_start = uuid.uuid4().hex
+_client_snapshot_lock = threading.Lock()
+_client_snapshot = {"revision": None, "data": None, "summary": None}
+
+
+def refresh_sync():
+    """A small shared clock, without analytics or ledger writes.
+
+    All local clients sample it once a second and fetch figures on the same
+    clock tick. Manual refresh invalidates the tick for every open client.
+    Log parsing retains its own --interval cadence.
+    """
+    seconds = N.refresh_interval()
+    tick = int(time.time() // seconds) if seconds else 0
+    with _refresh_sync_lock:
+        revision = f"{_sync_start}:{seconds}:{tick}:{_sync_manual}"
+    return {"seconds": seconds, "revision": revision}
+
+
+def notify_refresh():
+    global _sync_manual
+    with _refresh_sync_lock:
+        _sync_manual += 1
 
 
 def _device():
@@ -441,6 +466,29 @@ def build_payload():
     # as refresh so a response is consistent and iteration cannot race an append.
     with _refresh_lock:
         return _build_payload_locked()
+
+
+def client_snapshot():
+    """Freeze both HTTP views for this display tick, even if parsing finishes between requests.
+
+    Serialize while holding the parser lock: session dictionaries can still share
+    nested fields with the ledger. Only the serialized snapshot is retained.
+    This is transient display state, never saved into the durable ledger.
+    """
+    with _client_snapshot_lock:
+        revision = refresh_sync()["revision"]
+        if revision != _client_snapshot["revision"]:
+            with _refresh_lock:
+                payload = _build_payload_locked()
+                today = time.strftime("%Y-%m-%d")
+                rows = [row for row in payload["records"] if row["date"] == today]
+                summary = {"date": today,
+                           "tokens": sum(sum(int(row.get(field) or 0) for field in
+                                             ("in", "out", "cr", "cc")) for row in rows),
+                           "spend": round(sum(float(row.get("cost") or 0) for row in rows), 2)}
+                data_json, summary_json = json.dumps(payload), json.dumps(summary)
+            _client_snapshot.update(revision=revision, data=data_json, summary=summary_json)
+        return _client_snapshot["data"], _client_snapshot["summary"]
 
 
 def build_today_summary():
@@ -1998,9 +2046,11 @@ class Handler(BaseHTTPRequestHandler):
             }))
         elif route == "/api/native":
             self._send(200, json.dumps(N.status()))
+        elif route == "/api/sync":
+            self._send(200, json.dumps(refresh_sync()))
         elif route == "/api/summary":
             try:
-                self._send(200, json.dumps(build_today_summary()))
+                self._send(200, client_snapshot()[1])
             except Exception as e:
                 import traceback; traceback.print_exc()
                 self._send(500, json.dumps({"error": str(e)}))
@@ -2022,8 +2072,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send(405, json.dumps({"error": "use POST with a JSON body"}))
         elif route == "/api/data":
             try:
-                payload = build_payload()
-                self._send(200, json.dumps(payload))
+                self._send(200, client_snapshot()[0])
             except Exception as e:
                 import traceback; traceback.print_exc()
                 self._send(500, json.dumps({"error": str(e)}))
@@ -2081,7 +2130,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         route = self.path.split("?")[0]
-        if route in ("/api/settings", "/api/cache", "/api/update", "/api/devices", "/api/refresh", "/api/native", "/api/shutdown"):
+        if route in ("/api/settings", "/api/cache", "/api/update", "/api/devices", "/api/refresh", "/api/native", "/api/shutdown", "/api/sync"):
             if not self._csrf_ok():
                 self._send(403, json.dumps({"error": "cross-site request refused"}))
                 return
@@ -2097,6 +2146,10 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 if route == "/api/native":
                     result = N.action(body.get("enabled"))
+                elif route == "/api/sync":
+                    N.set_refresh_interval(body.get("seconds"))
+                    notify_refresh()
+                    result = refresh_sync()
                 elif route == "/api/shutdown":
                     token = os.environ.get("AGENT_TELEMETRY_CONTROL_TOKEN")
                     if not token or not hmac.compare_digest(token, self.headers.get("X-AgentTelemetry-Control") or ""):
@@ -2106,13 +2159,16 @@ class Handler(BaseHTTPRequestHandler):
                     result = {"ok": True}
                 elif route == "/api/refresh":
                     refresh(verbose=False)
+                    notify_refresh()
                     result = {"ok": True, "meta": dict(_meta)}
                 elif route == "/api/cache":
                     result = cache_action(body.get("action"))
+                    notify_refresh()
                 elif route == "/api/update":
                     result = update_action(body.get("action"))
                 elif route == "/api/devices":
                     result = devices_action(body)
+                    notify_refresh()
                 else:
                     result = save_claude_cleanup_days(body.get("cleanupPeriodDays"))
                 self._send(200, json.dumps(result))

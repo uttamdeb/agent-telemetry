@@ -126,6 +126,106 @@ class NativeTests(unittest.TestCase):
              patch.object(D, "_peer_items", return_value=[("/peer/rollout.jsonl", peer)]):
             self.assertEqual(D.build_today_summary(), {"date": today, "tokens": 2200000, "spend": 5.24})
 
+    def test_shared_clock_settings_validation_manual_and_csrf(self):
+        server = D.Server(("127.0.0.1", 0), D.Handler)
+        binding = patch.dict(D.BIND, {"host": "127.0.0.1", "port": server.server_port})
+        binding.start()
+        self.addCleanup(binding.stop)
+        self.addCleanup(server.server_close)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.shutdown)
+        def request(method, body=None, content="application/json", origin=None):
+            connection = http.client.HTTPConnection("127.0.0.1", server.server_port)
+            headers = {"Content-Type": content}
+            if origin: headers["Origin"] = origin
+            connection.request(method, "/api/sync", json.dumps(body) if body is not None else None, headers)
+            response = connection.getresponse()
+            result = response.status, json.loads(response.read())
+            connection.close()
+            return result
+        self.assertEqual(request("GET")[1]["seconds"], 15)
+        self.assertEqual(request("POST", {"seconds": 60}, "text/plain")[0], 403)
+        self.assertEqual(request("POST", {"seconds": 60}, origin="https://example.invalid")[0], 403)
+        for seconds in (True, -1, 1, "60", 15000, None):
+            self.assertEqual(request("POST", {"seconds": seconds})[0], 400)
+        self.assertEqual(request("POST", {"seconds": 60})[1]["seconds"], 60)
+        with patch.object(D.time, "time", return_value=61):
+            first = request("GET")[1]
+        with patch.object(D.time, "time", return_value=119):
+            self.assertEqual(request("GET")[1], first)
+        with patch.object(D.time, "time", return_value=120):
+            self.assertNotEqual(request("GET")[1]["revision"], first["revision"])
+        request("POST", {"seconds": 0})
+        with patch.object(D.time, "time", return_value=120):
+            manual = request("GET")[1]
+        with patch.object(D.time, "time", return_value=10000):
+            self.assertEqual(request("GET")[1], manual)
+            D.notify_refresh()
+            self.assertNotEqual(request("GET")[1]["revision"], manual["revision"])
+        self.assertEqual(set(manual), {"seconds", "revision"})
+
+    def test_browser_and_native_serve_one_snapshot_even_if_parsing_changes(self):
+        today = __import__("time").strftime("%Y-%m-%d")
+        payload = {"records": [{"date": today, "in": 100, "out": 10, "reason": 7, "cost": 1.25}]}
+        # Serialization freezes nested values too, without saving the ledger.
+        with patch.dict(D._client_snapshot, {"revision": None, "data": None, "summary": None}), \
+             patch.object(D, "_build_payload_locked", return_value=payload) as build, \
+             patch.object(D, "refresh_sync", return_value={"seconds": 60, "revision": "tick"}) as clock, \
+             patch.object(D, "save_cache") as save:
+            first_data, first_summary = D.client_snapshot()
+            payload["records"][0].update({"in": 200, "cost": 2.5})
+            second_data, second_summary = D.client_snapshot()
+            self.assertEqual(first_data, second_data)
+            self.assertEqual(first_summary, second_summary)
+            self.assertEqual(json.loads(second_summary), {"date": today, "tokens": 110, "spend": 1.25})
+            build.assert_called_once()
+            clock.return_value = {"seconds": 60, "revision": "manual-refresh"}
+            new_data, new_summary = D.client_snapshot()
+            self.assertEqual(json.loads(new_data)["records"][0]["in"], 200)
+            self.assertEqual(json.loads(new_summary)["tokens"], 210)
+            self.assertEqual(json.loads(new_summary)["spend"], 2.5)
+            save.assert_not_called()
+
+    def test_http_browser_and_windows_client_sync_without_touching_ledger(self):
+        import urllib.request
+        today = __import__("time").strftime("%Y-%m-%d")
+        payload = {"records": [{"date": today, "in": 100, "out": 10, "cost": 1.25}]}
+        server = D.Server(("127.0.0.1", 0), D.Handler)
+        self.addCleanup(server.server_close)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.shutdown)
+        base = "http://127.0.0.1:" + str(server.server_port)
+        monitor = Monitor(self.root, self.root / "data", sys.executable, url=base)
+        monitor.request(True)
+        browser = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        def get(path):
+            with browser.open(base + path) as response: return json.load(response)
+        with patch.dict(D.BIND, {"host": "127.0.0.1", "port": server.server_port}), \
+             patch.dict(D._client_snapshot, {"revision": None, "data": None, "summary": None}), \
+             patch.object(D, "_build_payload_locked", return_value=payload), \
+             patch.object(D, "refresh") as parse, patch.object(D, "save_cache") as save:
+            monitor.set_interval(0)
+            first = get("/api/data")
+            self.assertEqual(monitor.snapshot()["tokens"], first["records"][0]["in"] + 10)
+            payload["records"][0]["in"] = 200  # Background parse finishes after the snapshot.
+            monitor.sync()
+            self.assertEqual(monitor.snapshot()["tokens"], 110)
+            self.assertEqual(get("/api/data"), first)
+            before = get("/api/sync")
+            monitor.refresh(parse=True)  # Tray's explicit refresh updates the browser too.
+            self.assertNotEqual(get("/api/sync")["revision"], before["revision"])
+            current = get("/api/data")["records"][0]
+            self.assertEqual(monitor.snapshot()["tokens"], current["in"] + 10)
+            self.assertEqual(monitor.snapshot()["spend"], current["cost"])
+            parse.assert_called_once_with(verbose=False)
+            save.assert_not_called()
+            self.assertFalse((self.root / "data").exists())
+
+    def test_malformed_shared_preference_uses_safe_default(self):
+        for value in (True, "60", -1, 1, 999999999):
+            N._write("refresh-settings.json", {"seconds": value})
+            self.assertEqual(N.refresh_interval(), 15)
+
     def test_payload_allowlist_excludes_personal_data(self):
         with tempfile.TemporaryDirectory() as repository:
             root = Path(repository)
@@ -223,18 +323,64 @@ class MonitorTests(unittest.TestCase):
             refresh.assert_not_called()
         self.assertTrue(self.monitor.requested.is_set())
 
-    def test_interval_restart_does_not_undo_stop_while_saving(self):
+    def test_interval_change_does_not_restart_backend_or_undo_stop(self):
         intent = self.monitor.request(True)
         self.monitor.process = object()
-        def saving(**kwargs):
+        def setting(*args, **kwargs):
             self.monitor.request(False)  # UI Stop arrives during the owned shutdown.
-            return True
-        with patch.object(self.monitor, "stop", side_effect=saving) as stop, \
-             patch.object(self.monitor, "start") as start:
-            self.monitor.apply_command("interval", intent)
-            stop.assert_called_once_with(cancel=False)
+            return {"seconds": 60, "revision": "fixture"}
+        with patch.object(self.monitor, "stop") as stop, \
+             patch.object(self.monitor, "start") as start, \
+             patch.object(self.monitor, "_request", side_effect=setting), \
+             patch.object(self.monitor, "refresh") as refresh:
+            self.monitor.set_interval(60, intent)
+            stop.assert_not_called()
             start.assert_not_called()
+            refresh.assert_not_called()
         self.assertFalse(self.monitor.requested.is_set())
+
+    def test_shared_ticks_manual_refresh_and_failure_retry_match_dashboard(self):
+        state = {"seconds": 60, "revision": "first"}
+        summary = {"date": "2026-10-10", "tokens": 100, "spend": 1.25}
+        calls = []
+        def request(path, *args, **kwargs):
+            calls.append(path)
+            if path == "/api/sync": return dict(state)
+            if path == "/api/refresh": state["revision"] = "manual"; return {}
+            return dict(summary)
+        with patch.object(self.monitor, "_request", side_effect=request):
+            self.monitor.sync()
+            self.assertEqual(self.monitor.interval, 60)
+            self.assertEqual(self.monitor.snapshot()["tokens"], 100)
+            summary["tokens"] = 200
+            self.monitor.sync()
+            self.assertEqual(self.monitor.snapshot()["tokens"], 100)
+            self.assertEqual(calls.count("/api/summary"), 1)
+            state.update(seconds=0, revision="browser-selected-manual")
+            self.monitor.sync()
+            self.assertEqual(self.monitor.interval, 0)
+            summary["tokens"] = 300
+            self.monitor.sync()
+            self.assertEqual(self.monitor.snapshot()["tokens"], 200)
+            state["revision"] = "browser-manual-refresh"
+            self.monitor.sync()
+            self.assertEqual(self.monitor.snapshot()["tokens"], 300)
+            self.monitor.refresh(parse=True)
+            self.assertEqual(state["revision"], "manual")
+            # A failed summary must retry even when Manual keeps the tick constant.
+            self.monitor.stale = True
+            summary["tokens"] = 400
+            self.monitor.sync()
+            self.assertEqual(self.monitor.snapshot()["tokens"], 400)
+            self.assertFalse(self.monitor.stale)
+
+    def test_native_interval_updates_the_shared_dashboard_setting(self):
+        with patch.object(self.monitor, "_request", return_value={"seconds": 900, "revision": "new"}) as request, \
+             patch.object(self.monitor, "refresh") as refresh:
+            self.monitor.set_interval(900)
+            request.assert_called_once_with("/api/sync", {"seconds": 900})
+            self.assertEqual(self.monitor.interval, 900)
+            refresh.assert_called_once_with(intent=0)
 
     def test_latest_start_survives_an_older_queued_stop(self):
         old_stop = self.monitor.request(False)

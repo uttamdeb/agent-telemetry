@@ -9,6 +9,20 @@ import time
 import uuid
 
 _lock = threading.Lock()
+REFRESH_INTERVALS = (0, 15, 60, 300, 900)
+
+
+def refresh_interval():
+    value = _read("refresh-settings.json").get("seconds", 15)
+    return value if type(value) is int and value in REFRESH_INTERVALS else 15
+
+
+def set_refresh_interval(seconds):
+    if type(seconds) is not int or seconds not in REFRESH_INTERVALS:
+        raise ValueError("seconds must be one of 0, 15, 60, 300, 900")
+    with _lock:
+        _write("refresh-settings.json", {"seconds": seconds})
+
 
 
 def support_dir():

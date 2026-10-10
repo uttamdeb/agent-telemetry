@@ -73,6 +73,17 @@ and copies the ledger without overwriting existing app data or changing the orig
 For that flow, install with `--no-launch`, open the app manually and choose Import before
 Start monitoring. A default install attaches safely when the old dashboard is still running.
 
+Browser windows, the macOS menu bar and the Windows tray share one refresh interval:
+15 seconds (default), 1/5/15 minutes, or Manual. Change it in web Settings or the native
+app while monitoring. They sample a small shared clock each second and show figures
+from the same snapshot; a manual refresh in either app updates the others too, normally
+within a second plus request time. Manual continues listening for those explicit refreshes.
+The native figures are today's usage across all tools and connected devices; compare
+them with an unfiltered Today dashboard. Pause pauses only that browser's figures.
+Changing the interval does not restart the backend or reload the embedded dashboard.
+The server's `--interval` controls log parsing separately. Older attached backends without
+the sync API retain independent polling until upgraded and restarted.
+
 Read the [macOS guide](macos/AgentTelemetryMac/README.md) and
 [Windows guide](windows/README.md) for paths, controls and development checks. macOS
 source builds are ad-hoc signed local builds; a prebuilt Developer ID signed/notarized
@@ -82,6 +93,9 @@ are added. The macOS packaging step downloads a hash-pinned Python runtime expli
 Local app integrations can use `GET /api/health` for a small readiness response that contains
 no usage data, and `GET /api/summary` for today's token total and API-equivalent estimated
 spend. Both are read-only; they follow the dashboard's existing host and origin rules.
+`GET /api/sync` supplies the shared display clock; `POST /api/sync` sets its validated
+interval through the same JSON/same-origin CSRF guard. The data and summary HTTP endpoints
+retain one serialized snapshot per display tick, in memory only; the ledger is unaffected.
 `GET /api/native` reports local app status. `POST /api/native` requires the same CSRF guard
 as all writes. `POST /api/shutdown` additionally requires the owning Windows client's
 per-process control token; a normal standalone dashboard cannot be stopped by that route.

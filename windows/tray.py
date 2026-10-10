@@ -122,9 +122,7 @@ class Tray:
                 self.settings = {}
         except (OSError, ValueError):
             self.settings = {}
-        interval = self.settings.get("interval", 300)
-        if interval not in (60, 300, 900):
-            interval = 300
+        interval = 15
         self.monitor = Monitor(ROOT, native.support_dir().parent / "AgentTelemetry",
                                sys.executable, interval)
         self.generation = None if self_test else native.register(generation)
@@ -187,7 +185,7 @@ class Tray:
             operation, argument, intent = self.queue.get()
             quit_ok = False
             try:
-                if operation in ("start", "stop", "quit", "interval"):
+                if operation in ("start", "stop", "quit"):
                     result = self.monitor.apply_command(operation, intent)
                     quit_ok = operation == "quit" and result
                 elif operation == "open":
@@ -195,7 +193,9 @@ class Tray:
                 elif operation == "refresh":
                     self.monitor.refresh(parse=True, intent=intent)
                 elif operation == "poll":
-                    self.monitor.refresh(intent=intent)
+                    self.monitor.sync(intent=intent)
+                elif operation == "interval":
+                    self.monitor.set_interval(argument, intent)
                 elif operation == "import":
                     if self.monitor.requested.is_set() or self.monitor._probe() is not None:
                         raise ValueError("Stop the existing dashboard before importing usage history.")
@@ -265,9 +265,10 @@ class Tray:
         append(menu, 0 if snapshot["requested"] else 2, 3, "Refresh now")
         append(menu, 0x800, 0, None)
         append(menu, 8 if self.settings.get("display") == "numbers" else 0, 4, "Show numbers in tray icon")
-        for identifier, seconds in ((60, 60), (300, 300), (900, 900)):
-            append(menu, 8 if self.monitor.interval == seconds else 0, identifier,
-                   "Refresh every %d minute%s" % (seconds // 60, "" if seconds == 60 else "s"))
+        for identifier, seconds in ((15, 15), (60, 60), (300, 300), (900, 900), (1000, 0)):
+            append(menu, (8 if self.monitor.interval == seconds else 0) | (0 if snapshot["requested"] else 2), identifier,
+                   "Shared refresh: " + ("Manual" if not seconds else "15 seconds" if seconds == 15
+                   else "%d minute%s" % (seconds // 60, "" if seconds == 60 else "s")))
         append(menu, 8 if self.settings.get("auto_start") else 0, 5, "Start monitoring when app opens")
         append(menu, 8 if self.login_enabled() else 0, 6, "Open at Login")
         append(menu, 2 if snapshot["requested"] or self.monitor.process else 0, 7, "Import existing data…")
@@ -323,11 +324,8 @@ class Tray:
             self.choose_import()
         elif command == 8:
             self.quit()
-        elif command in (60, 300, 900):
-            self.monitor.interval = self.settings["interval"] = command
-            self.save_settings()
-            self.next_poll = 0
-            self.submit("interval")
+        elif command in (15, 60, 300, 900, 1000):
+            self.submit("interval", 0 if command == 1000 else command)
 
     def quit(self):
         if not self.quitting:
@@ -344,7 +342,7 @@ class Tray:
                 if not native.heartbeat(self.generation, closing=self.quitting):
                     self.quit()
                 if not self.quitting and self.monitor.requested.is_set() and time.time() >= self.next_poll and not self.queue.unfinished_tasks:
-                    self.next_poll = time.time() + self.monitor.interval
+                    self.next_poll = time.time() + 1
                     self.submit("poll")
                 self.update_icon()
             elif message == 0x8002:

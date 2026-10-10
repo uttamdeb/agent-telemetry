@@ -12,7 +12,7 @@ if sys.platform != "darwin":
     raise SystemExit("Native macOS fixtures require macOS")
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "macos/AgentTelemetryMac/Sources/AgentTelemetryMac"
-state = {"failed": False, "delay": False}
+state = {"failed": False, "delay": False, "seconds": 15, "revision": 0, "tokens": 100}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -23,12 +23,15 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/fail": state["failed"] = True
         if self.path == "/recover": state["failed"] = False
         if self.path == "/delay": state["delay"] = True
+        if self.path == "/advance": state["tokens"] = 200; state["revision"] += 1
+        if self.path == "/raw-advance": state["tokens"] = 250
         if self.path.startswith("/api/"):
             if self.path == "/api/health" and state["delay"]:
                 time.sleep(0.35)
             self.send_response(503 if state["failed"] else 200)
             body = json.dumps({"service": "agent-telemetry", "version": "fixture", "ready": True, "building": False}
-                if self.path == "/api/health" else {"date": "2026-10-10", "tokens": 100, "spend": 1.25}).encode()
+                if self.path == "/api/health" else {"seconds": state["seconds"], "revision": str(state["revision"])}
+                if self.path == "/api/sync" else {"date": "2026-10-10", "tokens": state["tokens"], "spend": 1.25}).encode()
         else:
             self.send_response(200)
             body = b"<!doctype html><html><head><title>Fixture</title></head><body>Fixture</body></html>"
@@ -36,7 +39,12 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    do_POST = do_GET
+    def do_POST(self):
+        raw = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        if not state["failed"]:
+            if self.path == "/api/sync": state["seconds"] = json.loads(raw)["seconds"]
+            state["revision"] += 1
+        self.do_GET()
 
 
 server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)

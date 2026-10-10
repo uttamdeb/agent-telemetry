@@ -120,6 +120,10 @@ Use temporary ledgers/mock servers for automated tests and retain the failure/re
 checks. Full signed/notarized macOS packaging remains a separate distribution check.
 Also cover Stop/Start during queued work, cadence changes while the service is unavailable,
 and a slow owned shutdown that retains its closing heartbeat until the ledger is saved.
+Refresh tests must cover the shared `/api/sync` clock, setting changes in both directions,
+Manual signals from another client, retry on an unchanged tick, and data/summary parity
+when parsing finishes between requests. Cadence changes must not restart the backend or
+reload the embedded page. Keep transient serialized snapshots out of the ledger.
 
 Then verify representative logs and the UI. At minimum:
 
