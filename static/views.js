@@ -1278,6 +1278,7 @@ document.getElementById("scrim").addEventListener("click",()=>{
   closeDrawer();
 });
 addEventListener("scroll",()=>{
+  document.getElementById("tabs").classList.toggle("stuck", scrollY>8);
   document.getElementById("filters").classList.toggle("stuck", scrollY>8);
 },{passive:true});
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change",()=>{

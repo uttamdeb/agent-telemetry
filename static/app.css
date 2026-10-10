@@ -133,7 +133,8 @@ input[type=date]{color-scheme:inherit}
 
 /* ---------- tabs ---------- */
 nav.tabs{display:flex;gap:2px;border-bottom:1px solid var(--border);margin-bottom:0;
-  background:var(--surface);
+  background:var(--surface);position:sticky;top:0;z-index:41;
+  box-shadow:0 1px 0 transparent;transition:box-shadow .15s ease;
   overflow-x:auto;scrollbar-width:none}
 nav.tabs::-webkit-scrollbar{display:none}
 nav.tabs button{background:none;border:none;border-bottom:2px solid transparent;
@@ -143,9 +144,10 @@ nav.tabs .tab-icon{width:15px;height:15px;vertical-align:-3px;margin-right:5px;s
 nav.tabs button:hover{color:var(--text)}
 nav.tabs button.on{color:var(--accent);border-bottom-color:var(--accent)}
 nav.tabs .cnt{color:var(--text-3);font-size:11px;margin-left:6px}
+nav.tabs.stuck{box-shadow:0 6px 18px -12px rgba(0,0,0,.35)}
 
 /* ---------- filter bar ---------- */
-.filters{position:sticky;top:0;z-index:40;background:var(--bg);
+.filters{position:sticky;top:41px;z-index:40;background:var(--bg);
   padding-top:12px;padding-bottom:12px;border-bottom:1px solid var(--border);margin-bottom:18px}
 .filters.stuck{box-shadow:0 6px 18px -12px rgba(0,0,0,.35)}
 .filters.filter-drawer-open{z-index:90}
