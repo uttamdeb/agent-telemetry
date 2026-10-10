@@ -64,7 +64,7 @@ function deepMerge(a,b){
 function stackDS(label, data, color){
   return {label, data, backgroundColor:color, stack:"a",
     borderColor:cssv("--surface"), borderWidth:{top:2,left:0,right:0,bottom:0},
-    borderRadius:3, borderSkipped:false, maxBarThickness:34};
+    borderRadius:6, borderSkipped:false, maxBarThickness:34};
 }
 /* A line needs TWO points to draw a segment, so a single-day range (or a series
    with one lone reading) renders as empty axes. Show the point itself instead. */
@@ -76,73 +76,23 @@ function areaDS(label, data, color, fill){
     borderWidth:2, pointRadius:soloPoint(data), pointHoverRadius:4, tension:.25,
     fill:fill===undefined?true:fill, stack:"a"};
 }
-/* value labels at the bar ends — small horizontal bar lists are unreadable
-    without them once one series dwarfs the rest. Also labels the top of vertical
-    stacked bars so daily totals are readable without hovering. */
-const barLabels = {
-  id:"barLabels",
-  afterDatasetsDraw(c, a, o){
-    const {ctx}=c;
-    const isHorizontal = c.config.options?.indexAxis === "y";
-    ctx.save();
-    ctx.font="600 10.5px "+getComputedStyle(document.body).fontFamily;
-    ctx.textBaseline="middle";
-    const inkOut=cssv("--text-2"), inkIn=cssv("--surface");
-    if(isHorizontal){
-      const meta=c.getDatasetMeta(0);
-      meta.data.forEach((bar,i)=>{
-        const v=c.data.datasets[0].data[i];
-        if(v==null) return;
-        const txt=(o.fmt||fmtTok)(v);
-        const pad=6;
-        const fits = bar.x + pad + ctx.measureText(txt).width < c.chartArea.right;
-        ctx.textAlign = fits ? "left" : "right";
-        ctx.fillStyle = fits ? inkOut : inkIn;   // inside a bar, use the surface ink
-        ctx.fillText(txt, fits ? bar.x+pad : bar.x-pad, bar.y);
-      });
-    } else {
-      // vertical stacked bars: show the stack total above the top segment
-      const datasets=c.data.datasets, labels=c.data.labels||[];
-      for(let i=0;i<labels.length;i++){
-        let total=0, topY=null, topX=null, visible=false;
-        for(let di=0; di<datasets.length; di++){
-          const meta=c.getDatasetMeta(di);
-          const bar=meta.data[i];
-          if(!bar || bar.skip) continue;
-          total += datasets[di].data[i] || 0;
-          topX = bar.x;
-          topY = bar.y;   // stacked segments ascend; last one is highest
-          visible = true;
-        }
-        if(!visible || total===0) continue;
-        const txt=(o.fmt||fmtTok)(total);
-        ctx.textAlign="center";
-        ctx.fillStyle=inkOut;
-        ctx.fillText(txt, topX, topY-6);
-      }
-    }
-    ctx.restore();
-  }
-};
 function hbar(id, rows, opt){
   opt = opt || {};
   const fmt = opt.fmt || fmtTok;
   mk(id, {
-    plugins:[barLabels],
     type:"bar",
     data:{labels:rows.map(r=>r.label),
       datasets:[{data:rows.map(r=>r.value),
         backgroundColor:rows.map(r=>r.color||cssv("--accent")),
-        borderRadius:3, borderSkipped:false, maxBarThickness:opt.thick||16}]},
+        borderRadius:6, borderSkipped:false, maxBarThickness:opt.thick||16}]},
     options:{indexAxis:"y",
-      layout:{padding:{right:opt.padRight||54}},
+      layout:{padding:{right:opt.padRight||8}},
       scales:axes({x:{grid:{display:true,color:cssv("--grid")},ticks:{color:cssv("--text-3"),
                        font:{size:10.5},callback:v=>fmt(v)}},
                    y:{grid:{display:false},ticks:{color:cssv("--text-2"),font:{size:11},
                        crossAlign:"far",autoSkip:false}}}),
       plugins:{tooltip:{itemSort:null,callbacks:{
-        label:c=>" "+fmt(c.parsed.x)+(opt.sub?opt.sub(rows[c.dataIndex]):"")},},
-        barLabels:{fmt}}}
+        label:c=>" "+fmt(c.parsed.x)+(opt.sub?opt.sub(rows[c.dataIndex]):"")}}}}
   });
 }
 
@@ -189,30 +139,35 @@ function renderCalendar(byDay, maxV, onClick){
 /* ---------- hour x weekday heatmap (SVG, sequential blue) ---------- */
 function renderHeatmap(cells, maxV){
   const cw=100/24, gap=2, rowH=22, mL=32, mT=16;
+  const hourLabel=h=>`${h%12||12} ${h<12?"AM":"PM"}`;
   const ramp=seqRamp();
   const bucket=v=>{ if(!v) return ramp[0]; const q=v/(maxV||1);
     return q>.66?ramp[6]:q>.4?ramp[5]:q>.2?ramp[4]:q>.07?ramp[3]:q>.01?ramp[2]:ramp[1]; };
   const W=760, H=mT+7*rowH+14, cellW=(W-mL)/24;
   let s=`<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMinYMin meet" role="img" aria-label="activity by hour and weekday">`;
   for(let h=0;h<24;h+=3)
-    s+=`<text x="${mL+h*cellW}" y="10" fill="${cssv("--text-3")}" font-size="9.5">${pad2(h)}</text>`;
+    s+=`<text x="${mL+h*cellW+(cellW-gap)/2}" y="10" text-anchor="middle" dominant-baseline="middle"
+      fill="${cssv("--text-3")}" font-size="9.5">${hourLabel(h)}</text>`;
   for(let d=0;d<7;d++){
     s+=`<text x="0" y="${mT+d*rowH+15}" fill="${cssv("--text-3")}" font-size="9.5">${DOW[d]}</text>`;
     for(let h=0;h<24;h++){
       const v=(cells[d]&&cells[d][h])||0;
       s+=`<rect x="${mL+h*cellW}" y="${mT+d*rowH}" width="${cellW-gap}" height="${rowH-gap}" rx="3"
-          fill="${bucket(v)}" data-d="${d}" data-h="${h}" data-v="${v}"/>`;
+          fill="${bucket(v)}" data-d="${d}" data-h="${h}" data-v="${v}" tabindex="0" role="img"
+          aria-label="${DOW[d]} ${pad2(h)}:00 — ${fmtTok(v)} tokens"/>`;
     }
   }
   s+="</svg>";
   const wrap=document.getElementById("heatmap"); wrap.innerHTML=s;
   const svg=wrap.querySelector("svg");
+  const cellTip=r=>`<div class="t">${DOW[+r.dataset.d]} ${pad2(+r.dataset.h)}:00</div>
+      <div class="r"><span class="k">tokens</span><span class="v">${fmtTok(+r.dataset.v)}</span></div>`;
   svg.addEventListener("mousemove",e=>{
     const r=e.target.closest("rect"); if(!r) return hideTip();
-    showTip(`<div class="t">${DOW[+r.dataset.d]} ${pad2(+r.dataset.h)}:00</div>
-      <div class="r"><span class="k">tokens</span><span class="v">${fmtTok(+r.dataset.v)}</span></div>`,
-      e.clientX,e.clientY);
+    showTip(cellTip(r),e.clientX,e.clientY);
   });
+  svg.addEventListener("focusin",e=>{ const r=e.target.closest("rect"); if(!r) return; const box=r.getBoundingClientRect(); showTip(cellTip(r),box.right,box.top); });
+  svg.addEventListener("focusout",e=>{ if(!svg.contains(e.relatedTarget)) hideTip(); });
   svg.addEventListener("mouseleave",hideTip);
 }
 

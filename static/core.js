@@ -283,13 +283,41 @@ function cycleTheme(){
 
 /* ---------- dropdown plumbing ---------- */
 function closeDD(except){
-  document.querySelectorAll(".dd.open").forEach(d=>{ if(d!==except) d.classList.remove("open"); });
+  document.querySelectorAll(".dd.open").forEach(d=>{ if(d!==except){
+    d.classList.remove("open");
+    const toggle=d.querySelector("[data-dd=toggle]");
+    if(toggle) toggle.setAttribute("aria-expanded","false");
+    const panel=d.querySelector(".filter-panel");
+    if(panel){
+      panel.classList.remove("viewport-panel","filter-drawer");
+      panel.style.width=""; panel.style.left=""; panel.style.top="";
+      document.getElementById("scrim").classList.remove("on");
+      document.getElementById("filters").classList.remove("filter-drawer-open");
+    }
+  }});
 }
 document.addEventListener("click", e=>{
   const tog = e.target.closest("[data-dd=toggle]");
   if(tog){ const dd=tog.closest(".dd"); const open=dd.classList.contains("open");
-    closeDD(); if(!open) dd.classList.add("open"); e.stopPropagation(); return; }
-  if(!e.target.closest(".dd-panel")) closeDD();
+    closeDD();
+    if(!open){
+      dd.classList.add("open");
+      tog.setAttribute("aria-expanded","true");
+      const panel=dd.querySelector(".filter-panel");
+      if(panel){
+        panel.classList.add("filter-drawer");
+        document.getElementById("filters").classList.add("filter-drawer-open");
+        document.getElementById("filterDrawerClose").focus();
+      }
+    }else{
+      tog.setAttribute("aria-expanded","false");
+      const panel=dd.querySelector(".filter-panel");
+      if(panel){ panel.classList.remove("viewport-panel","filter-drawer"); panel.style.width=""; panel.style.left=""; panel.style.top=""; document.getElementById("scrim").classList.remove("on"); document.getElementById("filters").classList.remove("filter-drawer-open"); }
+    }
+    e.stopPropagation(); return; }
+  const filterDD=document.getElementById("ddFilters");
+  if(filterDD?.classList.contains("open") && e.target.closest("#filtersPanel")) return;
+  if(!e.target.closest(".dd-panel,.filter-panel")) closeDD();
 });
 document.addEventListener("keydown", e=>{
   if(e.key==="Escape"){ closeDD(); closeDrawer(); }

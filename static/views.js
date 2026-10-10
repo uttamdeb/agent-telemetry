@@ -29,7 +29,7 @@ function syncRangeUI(){
 function multiPanel(panelId, labelId, items, set, allLabel, isTools){
   const p = document.getElementById(panelId);
   const on = k => isTools ? set.has(k) : (set.size===0 || set.has(k));
-  p.innerHTML = `<div class="dd-head"><span>${allLabel}</span>
+  p.innerHTML = `<div class="dd-head"><span class="dd-title">${allLabel}<span class="list-count-chip" aria-label="${items.length} items">${items.length}</span></span>
       <span><a href="#" data-all="1">${isTools?"all":"clear"}</a>${
         isTools?' · <a href="#" data-none="1">none</a>':""}</span></div>` +
     items.map(it=>`<div class="dd-item" data-k="${esc(it.key)}">
@@ -42,6 +42,28 @@ function multiPanel(panelId, labelId, items, set, allLabel, isTools){
   const noun = allLabel.split(" ")[1] || "";
   document.getElementById(labelId).textContent =
     n >= items.length ? allLabel : `${n} of ${items.length} ${noun}`.trim();
+}
+function activeFilterCount(){
+  let n=0;
+  if(S.tools.size!==ORDER.length) n++;
+  if(S.provs.size) n++;
+  if(S.ides.size) n++;
+  if(S.projs.size) n++;
+  if(S.models.size) n++;
+  if(S.exactOnly) n++;
+  if(S.search) n++;
+  return n;
+}
+function syncFilterUI(){
+  const n=activeFilterCount();
+  const count=document.getElementById("filterCount");
+  const filterBtn=document.getElementById("filtersBtn");
+  if(count) count.textContent=n;
+  if(filterBtn) filterBtn.classList.toggle("on",n>0);
+  const compare=document.getElementById("compareToggle");
+  if(compare) compare.checked=!!S.compare;
+  const reliable=document.getElementById("reliableBtn");
+  if(reliable) reliable.checked=!!S.exactOnly;
 }
 function buildFilterPanels(){
   const r = range();
@@ -86,7 +108,7 @@ function renderPills(){
   S.projs.forEach(p=>out.push(["proj:"+p, p]));
   S.models.forEach(m=>out.push(["model:"+m, m]));
   S.ides.forEach(i=>out.push(["ide:"+i, i]));
-  if(S.exactOnly) out.push(["exact","exact tokens only"]);
+  if(S.exactOnly) out.push(["exact","verified token counts only"]);
   if(S.search) out.push(["search",`“${S.search}”`]);
   if(S.compare) out.push(["cmp","comparing to previous period"]);
   const el = document.getElementById("pills");
@@ -178,11 +200,11 @@ function renderDaily(d){
     legendHTML("dailyChart", srcs.map(s=>({label:SRC[s].label,color:srcColor(s)})));
   document.getElementById("dailyHint").textContent =
     `${S.metric==="cost"?"est. cost":S.metric==="messages"?"assistant messages":"tokens"} per day, stacked by tool`;
-  mk("dailyChart",{type:"bar",plugins:[barLabels],
+  mk("dailyChart",{type:"bar",
     data:{labels:days.map(shortDay),datasets:ds},
-    options:{layout:{padding:{top:18}},
+    options:{layout:{padding:{top:4}},
       scales:axes({x:{stacked:true},y:{stacked:true,ticks:{callback:v=>fmt(v)}}}),
-      plugins:{barLabels:{fmt},tooltip:{callbacks:{
+      plugins:{tooltip:{callbacks:{
         label:c=>" "+c.dataset.label+": "+fmt(c.parsed.y),
         footer:it=>"total "+fmt(it.reduce((a,x)=>a+x.parsed.y,0))}}}}});
 }
@@ -205,7 +227,7 @@ function renderHeat(d){
   }
   renderHeatmap(cells,max);
   document.getElementById("hmHint").textContent =
-    "local hour × weekday, by tokens" + (dimFiltered()?" · tool + date filters only":"");
+    "tokens by local time × weekday · darker means more" + (dimFiltered()?" · tool + date filters only":"");
 }
 function renderComposition(d){
   const KINDS=[["in","Input","--k-in"],["cr","Cache read","--k-cr"],
@@ -371,11 +393,11 @@ function viewCost(d){
     const m={}; for(const r of d.recs) if(r.source===s) m[r.date]=(m[r.date]||0)+(r.cost||0);
     return stackDS(SRC[s].label, days2.map(x=>+(m[x]||0).toFixed(3)), srcColor(s));
   });
-  mk("dailyCost",{type:"bar",plugins:[barLabels],
+  mk("dailyCost",{type:"bar",
     data:{labels:days2.map(shortDay),datasets:dsc},
-    options:{layout:{padding:{top:18}},
+    options:{layout:{padding:{top:4}},
       scales:axes({x:{stacked:true},y:{stacked:true,ticks:{callback:v=>fmtUSD(v)}}}),
-      plugins:{barLabels:{fmt:fmtUSD2},tooltip:{callbacks:{label:c=>" "+c.dataset.label+": "+fmtUSD2(c.parsed.y),
+      plugins:{tooltip:{callbacks:{label:c=>" "+c.dataset.label+": "+fmtUSD2(c.parsed.y),
         footer:it=>"total "+fmtUSD2(it.reduce((a,x)=>a+x.parsed.y,0))}}}}});
 }
 
@@ -1041,7 +1063,7 @@ function renderAll(){
   Object.entries(tot).sort((a,b)=>b[1]-a[1]).forEach(([m])=>{
     const p=providerOf(m); (MODEL_RANK[p]=MODEL_RANK[p]||[]).push(m); });
 
-  syncRangeUI(); buildFilterPanels(); renderPills();
+  syncRangeUI(); buildFilterPanels(); renderPills(); syncFilterUI();
   document.querySelectorAll(".view").forEach(v=>v.classList.toggle("on", v.id==="v-"+S.view));
   document.querySelectorAll("#tabs button").forEach(b=>b.classList.toggle("on", b.dataset.v===S.view));
   const d = slice();
@@ -1107,11 +1129,17 @@ document.getElementById("rangePanel").addEventListener("click",e=>{
     if(a&&b){ S.preset="custom"; S.from=a<b?a:b; S.to=a<b?b:a; closeDD(); renderAll(); }
   }
 });
-document.getElementById("cmpSeg").addEventListener("click",e=>{
-  const b=e.target.closest("button"); if(!b) return;
-  S.compare=b.dataset.c==="1";
-  [...e.currentTarget.children].forEach(x=>x.classList.toggle("on",x===b)); renderAll();
+document.getElementById("compareToggle").addEventListener("change",e=>{
+  S.compare=e.currentTarget.checked; renderAll();
 });
+document.getElementById("clearFilters").addEventListener("click",()=>{
+  S.tools=new Set(ORDER); S.provs.clear(); S.projs.clear(); S.ides.clear(); S.models.clear();
+  S.exactOnly=false; S.search=""; document.getElementById("search").value=""; renderAll();
+});
+document.getElementById("filterDrawerClose").addEventListener("click",closeDD);
+// Keep the grouped filter popover open while changing any option inside it.
+// The document-level dropdown handler should only close it for outside clicks.
+document.getElementById("filtersPanel").addEventListener("click",e=>e.stopPropagation());
 function wireMulti(panelId, get, isTools){
   document.getElementById(panelId).addEventListener("click",e=>{
     const set=get();
@@ -1140,14 +1168,13 @@ document.getElementById("pills").addEventListener("click",e=>{
   if(k==="__all"){ S.preset="30d"; S.tools=new Set(ORDER); S.provs.clear(); S.projs.clear();
     S.models.clear(); S.search=""; S.exactOnly=false; S.compare=false;
     document.getElementById("search").value="";
-    document.querySelectorAll("#cmpSeg button").forEach((x,i)=>x.classList.toggle("on",i===0));
-    document.getElementById("reliableBtn").classList.remove("on"); }
+    document.getElementById("compareToggle").checked=false;
+    document.getElementById("reliableBtn").checked=false; }
   else if(k==="range") S.preset="30d";
   else if(k==="tools") S.tools=new Set(ORDER);
-  else if(k==="exact"){ S.exactOnly=false; document.getElementById("reliableBtn").classList.remove("on"); }
+  else if(k==="exact"){ S.exactOnly=false; document.getElementById("reliableBtn").checked=false; }
   else if(k==="search"){ S.search=""; document.getElementById("search").value=""; }
-  else if(k==="cmp"){ S.compare=false;
-    document.querySelectorAll("#cmpSeg button").forEach((x,i)=>x.classList.toggle("on",i===0)); }
+  else if(k==="cmp"){ S.compare=false; document.getElementById("compareToggle").checked=false; }
   else if(k.startsWith("prov:")) S.provs.delete(k.slice(5));
   else if(k.startsWith("proj:")) S.projs.delete(k.slice(5));
   else if(k.startsWith("ide:")) S.ides.delete(k.slice(4));
@@ -1159,8 +1186,8 @@ document.getElementById("search").addEventListener("input",e=>{
   clearTimeout(searchT); const v=e.target.value;
   searchT=setTimeout(()=>{ S.search=v.trim(); renderAll(); },220);
 });
-document.getElementById("reliableBtn").addEventListener("click",e=>{
-  S.exactOnly=!S.exactOnly; e.currentTarget.classList.toggle("on",S.exactOnly); renderAll();
+document.getElementById("reliableBtn").addEventListener("change",e=>{
+  S.exactOnly=e.currentTarget.checked; renderAll();
 });
 document.getElementById("themeBtn").addEventListener("click",cycleTheme);
 document.getElementById("settingsBtn").addEventListener("click",openSettings);
@@ -1197,7 +1224,11 @@ document.addEventListener("click",e=>{
   if(sr){ openSession(+sr.dataset.sess); return; }
 });
 document.getElementById("drawerX").addEventListener("click",closeDrawer);
-document.getElementById("scrim").addEventListener("click",closeDrawer);
+document.getElementById("scrim").addEventListener("click",()=>{
+  // The filter drawer stays open on scrim clicks; use its close button or Escape.
+  if(document.getElementById("ddFilters").classList.contains("open")) return;
+  closeDrawer();
+});
 addEventListener("scroll",()=>{
   document.getElementById("filters").classList.toggle("stuck", scrollY>8);
 },{passive:true});

@@ -31,51 +31,114 @@
   </header>
 
   <nav class="tabs" id="tabs">
-    <button data-v="overview" class="on">Overview</button>
-    <button data-v="cost">Cost</button>
-    <button data-v="models">Models &amp; Providers</button>
-    <button data-v="tools">Tools &amp; Agents</button>
-    <button data-v="projects">Projects</button>
-    <button data-v="sessions">Sessions</button>
-    <button data-v="storage">Storage</button>
+    <button data-v="overview" class="on">
+      <svg class="tab-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect width="7" height="9" x="3" y="3" rx="1" />
+        <rect width="7" height="5" x="14" y="3" rx="1" />
+        <rect width="7" height="9" x="14" y="12" rx="1" />
+        <rect width="7" height="5" x="3" y="16" rx="1" />
+      </svg>
+      Overview
+    </button>
+    <button data-v="cost">
+      <svg class="tab-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="10" />
+        <path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8" />
+        <path d="M12 18V6" />
+      </svg>
+      Cost
+    </button>
+    <button data-v="models">
+      <svg class="tab-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect width="16" height="16" x="4" y="4" rx="2" />
+        <rect width="6" height="6" x="9" y="9" rx="1" />
+        <path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3" />
+      </svg>
+      Models &amp; Providers
+    </button>
+    <button data-v="tools">
+      <svg class="tab-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94z" />
+      </svg>
+      Tools &amp; Agents
+    </button>
+    <button data-v="projects">
+      <svg class="tab-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
+      </svg>
+      Projects
+    </button>
+    <button data-v="sessions">
+      <svg class="tab-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 12a9 9 0 1 0 3-6.7" />
+        <path d="M3 4v5h5" />
+        <path d="M12 7v5l4 2" />
+      </svg>
+      Sessions
+    </button>
+    <button data-v="storage">
+      <svg class="tab-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <ellipse cx="12" cy="5" rx="9" ry="3" />
+        <path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5" />
+        <path d="M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3" />
+      </svg>
+      Storage
+    </button>
     <span class="tab-gap"></span>
     <button data-v="optimize" class="tab-special" title="Suggestions derived from your own usage">
-      <span class="spark">✦</span>Optimize</button>
+      <svg class="tab-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
+        <path d="M5 3v4M19 17v4M3 5h4M17 19h4" />
+      </svg>
+      Optimize
+    </button>
   </nav>
 
   <div class="filters" id="filters">
     <div class="frow">
       <div class="dd" id="ddRange">
-        <button class="btn" data-dd="toggle"><span id="rangeLabel">Last 30 days</span> ▾</button>
+        <button class="btn" data-dd="toggle" aria-expanded="false"><span id="rangeLabel">Last 30 days</span>
+          <svg class="chevron" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6" /></svg>
+        </button>
         <div class="dd-panel" id="rangePanel"></div>
       </div>
-      <div class="seg" id="cmpSeg" title="Compare with the preceding period">
-        <button data-c="0" class="on">No compare</button>
-        <button data-c="1">vs prev period</button>
+      <label class="switch-control" id="compareControl" title="Compare the selected range with the preceding period">
+        <input type="checkbox" id="compareToggle">
+        <span class="switch-ui" aria-hidden="true"></span>
+        <span>Compare previous period</span>
+      </label>
+      <label class="switch-control" id="reliableControl" title="Verified token counts only — exclude estimated counts from Copilot and Cursor">
+        <input type="checkbox" id="reliableBtn">
+        <span class="switch-ui" aria-hidden="true"></span>
+        <span>Verified token counts only</span>
+      </label>
+      <div class="dd" id="ddFilters">
+          <button class="btn filter-trigger" id="filtersBtn" data-dd="toggle" aria-haspopup="true" aria-expanded="false">
+            <span>Filters</span><span class="filter-count" id="filterCount">0</span>
+            <svg class="chevron" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6" /></svg>
+          </button>
+        <div class="filter-panel" id="filtersPanel" role="dialog" aria-modal="true" aria-labelledby="filterPanelTitle">
+          <div class="filter-panel-head">
+            <div><strong id="filterPanelTitle">Filter usage data</strong></div>
+            <div class="filter-head-actions">
+              <button class="filter-clear" id="clearFilters" type="button">Clear filters</button>
+              <button class="filter-drawer-close" id="filterDrawerClose" type="button" aria-label="Close filters">×</button>
+            </div>
+          </div>
+          <div class="filter-grid">
+            <div class="filter-group-title filter-source-title">Source</div>
+            <div class="filter-group-title filter-scope-title">Scope</div>
+            <span id="toolsLabel" class="sr-only">All tools</span><div class="filter-options" id="toolsPanel"></div>
+            <span id="projLabel" class="sr-only">All projects</span><div class="filter-options" id="projPanel"></div>
+            <span id="provLabel" class="sr-only">All providers</span><div class="filter-options" id="provPanel"></div>
+            <span id="modelLabel" class="sr-only">All models</span><div class="filter-options" id="modelPanel"></div>
+            <span id="ideLabel" class="sr-only">All IDEs</span><div class="filter-options" id="idePanel"></div>
+            <div class="filter-grid-spacer" aria-hidden="true"></div>
+          </div>
+        </div>
       </div>
-      <div class="dd" id="ddTools">
-        <button class="btn" data-dd="toggle"><span id="toolsLabel">All tools</span> ▾</button>
-        <div class="dd-panel" id="toolsPanel"></div>
-      </div>
-      <div class="dd" id="ddProv">
-        <button class="btn" data-dd="toggle"><span id="provLabel">All providers</span> ▾</button>
-        <div class="dd-panel" id="provPanel"></div>
-      </div>
-      <div class="dd" id="ddIde">
-        <button class="btn" data-dd="toggle"><span id="ideLabel">All IDEs</span> ▾</button>
-        <div class="dd-panel" id="idePanel"></div>
-      </div>
-      <div class="dd" id="ddProj">
-        <button class="btn" data-dd="toggle"><span id="projLabel">All projects</span> ▾</button>
-        <div class="dd-panel" id="projPanel"></div>
-      </div>
-      <div class="dd" id="ddModel">
-        <button class="btn" data-dd="toggle"><span id="modelLabel">All models</span> ▾</button>
-        <div class="dd-panel" id="modelPanel"></div>
-      </div>
-      <input type="search" class="field" id="search" placeholder="Search sessions / projects…">
+      <input type="search" class="field" id="search" placeholder="Search projects or sessions…">
       <div class="spacer"></div>
-      <button class="btn" id="reliableBtn" title="Exclude sources whose token counts are estimated (Copilot, Cursor)">exact tokens only</button>
     </div>
     <div class="pills" id="pills"></div>
   </div>
@@ -120,13 +183,13 @@
         </div>
         <div class="card col-7">
           <div class="head">
-            <div><h3>When you work</h3><div class="hint" id="hmHint">local hour × weekday, by tokens</div></div>
-            <div class="cal-legend">Less
+            <div><h3>When you work</h3><div class="hint" id="hmHint">tokens by local hour × weekday · darker means more</div></div>
+            <div class="heatmap-legend" aria-label="Token intensity: low to high"><span>Low</span>
               <span class="cell" style="background:var(--seq-0)"></span>
               <span class="cell" style="background:var(--seq-2)"></span>
               <span class="cell" style="background:var(--seq-3)"></span>
               <span class="cell" style="background:var(--seq-5)"></span>
-              <span class="cell" style="background:var(--seq-6)"></span>More</div>
+              <span class="cell" style="background:var(--seq-6)"></span><span>High</span></div>
           </div>
           <div class="hm-wrap" id="heatmap"></div>
         </div>
