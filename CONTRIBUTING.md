@@ -118,6 +118,8 @@ The Windows self-test reports whether Explorer accepted the icon; a headless han
 test alone does not prove a visible tray item. CI covers all three operating systems.
 Use temporary ledgers/mock servers for automated tests and retain the failure/recovery
 checks. Full signed/notarized macOS packaging remains a separate distribution check.
+Also cover Stop/Start during queued work, cadence changes while the service is unavailable,
+and a slow owned shutdown that retains its closing heartbeat until the ledger is saved.
 
 Then verify representative logs and the UI. At minimum:
 

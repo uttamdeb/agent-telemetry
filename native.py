@@ -103,12 +103,13 @@ def register(generation=None):
     return generation
 
 
-def heartbeat(generation):
+def heartbeat(generation, closing=False):
     control = _read("native-control.json")
-    if control.get("enabled") is not True or control.get("generation") != generation:
+    enabled = control.get("enabled") is True
+    if control.get("generation") != generation or (not enabled and not closing):
         return False
     _write("native-status.json", {"generation": generation, "pid": os.getpid(), "time": time.time()})
-    return True
+    return enabled
 
 
 def unregister(generation):

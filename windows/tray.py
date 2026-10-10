@@ -15,7 +15,7 @@ import webbrowser
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import native
-from windows.monitor import Monitor, import_ledger
+from windows.monitor import Monitor, import_ledger, login_enabled, toggle_login
 
 if sys.platform != "win32":
     raise SystemExit("The system tray app runs on Windows. Run python install.py to select your OS.")
@@ -175,32 +175,27 @@ class Tray:
         native._write("tray-settings.json", self.settings)
 
     def submit(self, operation, argument=None):
-        if operation == "start":
-            self.monitor.requested.set()
-        if operation in ("stop", "quit"):
-            self.monitor.requested.clear()
-        self.queue.put((operation, argument))
+        if self.quitting and operation != "quit":
+            return
+        intent = self.monitor.intent
+        if operation in ("start", "stop", "quit") or (operation == "open" and not self.monitor.requested.is_set()):
+            intent = self.monitor.request(operation in ("start", "open"))
+        self.queue.put((operation, argument, intent))
 
     def worker(self):
         while True:
-            operation, argument = self.queue.get()
+            operation, argument, intent = self.queue.get()
             quit_ok = False
             try:
-                if operation == "start":
-                    self.monitor.start()
-                elif operation == "stop":
-                    self.monitor.stop()
-                elif operation == "quit":
-                    quit_ok = self.monitor.stop()
+                if operation in ("start", "stop", "quit", "interval"):
+                    result = self.monitor.apply_command(operation, intent)
+                    quit_ok = operation == "quit" and result
+                elif operation == "open":
+                    self.monitor.open_dashboard(intent, webbrowser.open)
                 elif operation == "refresh":
-                    self.monitor.refresh(parse=True)
+                    self.monitor.refresh(parse=True, intent=intent)
                 elif operation == "poll":
-                    self.monitor.refresh()
-                elif operation == "interval":
-                    if self.monitor.process is not None:
-                        if self.monitor.stop():
-                            self.monitor.requested.set()
-                            self.monitor.start()
+                    self.monitor.refresh(intent=intent)
                 elif operation == "import":
                     if self.monitor.requested.is_set() or self.monitor._probe() is not None:
                         raise ValueError("Stop the existing dashboard before importing usage history.")
@@ -281,22 +276,10 @@ class Tray:
         return menu
 
     def login_enabled(self):
-        import winreg
-        try:
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run") as key:
-                command, _ = winreg.QueryValueEx(key, "AgentTelemetry")
-                return command == subprocess.list2cmdline([sys.executable, str(Path(__file__).resolve())])
-        except OSError:
-            return False
+        return login_enabled(sys.executable, Path(__file__).resolve())
 
     def toggle_login(self):
-        import winreg
-        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run") as key:
-            if self.login_enabled():
-                winreg.DeleteValue(key, "AgentTelemetry")
-            else:
-                winreg.SetValueEx(key, "AgentTelemetry", 0, winreg.REG_SZ,
-                                  subprocess.list2cmdline([sys.executable, str(Path(__file__).resolve())]))
+        toggle_login(sys.executable, Path(__file__).resolve())
 
     def choose_import(self):
         buffer = C.create_unicode_buffer(260)
@@ -322,9 +305,7 @@ class Tray:
         finally:
             destroy_menu(menu)
         if command == 1:
-            webbrowser.open(self.monitor.url)
-            if not self.monitor.requested.is_set():
-                self.submit("start")
+            self.submit("open")
         elif command == 2:
             self.submit("stop" if self.monitor.requested.is_set() else "start")
         elif command == 3:
@@ -360,7 +341,7 @@ class Tray:
             elif message == 0x8001 and lparam in (0x202, 0x205):
                 self.menu()
             elif message == 0x113:
-                if not native.heartbeat(self.generation):
+                if not native.heartbeat(self.generation, closing=self.quitting):
                     self.quit()
                 if not self.quitting and self.monitor.requested.is_set() and time.time() >= self.next_poll and not self.queue.unfinished_tasks:
                     self.next_poll = time.time() + self.monitor.interval

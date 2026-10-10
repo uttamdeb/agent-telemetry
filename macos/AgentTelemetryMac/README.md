@@ -45,6 +45,7 @@ Build and notarize each architecture on a matching Mac. The current package scri
 - The app bundle is built from an explicit source/assets allowlist. The packaging script also refuses to continue if it finds a user cache, peer state, or `server.log` in the resources it is about to ship.
 - Failed refreshes keep the last successful summary, visibly mark it stale and retry; a late startup result cannot undo Stop. Menu figures render the incoming published value. Polling changes and owned restarts preserve dashboard filters and tab.
 - Stop/Quit waits for an owned backend to finish parsing and save the ledger; it does not force-kill a long parse after a fixed deadline.
+- Changing cadence during an outage keeps retrying. The closing app continues its heartbeat until saving completes, preventing a competing web launch.
 
 ## Local development
 

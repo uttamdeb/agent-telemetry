@@ -9,12 +9,15 @@ final class NativeControl: ObservableObject {
     private let root: URL
     let requestedFromDashboard: Bool
 
-    init() {
-        root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+    init(root: URL? = nil, generation: String? = nil) {
+        self.root = root ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
             .appendingPathComponent("AgentTelemetryNative", isDirectory: true)
         let arguments = ProcessInfo.processInfo.arguments
-        if let index = arguments.firstIndex(of: "--native-generation"), arguments.indices.contains(index + 1) {
-            generation = arguments[index + 1]
+        if let generation {
+            self.generation = generation
+            requestedFromDashboard = true
+        } else if let index = arguments.firstIndex(of: "--native-generation"), arguments.indices.contains(index + 1) {
+            self.generation = arguments[index + 1]
             requestedFromDashboard = true
         } else {
             requestedFromDashboard = false
@@ -43,15 +46,22 @@ final class NativeControl: ObservableObject {
         }
         task = Task { [weak self] in
             guard let self else { return }
+            var closing = false
             while !Task.isCancelled {
                 guard let generation = self.generation,
                       let control = self.read("native-control.json"),
-                      control["enabled"] as? Bool == true,
                       control["generation"] as? String == generation else {
                     quit()
                     return
                 }
+                if control["enabled"] as? Bool != true && !closing {
+                    closing = true
+                    quit()
+                    if Task.isCancelled { return }
+                }
                 do {
+                    // A slow owned shutdown must keep reporting Closing until
+                    // its ledger is saved; otherwise web launch could race it.
                     try self.write("native-status.json", ["generation": generation,
                         "pid": ProcessInfo.processInfo.processIdentifier,
                         "time": Date().timeIntervalSince1970])

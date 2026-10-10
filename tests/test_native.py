@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import install
 import native as N
 import dashboard as D
-from windows.monitor import Monitor, import_ledger
+from windows.monitor import Monitor, import_ledger, login_enabled, toggle_login
 
 
 class NativeTests(unittest.TestCase):
@@ -68,6 +68,21 @@ class NativeTests(unittest.TestCase):
         with patch.object(N.subprocess, "Popen", side_effect=OSError("fixture")):
             with self.assertRaises(ValueError): N.action(True)
         self.assertFalse(N.status()["requested"])
+
+    def test_closing_heartbeat_keeps_launch_blocked_until_saving_finishes(self):
+        self.manifest()
+        generation = N.register()
+        N.action(False)
+        with patch.object(N.time, "time", return_value=100):
+            self.assertFalse(N.heartbeat(generation, closing=True))
+        with patch.object(N.time, "time", return_value=110):
+            state = N.status()
+            self.assertTrue(state["running"])
+            self.assertFalse(state["requested"])
+            with self.assertRaisesRegex(ValueError, "closing"):
+                N.action(True)
+        N.unregister(generation)
+        self.assertFalse(N.status()["running"])
 
     def test_malformed_manifest_and_unresponsive_launch_are_visible(self):
         N._write("native-install.json", {"platform": sys.platform, "command": ["fixture"], "entry": 42})
@@ -156,6 +171,35 @@ class MonitorTests(unittest.TestCase):
         self.monitor = Monitor("/fixture", "/fixture-data", sys.executable)
         self.monitor.requested.set()
 
+    def test_login_toggle_quotes_paths_and_only_changes_its_own_run_value(self):
+        from types import SimpleNamespace
+        from contextlib import nullcontext
+        import subprocess
+        values = {"AnotherApp": ("keep this", 1)}
+        opened = []
+        def key(root, path):
+            opened.append((root, path))
+            return nullcontext("fixture-key")
+        def query(key, name):
+            if name not in values:
+                raise FileNotFoundError(name)
+            return values[name]
+        registry = SimpleNamespace(HKEY_CURRENT_USER="fixture-user", REG_SZ=1,
+            OpenKey=key, CreateKey=key, QueryValueEx=query,
+            SetValueEx=lambda key,name,reserved,kind,value: values.update({name:(value,kind)}),
+            DeleteValue=lambda key,name: values.pop(name))
+        python, entry = r"C:\Program Files\Python\pythonw.exe", r"C:\User Folder\AgentTelemetry\tray.py"
+        with patch.dict(sys.modules, {"winreg": registry}):
+            self.assertFalse(login_enabled(python, entry))
+            toggle_login(python, entry)
+            self.assertTrue(login_enabled(python, entry))
+            self.assertEqual(values["AgentTelemetry"], (subprocess.list2cmdline([python,entry]), 1))
+            toggle_login(python, entry)
+            self.assertFalse(login_enabled(python, entry))
+        self.assertEqual(values, {"AnotherApp": ("keep this", 1)})
+        self.assertTrue(all(root=="fixture-user" and path==r"Software\Microsoft\Windows\CurrentVersion\Run"
+                            for root,path in opened))
+
     def test_cancelled_probe_does_not_start_or_connect(self):
         def probe():
             self.monitor.requested.clear()
@@ -165,6 +209,63 @@ class MonitorTests(unittest.TestCase):
             child.assert_not_called()
         self.monitor.stop()
         self.assertEqual(self.monitor.snapshot()["status"], "Monitoring off")
+
+    def test_newer_start_cannot_make_an_old_probe_current_again(self):
+        first = self.monitor.request(True)
+        def probe():
+            self.monitor.request(False)
+            self.monitor.request(True)
+            return {"ready": True, "service": "agent-telemetry"}
+        with patch.object(self.monitor, "_probe", side_effect=probe), \
+             patch.object(self.monitor, "refresh") as refresh, patch("subprocess.Popen") as child:
+            self.monitor.start(first)
+            child.assert_not_called()
+            refresh.assert_not_called()
+        self.assertTrue(self.monitor.requested.is_set())
+
+    def test_interval_restart_does_not_undo_stop_while_saving(self):
+        intent = self.monitor.request(True)
+        self.monitor.process = object()
+        def saving(**kwargs):
+            self.monitor.request(False)  # UI Stop arrives during the owned shutdown.
+            return True
+        with patch.object(self.monitor, "stop", side_effect=saving) as stop, \
+             patch.object(self.monitor, "start") as start:
+            self.monitor.apply_command("interval", intent)
+            stop.assert_called_once_with(cancel=False)
+            start.assert_not_called()
+        self.assertFalse(self.monitor.requested.is_set())
+
+    def test_latest_start_survives_an_older_queued_stop(self):
+        old_stop = self.monitor.request(False)
+        latest_start = self.monitor.request(True)
+        with patch.object(self.monitor, "stop") as stop, patch.object(self.monitor, "start") as start:
+            self.monitor.apply_command("stop", old_stop)
+            self.monitor.apply_command("start", latest_start)
+            stop.assert_not_called()
+            start.assert_called_once_with(latest_start)
+        self.assertTrue(self.monitor.requested.is_set())
+
+    def test_late_summary_from_an_old_intent_is_not_applied(self):
+        def request(*args, **kwargs):
+            self.monitor.request(False)
+            self.monitor.request(True)
+            return {"date": "2026-10-10", "tokens": 999, "spend": 99}
+        with patch.object(self.monitor, "_request", side_effect=request):
+            self.monitor.refresh()
+        self.assertEqual(self.monitor.snapshot()["tokens"], 0)
+
+    def test_restart_waits_for_an_already_owned_starting_process(self):
+        from unittest.mock import Mock
+        process = Mock(pid=123)
+        process.poll.return_value = None
+        self.monitor.process = process
+        health = {"ready": True, "service": "agent-telemetry", "pid": 123}
+        with patch.object(self.monitor, "_probe", side_effect=[None, health]), \
+             patch.object(self.monitor, "refresh") as refresh, patch("subprocess.Popen") as child:
+            self.monitor.start()
+            child.assert_not_called()
+            refresh.assert_called_once_with(intent=0)
 
     def test_first_snapshot_failure_retention_and_recovery(self):
         first = {"date": "2026-10-10", "tokens": 100, "spend": 1.25}
@@ -185,6 +286,28 @@ class MonitorTests(unittest.TestCase):
             self.monitor.refresh()
         self.assertFalse(self.monitor.snapshot()["stale"])
         self.assertEqual(self.monitor.snapshot()["tokens"], 200)
+
+    def test_open_dashboard_waits_for_readiness_and_respects_cancel(self):
+        from unittest.mock import Mock
+        ready = {"ready":True, "service":"agent-telemetry"}
+        events = []
+        def probe():
+            events.append("probe")
+            return ready if len(events) >= 3 else dict(ready, ready=False)
+        opener = Mock(side_effect=lambda url: events.append("open"))
+        with patch.object(self.monitor, "_probe", side_effect=probe), \
+             patch.object(self.monitor, "refresh") as refresh, patch("time.sleep"):
+            self.monitor.open_dashboard(opener=opener)
+            refresh.assert_called_once_with(intent=0)
+            opener.assert_called_once_with(self.monitor.url)
+        self.assertEqual(events, ["probe", "probe", "probe", "open"])
+        opener.reset_mock()
+        def cancel():
+            self.monitor.request(False)
+            return ready
+        with patch.object(self.monitor, "_probe", side_effect=cancel):
+            self.monitor.open_dashboard(opener=opener)
+            opener.assert_not_called()
 
     def test_detach_does_not_stop_existing_service(self):
         with patch.object(self.monitor, "_request") as request:

@@ -9,6 +9,27 @@ import threading
 import time
 import urllib.error
 import urllib.request
+import webbrowser
+
+
+def login_enabled(python, entry):
+    import winreg
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run") as key:
+            command, _ = winreg.QueryValueEx(key, "AgentTelemetry")
+            return command == subprocess.list2cmdline([str(python), str(entry)])
+    except OSError:
+        return False
+
+
+def toggle_login(python, entry):
+    import winreg
+    with winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run") as key:
+        if login_enabled(python, entry):
+            winreg.DeleteValue(key, "AgentTelemetry")
+        else:
+            winreg.SetValueEx(key, "AgentTelemetry", 0, winreg.REG_SZ,
+                             subprocess.list2cmdline([str(python), str(entry)]))
 
 
 class Monitor:
@@ -19,6 +40,7 @@ class Monitor:
         self.token = None
         self.requested = threading.Event()
         self.lock = threading.Lock()
+        self.intent = 0
         self.summary = {"date": "", "tokens": 0, "spend": 0}
         self.status = "Monitoring off"
         self.stale = False
@@ -36,6 +58,35 @@ class Monitor:
             self.status = status
             if stale is not None:
                 self.stale = stale
+
+    def request(self, enabled):
+        """Record the latest UI intent before a queued/network operation completes."""
+        with self.lock:
+            self.intent += 1
+            if enabled:
+                self.requested.set()
+            else:
+                self.requested.clear()
+            return self.intent
+
+    def is_current(self, intent):
+        with self.lock:
+            return self.intent == intent
+
+    def _active(self, intent):
+        return self.requested.is_set() and self.is_current(intent)
+
+    def apply_command(self, operation, intent):
+        if not self.is_current(intent):
+            return False
+        if operation == "start":
+            self.start(intent)
+        elif operation in ("stop", "quit"):
+            return self.stop(cancel=False)
+        elif operation == "interval" and self.process is not None and self._active(intent):
+            if self.stop(cancel=False) and self._active(intent):
+                self.start(intent)
+        return False
 
     def _request(self, path, body=None, token=None, timeout=10):
         headers = {"Origin": self.url}
@@ -74,13 +125,16 @@ class Monitor:
         except urllib.error.URLError:
             return None
 
-    def start(self):
+    def start(self, intent=None):
+        intent = self.intent if intent is None else intent
+        if not self._active(intent):
+            return
         self._state("Starting…", False)
         try:
             health = self._probe()
-            if not self.requested.is_set():
+            if not self._active(intent):
                 return
-            if health is None:
+            if health is None and self.process is None:
                 self.data_dir.mkdir(parents=True, exist_ok=True)
                 self.token = secrets.token_urlsafe(32)
                 environment = dict(os.environ, AGENT_TELEMETRY_CONTROL_TOKEN=self.token,
@@ -93,27 +147,36 @@ class Monitor:
                         stdin=subprocess.DEVNULL, stdout=log, stderr=log,
                         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
             for _ in range(600):
-                if not self.requested.is_set():
+                if not self._active(intent):
                     return
                 if self.process is not None and self.process.poll() is not None:
                     self.process = None
                     raise ValueError("The local backend exited. See its local server.log and retry.")
                 health = self._probe()
-                if not self.requested.is_set():
+                if not self._active(intent):
                     return
                 if health and health.get("ready"):
                     if self.process is not None and health.get("pid") != self.process.pid:
                         raise ValueError("Another dashboard took port 7878. Stop monitoring and retry.")
                     self.legacy = bool(health.get("legacy"))
-                    self.refresh()
-                    return
+                    self.refresh(intent=intent)
+                    return True
                 time.sleep(0.5)
             raise ValueError("The dashboard did not finish starting. Stop monitoring and retry.")
         except (OSError, ValueError) as error:
-            self._state(str(error), True)
+            if self._active(intent):
+                self._state(str(error), True)
 
-    def refresh(self, parse=False):
-        if not self.requested.is_set():
+    def open_dashboard(self, intent=None, opener=None):
+        intent = self.intent if intent is None else intent
+        # First-run parsing can take a minute. Open only once the service is ready,
+        # and never open it on behalf of an older, canceled Start request.
+        if self.start(intent) and self._active(intent):
+            (opener or webbrowser.open)(self.url)
+
+    def refresh(self, parse=False, intent=None):
+        intent = self.intent if intent is None else intent
+        if not self._active(intent):
             return
         try:
             if parse:
@@ -125,7 +188,7 @@ class Monitor:
                 payload = {"date": today, "tokens": sum(sum(r.get(k, 0) for k in
                     ("in", "out", "cr", "cc")) for r in rows),
                     "spend": sum(r.get("cost", 0) for r in rows)}
-            if not self.requested.is_set():
+            if not self._active(intent):
                 return
             summary = {"date": str(payload["date"]), "tokens": int(payload["tokens"]),
                        "spend": float(payload["spend"])}
@@ -135,11 +198,12 @@ class Monitor:
                 self.last_success = time.time()
                 self.status = "Monitoring on" if self.process is not None else "Using existing dashboard"
         except (OSError, ValueError, KeyError, TypeError):
-            if self.requested.is_set():
+            if self._active(intent):
                 self._state("Dashboard unavailable; showing the last successful refresh. Retrying…", True)
 
-    def stop(self):
-        self.requested.clear()
+    def stop(self, cancel=True):
+        if cancel:
+            self.request(False)
         process = self.process
         if process is not None:
             self._state("Stopping; saving usage history…")

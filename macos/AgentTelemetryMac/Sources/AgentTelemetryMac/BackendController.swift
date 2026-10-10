@@ -224,7 +224,7 @@ final class BackendController: ObservableObject {
     func refreshIntervalDidChange() {
         summaryTask?.cancel()
         summaryTask = nil
-        guard isReady else { return }
+        guard isMonitoring else { return }
         beginSummaryUpdates()
 
         // The Python service reads its refresh cadence at launch. Restart only

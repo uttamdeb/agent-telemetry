@@ -49,7 +49,7 @@ try:
         backend.write_text((SOURCE / backend.name).read_text().replace(
             "http://127.0.0.1:7878", "http://127.0.0.1:" + str(server.server_port)))
         sdk = subprocess.check_output(["xcrun", "--sdk", "macosx", "--show-sdk-path"], text=True).strip()
-        names = ("AppSettings.swift", "CacheMigration.swift", "DashboardWebView.swift", "StatusMenu.swift", "MenuBarPopoverController.swift")
+        names = ("AppSettings.swift", "CacheMigration.swift", "DashboardWebView.swift", "StatusMenu.swift", "MenuBarPopoverController.swift", "NativeControl.swift")
         command = ["swiftc", "-sdk", sdk, "-parse-as-library", str(backend)]
         command += [str(SOURCE / name) for name in names]
         command += [str(ROOT / "tests/MacNativeRegression.swift"), "-o", str(root / "native-tests")]

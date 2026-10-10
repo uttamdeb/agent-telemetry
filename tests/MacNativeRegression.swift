@@ -34,12 +34,14 @@ struct MacNativeRegression {
         try await Task.sleep(nanoseconds: 700_000_000)
         precondition(backend.summaryStale && backend.isMonitoring && backend.status.message != nil)
         precondition(backend.summary.tokens == 100)
+        settings.refreshIntervalSeconds = 1 // Short isolated retry interval, no user defaults.
+        backend.refreshIntervalDidChange()
         _ = try await URLSession.shared.data(from: base.appendingPathComponent("recover"))
-        backend.refreshNow()
-        try await Task.sleep(nanoseconds: 700_000_000)
+        try await Task.sleep(nanoseconds: 1_400_000_000)
         precondition(!backend.summaryStale && backend.isReady && backend.lastSummaryUpdate != nil)
-        print("PASS summary failure retains data, marks stale and recovers")
+        print("PASS summary failure retains data and retries after a cadence change during an outage")
         backend.stop()
+        settings.refreshIntervalSeconds = 300
 
         _ = try await URLSession.shared.data(from: base.appendingPathComponent("delay"))
         let stoppingBackend = BackendController(settings: settings)
@@ -50,6 +52,25 @@ struct MacNativeRegression {
         try await Task.sleep(nanoseconds: 800_000_000)
         precondition(stoppingBackend.status == .stopped, "Health completion undid Stop")
         print("PASS canceled health completion cannot revive monitoring")
+
+        let controls = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: controls, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: controls) }
+        let controlURL = controls.appendingPathComponent("native-control.json")
+        let heartbeatURL = controls.appendingPathComponent("native-status.json")
+        try Data(#"{"enabled":true,"generation":"closing-fixture"}"#.utf8).write(to: controlURL)
+        var quits = 0
+        let native = NativeControl(root: controls, generation: "closing-fixture")
+        native.start { quits += 1 } // Simulate a backend that is still saving.
+        try await Task.sleep(nanoseconds: 200_000_000)
+        try Data(#"{"enabled":false,"generation":"closing-fixture"}"#.utf8).write(to: controlURL)
+        try await Task.sleep(nanoseconds: 1_400_000_000)
+        let firstHeartbeat = try JSONSerialization.jsonObject(with: Data(contentsOf: heartbeatURL)) as! [String: Any]
+        try await Task.sleep(nanoseconds: 1_200_000_000)
+        let nextHeartbeat = try JSONSerialization.jsonObject(with: Data(contentsOf: heartbeatURL)) as! [String: Any]
+        precondition(quits == 1 && (nextHeartbeat["time"] as! Double) > (firstHeartbeat["time"] as! Double))
+        native.finish()
+        print("PASS closing native app retains a live heartbeat while its owned backend saves")
 
         var latestURL: URL?
         let host = NSHostingView(rootView: DashboardWebView(url: base, refreshIntervalSeconds: 60,

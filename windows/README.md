@@ -16,7 +16,8 @@ hidden-icons arrow or choose to show AgentTelemetry in taskbar settings.
 Click either mouse button on its icon for the menu: today's tokens and estimated API
 spend, monitoring status, Open dashboard, Start/Stop, Refresh, icon/numbers display,
 1/5/15-minute refresh cadence, automatic monitoring, Open at Login, Import and Quit.
-The full dashboard opens in the default browser. Numbers also have text labels in the
+Open dashboard waits for backend readiness before opening the default browser; Stop
+cancels a pending open. Numbers also have text labels in the
 menu and tooltip; colour is never the only source of information.
 
 Open at Login writes only the current user's `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`
@@ -40,6 +41,8 @@ Failures retain and label the last successful figures; polling retries recovery.
 Stop/Quit requests an authenticated, CSRF-guarded graceful shutdown only of its owned
 process and waits for the ledger to flush. It does not force-kill a slow save. If a save
 is still finishing, the menu reports it and a later Stop/Quit can retry.
+Queued work honors the newest Start/Stop request. Closing keeps its heartbeat alive
+while saving, so the web toggle cannot launch another instance in the middle of shutdown.
 
 ## Development and tests
 

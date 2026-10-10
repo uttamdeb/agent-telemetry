@@ -48,6 +48,10 @@ no third-party GUI dependency. Linux stays on the existing browser workflow.
   immediate reread. Check lifecycle/cancellation **after** every readiness await.
 - Keep last successful figures but mark failures stale and retry. Preserve the WebView's
   current query/hash across polling changes and app-owned backend restarts.
+- Keep retries alive when cadence changes during an outage. Windows queued work carries
+  a monotonically increasing UI intent; an older operation cannot undo a newer Start/Stop.
+  Keep the closing client's heartbeat alive until its owned backend has saved and exited,
+  so a web launch cannot race a slow shutdown. Never force-kill it to meet a timeout.
 - Packaging must traverse nested Mach-O files with NUL-delimited filenames, sign them
   before their app container, verify signatures and never bundle user data. The Windows
   install payload also uses an explicit allowlist. Local ad-hoc macOS builds are not
