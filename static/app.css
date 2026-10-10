@@ -8,7 +8,7 @@
    ========================================================================== */
 :root{
   color-scheme:light;
-  --bg:#f4f6f9; --surface:#ffffff; --surface-2:#f2f4f7; --surface-3:#e9edf2;
+  --bg:#fafafa; --surface:#ffffff; --surface-2:#f2f4f7; --surface-3:#e9edf2;
   --border:#e0e5ec; --border-2:#cdd5e0;
   --text:#111721; --text-2:#57616f; --text-3:#8892a2;
   --accent:#2a78d6; --accent-soft:rgba(42,120,214,.10);
