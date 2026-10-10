@@ -56,7 +56,7 @@ opens it. Use `--no-launch` to install without opening. Linux keeps the browser 
 | Platform | Native client | Installation requirements |
 | --- | --- | --- |
 | macOS 13+ | SwiftUI/AppKit menu item, token/spend popover and embedded dashboard | Python to run the installer; Swift 5.8+ and a macOS SDK to build the app. The app then uses its bundled Python. |
-| Windows 10/11 | Native notification-area icon/menu, token/spend totals and dashboard in your browser | Standard Python 3.8+ including `pythonw.exe`. No pip packages or separate GUI toolkit. |
+| Windows 10/11 | Branded tray icon and native summary popover matching the macOS layout; dashboard in your browser | Standard Python 3.8+ including `pythonw.exe`. No pip packages or separate GUI toolkit. |
 
 After installation, **web Settings → Menu bar / system tray** has a toggle to launch or
 quit the native app. Status reflects the app's heartbeat, not just a launch attempt. You
@@ -64,6 +64,14 @@ can also open **AgentTelemetry.app** in `~/Applications` or **AgentTelemetry** f
 Windows Start menu. The app's **Open at Login** and **Start monitoring when app opens**
 options are separate and off by default. Opening from the installer or web toggle starts
 monitoring for that launch. No dashboard setting is required to open an app manually.
+
+Both native popovers put a monitoring switch above today's token/spend cards, with
+expandable **Details & settings**, a dashboard button and always-visible refresh/quit
+controls. Windows follows the system light/dark or high-contrast theme, scales to the
+tray's monitor, and scrolls settings on smaller displays. Tab/Space/Enter operate the
+native controls; Escape or clicking elsewhere closes the panel. Its default chart icon
+and optional numeric icon are accompanied by a text tooltip. Windows uses Segoe UI
+and opens the full dashboard in your browser; macOS uses its system font and embeds it.
 
 Both clients reuse a dashboard already running on port 7878 and stop only a backend they
 started. A web/native app using a custom dashboard port is not supported by the native

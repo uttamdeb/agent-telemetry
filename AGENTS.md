@@ -29,7 +29,13 @@ no third-party GUI dependency. Linux stays on the existing browser workflow.
 - `native.py` owns the installed-client manifest, launch/quit requests and heartbeat
   protocol in the separate **AgentTelemetryNative** application-support directory.
   Do not put those files into the ledger directory: import requires an empty destination.
-- `windows/tray.py` owns Win32 UI and its serialized worker queue;
+- `windows/tray.py` owns the notification icon and serialized worker queue;
+  `windows/popover.py` renders the native counterpart of macOS `StatusMenu` using
+  standard button/combobox HWNDs, with theme/DPI support, clipped scrollable settings
+  and a fixed footer. `windows/presentation.py` holds portable layout/date/position logic;
+  `windows/win32.py` holds typed ctypes bindings. Bind each API overload independently
+  (`dll[name]`), because `getattr` caches a shared object whose argtypes can be overwritten.
+  The installer explicitly includes these modules and `windows/assets/*.ico` by name.
   `windows/monitor.py` owns testable backend attachment, ownership, stale summaries and import.
 - `macos/AgentTelemetryMac` owns SwiftUI/AppKit UI, app-owned Python and WKWebView.
   `NativeControl.swift` handles the same heartbeat/control-file protocol as Windows.
@@ -57,6 +63,11 @@ no third-party GUI dependency. Linux stays on the existing browser workflow.
   immediate reread. Check lifecycle/cancellation **after** every readiness await.
 - Keep last successful figures but mark failures stale and retry. Preserve the WebView's
   current query/hash across polling changes and app-owned backend restarts.
+- Windows visual changes require `python tests/run_windows_native.py --screenshots
+  windows-ui-fixtures` on Windows and inspection of its mock-data render artifacts.
+  An accepted Shell notification icon or successful HWND creation does not prove a
+  readable panel. Cover both themes, 100/150/200% scale, collapse/expand, keyboard,
+  outside dismissal, stale/retry and graceful-saving states. No real ledger in screenshots.
 - Keep retries alive when cadence changes during an outage. Windows queued work carries
   a monotonically increasing UI intent; an older operation cannot undo a newer Start/Stop.
   Keep the closing client's heartbeat alive until its owned backend has saved and exited,

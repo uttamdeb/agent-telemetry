@@ -109,13 +109,17 @@ For native changes, also run the actual OS checks:
 # macOS: compile the full app and reproduce display/lifecycle/navigation regressions
 swift build --package-path macos/AgentTelemetryMac
 python3 tests/run_mac_native.py
-# Windows: actual Win32 window, GDI icon and popup-menu handles; safe install without launch
+# Windows: actual controls, icon handles, rendering fixtures; safe install without launch
 python windows/tray.py --self-test
+python tests/run_windows_native.py --screenshots windows-ui-fixtures
 python install.py --no-launch
 ```
 
-The Windows self-test reports whether Explorer accepted the icon; a headless handle
-test alone does not prove a visible tray item. CI covers all three operating systems.
+The Windows self-test reports whether Explorer accepted the icon. The rendering suite
+exercises actual native controls and captures light/dark, 100/150/200% and failure/saving
+fixtures. Inspect those artifacts for clipping and legibility; a handle test alone does
+not establish visual quality or prove the user's own Explorer shows the item.
+CI covers all three operating systems.
 Use temporary ledgers/mock servers for automated tests and retain the failure/recovery
 checks. Full signed/notarized macOS packaging remains a separate distribution check.
 Also cover Stop/Start during queued work, cadence changes while the service is unavailable,

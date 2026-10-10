@@ -85,7 +85,7 @@ class Popover:
             (5, "Start monitoring automatically"), (7, "Import existing data…"), (12, "Retry")):
             handle = w.create_window(0, "BUTTON", title, 0x5001400b, 0, 0, 0, 0,
                                       self.panel if identifier in (5, 6, 7, 10, 11) else self.window,
-                                      identifier, tray.instance, None)
+                                      identifier + 100, tray.instance, None)
             if not handle:
                 raise C.WinError(C.get_last_error())
             self.controls[identifier] = handle
@@ -259,7 +259,7 @@ class Popover:
         w.text_color(dc, self.colors[tone])
         w.background_mode(dc, 1)
         try:
-            w.draw_text(dc, text, len(text), C.byref(rect), flags)
+            w.draw_text(dc, text, len(text), C.byref(rect), flags | 0x800)  # DT_NOPREFIX: show literal '&'.
         finally:
             w.select_object(dc, previous)
 
@@ -295,7 +295,7 @@ class Popover:
         self.text(dc, "Shared refresh", self.rect(21, 45 - self.scroll, 104, 24), 11, tone="muted")
 
     def draw_button(self, item):
-        identifier, dc, rect = item.id, item.dc, item.rect
+        identifier, dc, rect = item.id - 100, item.dc, item.rect
         enabled = w.is_enabled(item.window)
         focused = bool(item.state & 0x10)
         pressed = bool(item.state & 1)
@@ -397,6 +397,13 @@ class Popover:
                 return 0
             if message == 0x111:
                 identifier, event = wparam & 0xffff, (wparam >> 16) & 0xffff
+                # Native IDs deliberately avoid IDOK/IDCANCEL. Otherwise Escape
+                # routes to the monitoring button when it happens to have ID 2.
+                if identifier == 2 and not lparam:
+                    self.hide()
+                    return 0
+                if 100 < identifier < 120:
+                    identifier -= 100
                 if window == self.panel and (event == 6 or (identifier == 20 and event == 3)):
                     # Tab into a clipped setting scrolls it into view.
                     top = {10: 4, 11: 4, 20: 43, 6: 79, 5: 108, 7: 142}.get(identifier)
@@ -413,8 +420,6 @@ class Popover:
                     if 0 <= selected < len(INTERVALS):
                         self.tray.submit("interval", INTERVALS[selected][0])
                         self.update(force=True)
-                elif identifier == 2 and not lparam:  # IsDialogMessage Escape / IDCANCEL.
-                    self.hide()
                 elif identifier in self.controls and event == 0:
                     self.command(identifier)
                 return 0

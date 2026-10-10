@@ -10,6 +10,7 @@ from pathlib import Path
 import struct
 import sys
 import tempfile
+import time
 import zlib
 from unittest.mock import patch
 
@@ -90,6 +91,18 @@ def screenshot(window, destination):
         w.release_dc(None, dc)
 
 
+def pump():
+    """Let Windows finish queued layout/paint work before capturing its output."""
+    peek = w.api(w.U, "PeekMessageW", W.BOOL, C.POINTER(W.MSG), W.HWND, W.UINT, W.UINT, W.UINT)
+    deadline = time.monotonic() + .05
+    msg = W.MSG()
+    while time.monotonic() < deadline:
+        while peek(C.byref(msg), None, 0, 0, 1):
+            w.translate(C.byref(msg))
+            w.dispatch(C.byref(msg))
+        time.sleep(.005)
+
+
 def click(panel, identifier):
     w.send(panel.controls[identifier], 0xf5, 0, 0)  # BM_CLICK, actual native button routing.
     assert panel.error is None, panel.error
@@ -159,9 +172,13 @@ def main():
                         panel.update(force=True)
                         panel.reposition()
                         w.update_window(panel.window)
+                        pump()
+                        assert panel.expanded == expanded, ("Layout changed during paint", expanded, panel.expanded)
                         assert panel.error is None, panel.error
+                        print("Capture", dark, scale, expanded, panel.geometry)
                         screenshot(panel.window, options.screenshots / ("%s-%s-%s.png" % (
                             "dark" if dark else "light", int(scale * 100), "expanded" if expanded else "collapsed")))
+                        assert panel.expanded == expanded, "Printing toggled settings"
             # Failure retains the last figures and exposes Retry, not a blank card.
             app.monitor._state("Dashboard unavailable; showing the last successful refresh. Retrying…", True)
             panel.update(force=True)
