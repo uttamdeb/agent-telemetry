@@ -12,6 +12,8 @@ import native
 ROOT = Path(__file__).resolve().parent
 BACKEND_FILES = ("dashboard.py", "parser.py", "native.py", "index.html", "chart.umd.min.js",
                  "manifest.json", "sw.js", "LICENSE")
+WINDOWS_FILES = ("tray.py", "monitor.py", "win32.py", "popover.py", "presentation.py")
+WINDOWS_ASSETS = ("AgentTelemetry.ico", "TrayIcon.ico")
 
 
 def copy_windows_payload(destination):
@@ -22,8 +24,12 @@ def copy_windows_payload(destination):
         shutil.copy2(str(ROOT / name), str(destination / name))
     shutil.copytree(str(ROOT / "static"), str(destination / "static"))
     (destination / "windows").mkdir()
-    for name in ("tray.py", "monitor.py"):
+    for name in WINDOWS_FILES:
         shutil.copy2(str(ROOT / "windows" / name), str(destination / "windows" / name))
+    (destination / "windows" / "assets").mkdir()
+    for name in WINDOWS_ASSETS:
+        shutil.copy2(str(ROOT / "windows" / "assets" / name),
+                     str(destination / "windows" / "assets" / name))
     forbidden = {".usage_cache.json", ".peers.json", ".peers", "server.log"}
     if any(path.name in forbidden for path in destination.rglob("*")):
         raise ValueError("Refusing to install a payload containing personal telemetry.")
@@ -64,9 +70,11 @@ def install_windows():
         "$s = $w.CreateShortcut((Join-Path $p 'AgentTelemetry.lnk')); "
         "$s.TargetPath = $env:AT_INSTALL_PYTHONW; "
         "$s.Arguments = $env:AT_INSTALL_ARGUMENTS; "
-        "$s.WorkingDirectory = $env:AT_INSTALL_DIRECTORY; $s.Save()")
+        "$s.WorkingDirectory = $env:AT_INSTALL_DIRECTORY; "
+        "$s.IconLocation = $env:AT_INSTALL_ICON; $s.Save()")
     environment = dict(os.environ, AT_INSTALL_PYTHONW=str(pythonw),
-        AT_INSTALL_ARGUMENTS=subprocess.list2cmdline([str(entry)]), AT_INSTALL_DIRECTORY=str(target))
+        AT_INSTALL_ARGUMENTS=subprocess.list2cmdline([str(entry)]), AT_INSTALL_DIRECTORY=str(target),
+        AT_INSTALL_ICON=str(target / "windows" / "assets" / "AgentTelemetry.ico"))
     subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
                    check=True, env=environment)
     return {"platform": "win32", "entry": str(entry), "command": [str(pythonw), str(entry)], "version": "2.0.0"}

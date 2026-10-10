@@ -234,8 +234,11 @@ class NativeTests(unittest.TestCase):
             (root / "static").mkdir()
             (root / "static" / "app.css").write_text("fixture")
             (root / "windows").mkdir()
-            for name in ("tray.py", "monitor.py"):
+            for name in install.WINDOWS_FILES:
                 (root / "windows" / name).write_text("fixture")
+            (root / "windows" / "assets").mkdir()
+            for name in install.WINDOWS_ASSETS:
+                (root / "windows" / "assets" / name).write_bytes(b"icon fixture")
             for name in (".usage_cache.json", ".peers.json", "server.log"):
                 (root / name).write_text("personal fixture")
             (root / ".peers").mkdir()

@@ -20,101 +20,14 @@ from windows.monitor import Monitor, import_ledger, login_enabled, toggle_login
 if sys.platform != "win32":
     raise SystemExit("The system tray app runs on Windows. Run python install.py to select your OS.")
 
-U, S, K, G, O = (C.WinDLL(name, use_last_error=True) for name in
-                 ("user32", "shell32", "kernel32", "gdi32", "ole32"))
-LRESULT = C.c_ssize_t
-WNDPROC = C.WINFUNCTYPE(LRESULT, W.HWND, W.UINT, W.WPARAM, W.LPARAM)
-
-
-class WNDCLASS(C.Structure):
-    _fields_ = [("style", W.UINT), ("proc", WNDPROC), ("extra", C.c_int),
-        ("windowExtra", C.c_int), ("instance", W.HINSTANCE), ("icon", W.HICON),
-        ("cursor", W.HANDLE), ("background", W.HBRUSH), ("menu", W.LPCWSTR), ("name", W.LPCWSTR)]
-
-
-class GUID(C.Structure):
-    _fields_ = [("a", W.DWORD), ("b", W.WORD), ("c", W.WORD), ("d", C.c_ubyte * 8)]
-
-
-class NOTIFYICONDATA(C.Structure):
-    _fields_ = [("size", W.DWORD), ("window", W.HWND), ("id", W.UINT),
-        ("flags", W.UINT), ("message", W.UINT), ("icon", W.HICON),
-        ("tip", W.WCHAR * 128), ("state", W.DWORD), ("mask", W.DWORD),
-        ("info", W.WCHAR * 256), ("version", W.UINT), ("title", W.WCHAR * 64),
-        ("infoFlags", W.DWORD), ("guid", GUID), ("balloonIcon", W.HICON)]
-
-
-class ICONINFO(C.Structure):
-    _fields_ = [("icon", W.BOOL), ("x", W.DWORD), ("y", W.DWORD),
-                ("mask", W.HBITMAP), ("color", W.HBITMAP)]
-
-
-class BROWSEINFO(C.Structure):
-    _fields_ = [("owner", W.HWND), ("root", C.c_void_p), ("display", W.LPWSTR),
-        ("title", W.LPCWSTR), ("flags", W.UINT), ("callback", C.c_void_p),
-        ("parameter", W.LPARAM), ("image", C.c_int)]
-
-
-def api(dll, name, result, *arguments):
-    function = getattr(dll, name)
-    function.restype, function.argtypes = result, list(arguments)
-    return function
-
-
-get_module = api(K, "GetModuleHandleW", W.HMODULE, W.LPCWSTR)
-register_class = api(U, "RegisterClassW", W.ATOM, C.POINTER(WNDCLASS))
-create_window = api(U, "CreateWindowExW", W.HWND, W.DWORD, W.LPCWSTR, W.LPCWSTR,
-    W.DWORD, C.c_int, C.c_int, C.c_int, C.c_int, W.HWND, W.HMENU, W.HINSTANCE, C.c_void_p)
-default_proc = api(U, "DefWindowProcW", LRESULT, W.HWND, W.UINT, W.WPARAM, W.LPARAM)
-get_message = api(U, "GetMessageW", C.c_int, C.POINTER(W.MSG), W.HWND, W.UINT, W.UINT)
-translate = api(U, "TranslateMessage", W.BOOL, C.POINTER(W.MSG))
-dispatch = api(U, "DispatchMessageW", LRESULT, C.POINTER(W.MSG))
-post = api(U, "PostMessageW", W.BOOL, W.HWND, W.UINT, W.WPARAM, W.LPARAM)
-destroy_window = api(U, "DestroyWindow", W.BOOL, W.HWND)
-post_quit = api(U, "PostQuitMessage", None, C.c_int)
-set_timer = api(U, "SetTimer", C.c_size_t, W.HWND, C.c_size_t, W.UINT, C.c_void_p)
-notify = api(S, "Shell_NotifyIconW", W.BOOL, W.DWORD, C.POINTER(NOTIFYICONDATA))
-load_icon = api(U, "LoadIconW", W.HICON, W.HINSTANCE, C.c_void_p)
-destroy_icon = api(U, "DestroyIcon", W.BOOL, W.HICON)
-popup = api(U, "CreatePopupMenu", W.HMENU)
-append = api(U, "AppendMenuW", W.BOOL, W.HMENU, W.UINT, C.c_size_t, W.LPCWSTR)
-destroy_menu = api(U, "DestroyMenu", W.BOOL, W.HMENU)
-get_cursor = api(U, "GetCursorPos", W.BOOL, C.POINTER(W.POINT))
-foreground = api(U, "SetForegroundWindow", W.BOOL, W.HWND)
-track = api(U, "TrackPopupMenu", W.UINT, W.HMENU, W.UINT, C.c_int, C.c_int, C.c_int, W.HWND, C.c_void_p)
-message_box = api(U, "MessageBoxW", C.c_int, W.HWND, W.LPCWSTR, W.LPCWSTR, W.UINT)
-taskbar_created = api(U, "RegisterWindowMessageW", W.UINT, W.LPCWSTR)("TaskbarCreated")
-create_mutex = api(K, "CreateMutexW", W.HANDLE, C.c_void_p, W.BOOL, W.LPCWSTR)
-close_handle = api(K, "CloseHandle", W.BOOL, W.HANDLE)
-get_dc = api(U, "GetDC", W.HDC, W.HWND)
-release_dc = api(U, "ReleaseDC", C.c_int, W.HWND, W.HDC)
-compatible_dc = api(G, "CreateCompatibleDC", W.HDC, W.HDC)
-bitmap = api(G, "CreateCompatibleBitmap", W.HBITMAP, W.HDC, C.c_int, C.c_int)
-select_object = api(G, "SelectObject", W.HANDLE, W.HDC, W.HANDLE)
-delete_object = api(G, "DeleteObject", W.BOOL, W.HANDLE)
-delete_dc = api(G, "DeleteDC", W.BOOL, W.HDC)
-background_color = api(G, "SetBkColor", W.DWORD, W.HDC, W.DWORD)
-text_color = api(G, "SetTextColor", W.DWORD, W.HDC, W.DWORD)
-text_out = api(G, "ExtTextOutW", W.BOOL, W.HDC, C.c_int, C.c_int, W.UINT,
-               C.POINTER(W.RECT), W.LPCWSTR, W.UINT, C.c_void_p)
-create_font = api(G, "CreateFontW", W.HANDLE, *([C.c_int] * 5 + [W.DWORD] * 8 + [W.LPCWSTR]))
-create_bitmap = api(G, "CreateBitmap", W.HBITMAP, C.c_int, C.c_int, W.UINT, W.UINT, C.c_void_p)
-create_icon = api(U, "CreateIconIndirect", W.HICON, C.POINTER(ICONINFO))
-browse = api(S, "SHBrowseForFolderW", C.c_void_p, C.POINTER(BROWSEINFO))
-path_from_id = api(S, "SHGetPathFromIDListW", W.BOOL, C.c_void_p, W.LPWSTR)
-free_id = api(O, "CoTaskMemFree", None, C.c_void_p)
-
-
-def compact(value):
-    if value >= 1000000:
-        return "%.1fM" % (value / 1000000)
-    if value >= 1000:
-        return "%.1fk" % (value / 1000)
-    return str(value)
+from windows.win32 import *  # Typed Win32 bindings, no third-party GUI toolkit.
+from windows.popover import Popover
+from windows.presentation import compact
 
 
 class Tray:
     def __init__(self, generation=None, self_test=False):
+        self.self_test = self_test
         self.settings_path = native.support_dir() / "tray-settings.json"
         try:
             self.settings = json.loads(self.settings_path.read_text(encoding="utf-8"))
@@ -127,13 +40,18 @@ class Tray:
                                sys.executable, interval)
         self.generation = None if self_test else native.register(generation)
         self.quitting = False
+        self.pending_ui = 0
         self.queue = queue.Queue()
         self.next_poll = 0
         self.custom_icon = None
         self.icon_key = None
         self.callback = WNDPROC(self.window_proc)  # keep callback alive
         self.instance = get_module(None)
-        self.base_icon = load_icon(None, C.c_void_p(32512))
+        # A real, DPI-sized chart glyph, never the generic Python/application icon.
+        self.base_icon = load_image(None, str(ROOT / "windows" / "assets" / "TrayIcon.ico"),
+                                    1, 32, 32, 0x10)
+        if not self.base_icon:
+            raise C.WinError(C.get_last_error())
         window_class = WNDCLASS(0, self.callback, 0, 0, self.instance, self.base_icon,
                                None, None, None, "AgentTelemetryTray")
         if not register_class(C.byref(window_class)):
@@ -148,18 +66,8 @@ class Tray:
         self.nid.flags, self.nid.message = 1 | 2 | 4, 0x8001
         self.nid.icon, self.nid.tip = self.base_icon, "AgentTelemetry"
         self.icon_added = bool(notify(0, C.byref(self.nid)))
+        self.popover = Popover(self)
         if self_test:
-            # Hosted Windows runners may have no Explorer; exercise Win32 handles,
-            # GDI numeric icons and menu construction without claiming Explorer UI.
-            icon = self.numbers_icon("1.2M", "$2.34")
-            if not icon:
-                raise C.WinError(C.get_last_error())
-            destroy_icon(icon)
-            menu = self.build_menu()
-            destroy_menu(menu)
-            print("PASS Win32 hidden window, numeric icon and native popup menu; Explorer icon added:", self.icon_added)
-            notify(2, C.byref(self.nid))
-            destroy_window(self.window)
             return
         if self.generation is None:
             destroy_window(self.window)
@@ -172,6 +80,19 @@ class Tray:
     def save_settings(self):
         native._write("tray-settings.json", self.settings)
 
+    def test_handles(self):
+        # Hosted runners may have no Explorer. Visual/interaction fixtures are
+        # tested separately by tests/run_windows_native.py, using no real data.
+        try:
+            icon = self.numbers_icon("1.2M", "$2.34")
+            if not icon:
+                raise C.WinError(C.get_last_error())
+            destroy_icon(icon)
+            self.popover.update(force=True)
+            print("PASS Win32 window, branded/numeric icons and native popover; Explorer icon added:", self.icon_added)
+        finally:
+            destroy_window(self.window)
+
     def submit(self, operation, argument=None):
         if self.quitting and operation != "quit":
             return
@@ -179,6 +100,10 @@ class Tray:
         if operation in ("start", "stop", "quit") or (operation == "open" and not self.monitor.requested.is_set()):
             intent = self.monitor.request(operation in ("start", "open"))
         self.queue.put((operation, argument, intent))
+        if operation != "poll":
+            self.pending_ui += 1
+        if hasattr(self, "popover"):
+            self.popover.update(force=True)
 
     def worker(self):
         while True:
@@ -206,7 +131,9 @@ class Tray:
                 self.monitor._state("Could not complete the action: " + str(error), True)
             finally:
                 self.queue.task_done()
-                post(self.window, 0x8002, int(quit_ok), int(operation == "quit"))
+                # Only the UI thread updates HWNDs and its pending-operation count.
+                post(self.window, 0x8002, int(quit_ok),
+                     int(operation == "quit") | (int(operation != "poll") << 1))
 
     def numbers_icon(self, tokens, spend):
         dc = get_dc(None)
@@ -250,32 +177,6 @@ class Tray:
         else:
             notify(1, C.byref(self.nid))
 
-    def build_menu(self):
-        menu = popup()
-        snapshot = self.monitor.snapshot()
-        today = snapshot["date"] == time.strftime("%Y-%m-%d")
-        append(menu, 2, 0, "AgentTelemetry — " + snapshot["status"])
-        append(menu, 2, 0, "Today: " + (format(snapshot["tokens"], ",") if today else "unavailable") + " tokens")
-        append(menu, 2, 0, "Estimated API spend: " + ("$%.2f" % snapshot["spend"] if today else "unavailable"))
-        if snapshot["stale"]:
-            append(menu, 2, 0, "Figures are from the last successful refresh")
-        append(menu, 0x800, 0, None)
-        append(menu, 0, 1, "Open dashboard")
-        append(menu, 0, 2, "Stop monitoring" if snapshot["requested"] else "Start monitoring")
-        append(menu, 0 if snapshot["requested"] else 2, 3, "Refresh now")
-        append(menu, 0x800, 0, None)
-        append(menu, 8 if self.settings.get("display") == "numbers" else 0, 4, "Show numbers in tray icon")
-        for identifier, seconds in ((15, 15), (60, 60), (300, 300), (900, 900), (1000, 0)):
-            append(menu, (8 if self.monitor.interval == seconds else 0) | (0 if snapshot["requested"] else 2), identifier,
-                   "Shared refresh: " + ("Manual" if not seconds else "15 seconds" if seconds == 15
-                   else "%d minute%s" % (seconds // 60, "" if seconds == 60 else "s")))
-        append(menu, 8 if self.settings.get("auto_start") else 0, 5, "Start monitoring when app opens")
-        append(menu, 8 if self.login_enabled() else 0, 6, "Open at Login")
-        append(menu, 2 if snapshot["requested"] or self.monitor.process else 0, 7, "Import existing data…")
-        append(menu, 0x800, 0, None)
-        append(menu, 0, 8, "Quit AgentTelemetry")
-        return menu
-
     def login_enabled(self):
         return login_enabled(sys.executable, Path(__file__).resolve())
 
@@ -295,26 +196,13 @@ class Tray:
         finally:
             free_id(identifier)
 
-    def menu(self):
-        menu = self.build_menu()
-        try:
-            position = W.POINT()
-            get_cursor(C.byref(position))
-            foreground(self.window)
-            command = track(menu, 0x100 | 0x2, position.x, position.y, 0, self.window, None)
-            post(self.window, 0, 0, 0)
-        finally:
-            destroy_menu(menu)
+    def command(self, command):
         if command == 1:
             self.submit("open")
         elif command == 2:
             self.submit("stop" if self.monitor.requested.is_set() else "start")
         elif command == 3:
             self.submit("refresh")
-        elif command == 4:
-            self.settings["display"] = "icon" if self.settings.get("display") == "numbers" else "numbers"
-            self.save_settings()
-            self.update_icon()
         elif command == 5:
             self.settings["auto_start"] = not self.settings.get("auto_start", False)
             self.save_settings()
@@ -324,6 +212,8 @@ class Tray:
             self.choose_import()
         elif command == 8:
             self.quit()
+        elif command == 12:
+            self.submit("start")
         elif command in (15, 60, 300, 900, 1000):
             self.submit("interval", 0 if command == 1000 else command)
 
@@ -337,7 +227,7 @@ class Tray:
             if message == taskbar_created and hasattr(self, "nid"):
                 notify(0, C.byref(self.nid))
             elif message == 0x8001 and lparam in (0x202, 0x205):
-                self.menu()
+                self.popover.show()
             elif message == 0x113:
                 if not native.heartbeat(self.generation, closing=self.quitting):
                     self.quit()
@@ -345,21 +235,34 @@ class Tray:
                     self.next_poll = time.time() + 1
                     self.submit("poll")
                 self.update_icon()
+                self.popover.update()
             elif message == 0x8002:
+                if lparam & 2:
+                    self.pending_ui = max(0, self.pending_ui - 1)
                 if wparam:
                     native.unregister(self.generation)
                     destroy_window(window)
-                elif lparam:
+                elif lparam & 1:
                     self.quitting = False
                 else:
                     self.update_icon()
+                if not wparam:
+                    self.popover.update(force=True)
+            elif message == 0x8003:
+                self.popover.hide()
+                message_box(window, "The panel could not be drawn. See the local tray.log for details.",
+                            "AgentTelemetry", 0x10)
             elif message == 0x10:
                 self.quit()
             elif message == 0x2:
+                if hasattr(self, "popover"):
+                    self.popover.close()
                 if hasattr(self, "nid"):
                     notify(2, C.byref(self.nid))
                 if self.custom_icon:
                     destroy_icon(self.custom_icon)
+                if self.base_icon:
+                    destroy_icon(self.base_icon)
                 post_quit(0)
             else:
                 return default_proc(window, message, wparam, lparam)
@@ -376,8 +279,9 @@ class Tray:
                 raise C.WinError(C.get_last_error())
             if result == 0:
                 break
-            translate(C.byref(message))
-            dispatch(C.byref(message))
+            if not is_visible(self.popover.window) or not dialog_message(self.popover.window, C.byref(message)):
+                translate(C.byref(message))
+                dispatch(C.byref(message))
 
 
 def main():
@@ -385,6 +289,7 @@ def main():
     arguments.add_argument("--native-generation")
     arguments.add_argument("--self-test", action="store_true")
     options = arguments.parse_args()
+    enable_dpi_awareness()
     if not options.self_test:
         native.support_dir().mkdir(parents=True, exist_ok=True)
         # pythonw has no console streams; keep failures inspectable locally.
@@ -399,7 +304,9 @@ def main():
     api(O, "CoInitializeEx", C.c_long, C.c_void_p, W.DWORD)(None, 2)
     try:
         app = Tray(options.native_generation, options.self_test)
-        if not options.self_test and app.generation is not None:
+        if options.self_test:
+            app.test_handles()
+        elif app.generation is not None:
             app.run()
     finally:
         api(O, "CoUninitialize", None)()

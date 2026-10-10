@@ -21,6 +21,14 @@ jobs:
       - if: runner.os == 'Windows'
         run: python windows/tray.py --self-test
       - if: runner.os == 'Windows'
+        run: python tests/run_windows_native.py --screenshots windows-ui-fixtures
+      - if: runner.os == 'Windows' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-ui-fixtures
+          path: windows-ui-fixtures/*.png
+          if-no-files-found: warn
+      - if: runner.os == 'Windows'
         run: python install.py --no-launch
       - if: runner.os == 'macOS'
         run: swift build --package-path macos/AgentTelemetryMac
