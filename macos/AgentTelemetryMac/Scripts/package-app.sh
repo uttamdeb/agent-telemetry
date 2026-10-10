@@ -31,7 +31,7 @@ AT_TEMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$AT_TEMP_DIR"' EXIT
 
 mkdir -p "$AT_OUTPUT_DIR"
-AT_SDK_PATH="$(xcrun --sdk macosx --show-sdk-path)"
+AT_SDK_PATH="${AGENT_TELEMETRY_SDK_PATH:-$(xcrun --sdk macosx --show-sdk-path)}"
 AT_EXECUTABLE="$AT_TEMP_DIR/AgentTelemetryMac"
 AT_SWIFT_SOURCES=("$AT_PACKAGE_DIR"/Sources/AgentTelemetryMac/*.swift)
 swiftc -sdk "$AT_SDK_PATH" -target "$AT_ARCH-apple-macosx13.0" \
@@ -69,7 +69,7 @@ cp "$AT_ICON_MASTER" "$AT_ICONSET_DIR/icon_512x512@2x.png"
 
 AT_BACKEND_DIR="$AT_APP_PATH/Contents/Resources/AgentTelemetry"
 mkdir -p "$AT_BACKEND_DIR"
-cp "$AT_REPO_ROOT/dashboard.py" "$AT_REPO_ROOT/parser.py" \
+cp "$AT_REPO_ROOT/dashboard.py" "$AT_REPO_ROOT/parser.py" "$AT_REPO_ROOT/native.py" \
    "$AT_REPO_ROOT/index.html" "$AT_REPO_ROOT/chart.umd.min.js" \
    "$AT_REPO_ROOT/manifest.json" "$AT_REPO_ROOT/sw.js" \
    "$AT_REPO_ROOT/LICENSE" "$AT_BACKEND_DIR/"
@@ -117,7 +117,7 @@ while IFS= read -r -d '' AT_FILE; do
       /usr/bin/codesign --force --options runtime --timestamp --sign "$AT_SIGN_IDENTITY" "$AT_FILE"
     fi
   fi
-done < <(find "$AT_APP_PATH/Contents" -type f -print | sed -n '1!G;h;$p')
+done < <(find "$AT_APP_PATH/Contents" -type f -print0)
 if [[ "$AT_SIGN_IDENTITY" == "-" ]]; then
   /usr/bin/codesign --force --sign - "$AT_APP_PATH"
 else

@@ -8,6 +8,7 @@ struct AgentTelemetryApp: App {
     @StateObject private var settings: AppSettings
     @StateObject private var backend: BackendController
     @StateObject private var menuBarPopover = MenuBarPopoverController()
+    @StateObject private var nativeControl = NativeControl()
 
     init() {
         let settings = AppSettings()
@@ -24,16 +25,27 @@ struct AgentTelemetryApp: App {
             backend: backend,
             settings: settings,
             openDashboard: { openDashboard() },
-            quit: { backend.stop { NSApp.terminate(nil) } }
+            quit: { quit() }
         )
+        let _ = nativeControl.start(quit: { quit() })
 
         WindowGroup("AgentTelemetry", id: "dashboard") {
             DashboardWindow(backend: backend, settings: settings)
+                .onAppear {
+                    if nativeControl.requestedFromDashboard { backend.start() }
+                }
         }
     }
 
     private func openDashboard() {
         backend.start(openDashboard: { openWindow(id: "dashboard") })
+    }
+
+    private func quit() {
+        backend.stop {
+            nativeControl.finish()
+            NSApp.terminate(nil)
+        }
     }
 
 }

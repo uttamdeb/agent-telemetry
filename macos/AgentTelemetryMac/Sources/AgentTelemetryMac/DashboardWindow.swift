@@ -8,8 +8,9 @@ struct DashboardWindow: View {
         Group {
             if backend.isReady {
                 DashboardWebView(
-                    url: backend.dashboardURL,
-                    refreshIntervalSeconds: settings.refreshIntervalSeconds
+                    url: backend.lastDashboardURL ?? backend.dashboardURL,
+                    refreshIntervalSeconds: settings.refreshIntervalSeconds,
+                    onNavigate: { backend.lastDashboardURL = $0 }
                 )
             } else {
                 VStack(spacing: 10) {

@@ -102,6 +102,10 @@ enum BackendStatus: Equatable {
 final class BackendController: ObservableObject {
     @Published private(set) var status: BackendStatus = .stopped
     @Published private(set) var summary = DailySummary.empty
+    @Published private(set) var summaryStale = false
+    @Published private(set) var lastSummaryUpdate: Date?
+    // Owned restarts can recreate the WebView; retain its current filters and tab.
+    var lastDashboardURL: URL?
 
     let dashboardURL = URL(string: "http://127.0.0.1:7878")!
 
@@ -130,6 +134,7 @@ final class BackendController: ObservableObject {
     }
 
     var isReady: Bool { status.isReady }
+    var isMonitoring: Bool { isReady || summaryStale }
 
     var canImportExistingData: Bool {
         if status == .stopped { return true }
@@ -139,6 +144,13 @@ final class BackendController: ObservableObject {
 
     func start(openDashboard: (() -> Void)? = nil) {
         if let openDashboard { pendingDashboardOpen = openDashboard }
+        if summaryStale {
+            Task {
+                await refreshSummary()
+                if isReady { openPendingDashboard() }
+            }
+            return
+        }
         if isReady {
             openPendingDashboard()
             Task { await refreshSummary() }
@@ -158,6 +170,7 @@ final class BackendController: ObservableObject {
 
     func stop(after: (() -> Void)? = nil) {
         lifecycle += 1
+        summaryStale = false
         healthTask?.cancel()
         summaryTask?.cancel()
         summaryTask = nil
@@ -183,7 +196,7 @@ final class BackendController: ObservableObject {
     }
 
     func refreshNow() {
-        guard isReady else { start(); return }
+        guard isMonitoring else { start(); return }
         Task { await postRefreshAndReloadSummary() }
     }
 
@@ -224,7 +237,9 @@ final class BackendController: ObservableObject {
     }
 
     private func connectOrLaunch(lifecycle attempt: Int) async {
-        switch await probePort() {
+        let probe = await probePort()
+        guard !Task.isCancelled, lifecycle == attempt else { return }
+        switch probe {
         case let .service(health) where health.service == "agent-telemetry":
             if health.ready {
                 ownsProcess = false
@@ -316,7 +331,9 @@ final class BackendController: ObservableObject {
     private func waitUntilReady(lifecycle attempt: Int, owned: Bool) async {
         for _ in 0..<600 {
             guard !Task.isCancelled, lifecycle == attempt else { return }
-            switch await probePort() {
+            let probe = await probePort()
+            guard !Task.isCancelled, lifecycle == attempt else { return }
+            switch probe {
             case let .service(health) where health.service == "agent-telemetry" && health.ready:
                 ownsProcess = owned
                 isLegacyService = false
@@ -405,34 +422,55 @@ final class BackendController: ObservableObject {
     }
 
     private func refreshSummary() async {
-        guard isReady else { return }
+        guard isReady || summaryStale else { return }
+        let attempt = lifecycle
         do {
             let endpoint = isLegacyService ? "api/data" : "api/summary"
             var request = URLRequest(url: dashboardURL.appendingPathComponent(endpoint))
             request.timeoutInterval = isLegacyService ? 8 : 10
             let (data, response) = try await session.data(for: request)
-            guard (response as? HTTPURLResponse)?.statusCode == 200 else { return }
+            guard !Task.isCancelled, lifecycle == attempt else { return }
+            guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+                markSummaryStale()
+                return
+            }
             if isLegacyService {
                 summary = try JSONDecoder().decode(LegacyDashboardPayload.self, from: data).todaySummary
             } else {
                 summary = try JSONDecoder().decode(DailySummary.self, from: data)
             }
+            summaryStale = false
+            lastSummaryUpdate = Date()
+            status = ownsProcess ? .running : .connectedToExisting
         } catch {
-            // Keep the last known figures. The menu never displays raw server errors.
+            guard !Task.isCancelled, lifecycle == attempt else { return }
+            markSummaryStale()
         }
     }
 
+    private func markSummaryStale() {
+        summaryStale = true
+        status = .needsAttention("The dashboard is unavailable. Figures are from the last successful refresh; retrying.")
+    }
+
     private func postRefreshAndReloadSummary() async {
+        let attempt = lifecycle
         var request = URLRequest(url: dashboardURL.appendingPathComponent("api/refresh"))
         request.httpMethod = "POST"
         request.timeoutInterval = 60
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = Data("{}".utf8)
         do {
-            _ = try await session.data(for: request)
+            let (_, response) = try await session.data(for: request)
+            guard !Task.isCancelled, lifecycle == attempt else { return }
+            guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+                markSummaryStale()
+                return
+            }
             await refreshSummary()
         } catch {
-            // Leave the last successful summary visible.
+            guard !Task.isCancelled, lifecycle == attempt else { return }
+            markSummaryStale()
         }
     }
 
@@ -453,6 +491,8 @@ final class BackendController: ObservableObject {
     }
 
     private func processDidExit(status exitStatus: Int32) {
+        lifecycle += 1
+        summaryStale = false
         process = nil
         ownsProcess = false
         isLegacyService = false

@@ -49,10 +49,10 @@ final class MenuBarPopoverController: NSObject, ObservableObject, NSPopoverDeleg
         popover.contentViewController = host
 
         backend.$status
-            .sink { [weak self] _ in self?.updateStatusItem() }
+            .sink { [weak self] status in self?.updateStatusItem(status: status) }
             .store(in: &subscriptions)
         backend.$summary
-            .sink { [weak self] _ in self?.updateStatusItem() }
+            .sink { [weak self] summary in self?.updateStatusItem(summary: summary) }
             .store(in: &subscriptions)
         settings.$menuBarDisplay
             .sink { [weak self] display in self?.updateStatusItem(display: display) }
@@ -94,22 +94,25 @@ final class MenuBarPopoverController: NSObject, ObservableObject, NSPopoverDeleg
         popover.contentSize = NSSize(width: 310, height: fitted.height)
     }
 
-    private func updateStatusItem(display: AppSettings.MenuBarDisplay? = nil) {
+    private func updateStatusItem(display: AppSettings.MenuBarDisplay? = nil,
+                                  summary: DailySummary? = nil, status: BackendStatus? = nil) {
         guard let button = statusItem?.button, let backend, let settings else { return }
         let display = display ?? settings.menuBarDisplay
+        let summary = summary ?? backend.summary
+        let status = status ?? backend.status
         button.title = ""
-        button.toolTip = backend.summary.date.isEmpty
+        button.toolTip = summary.date.isEmpty
             ? "AgentTelemetry; today's summary is not available"
-            : "AgentTelemetry; \(backend.summary.tokens) tokens today; estimated spend \(backend.summary.spend) dollars"
+            : "AgentTelemetry; \(summary.tokens) tokens today; estimated spend \(summary.spend) dollars"
 
         if display == .numbers {
-            button.image = menuBarNumbersImage(for: backend.summary)
+            button.image = menuBarNumbersImage(for: summary)
             button.contentTintColor = nil
             return
         }
 
         let symbol: String
-        switch backend.status {
+        switch status {
         case .starting, .stopping:
             symbol = "ellipsis.circle"
         case .needsAttention:

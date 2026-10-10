@@ -19,6 +19,7 @@ import gzip, hmac, io, ipaddress, secrets, socket, uuid, signal, urllib.parse, u
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import parser as P
+import native as N
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = HERE
@@ -1993,7 +1994,10 @@ class Handler(BaseHTTPRequestHandler):
                 "version": VERSION.get("describe") or VERSION.get("commit") or "development",
                 "ready": not bool(_meta.get("building")),
                 "building": bool(_meta.get("building")),
+                "pid": os.getpid(),
             }))
+        elif route == "/api/native":
+            self._send(200, json.dumps(N.status()))
         elif route == "/api/summary":
             try:
                 self._send(200, json.dumps(build_today_summary()))
@@ -2077,7 +2081,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         route = self.path.split("?")[0]
-        if route in ("/api/settings", "/api/cache", "/api/update", "/api/devices", "/api/refresh"):
+        if route in ("/api/settings", "/api/cache", "/api/update", "/api/devices", "/api/refresh", "/api/native", "/api/shutdown"):
             if not self._csrf_ok():
                 self._send(403, json.dumps({"error": "cross-site request refused"}))
                 return
@@ -2091,7 +2095,16 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(400, json.dumps({"error": "invalid JSON body"}))
                 return
             try:
-                if route == "/api/refresh":
+                if route == "/api/native":
+                    result = N.action(body.get("enabled"))
+                elif route == "/api/shutdown":
+                    token = os.environ.get("AGENT_TELEMETRY_CONTROL_TOKEN")
+                    if not token or not hmac.compare_digest(token, self.headers.get("X-AgentTelemetry-Control") or ""):
+                        self._send(403, json.dumps({"error": "only the owning native app can stop this service"}))
+                        return
+                    self.server.stopping.set()
+                    result = {"ok": True}
+                elif route == "/api/refresh":
                     refresh(verbose=False)
                     result = {"ok": True, "meta": dict(_meta)}
                 elif route == "/api/cache":
@@ -2184,6 +2197,7 @@ def main():
 
     BIND.update(host=args.host, port=args.port)
     srv = Server((args.host, args.port), Handler)
+    srv.stopping = stopping
     url = f"http://{args.host}:{args.port}"
     sys.stderr.write(f"\n  ✦ AgentTelemetry live at  {url}  ·  {DEVICE['name']}\n")
     sys.stderr.write(f"    refreshing every {args.interval}s · Ctrl-C to stop\n\n")

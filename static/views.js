@@ -1131,10 +1131,40 @@ function setPollMs(v){
   applyPollInterval();
 }
 
+let nativeSettingsTimer;
+async function loadNativeSettings(){
+  const box=document.getElementById("nativeAppBox");
+  if(!box) return;
+  try{
+    const r=await fetch("/api/native");
+    if(!r.ok) throw new Error("Could not read native app status.");
+    const state=await r.json();
+    if(!box.isConnected) return;
+    if(!state.supported){ box.innerHTML='<div class="stg-hint">Native menu apps support macOS and Windows. Use the browser dashboard on this OS.</div>'; return; }
+    box.innerHTML=`<label class="stg-field"><input type="checkbox" id="nativeAppToggle" ${state.requested?"checked":""} ${state.installed?"":"disabled"}> ${esc(state.label)}</label>
+      <div class="stg-hint">${!state.installed?"Install once with <code>python install.py</code>; it selects the app for your OS.":state.running?(state.requested?"Running":"Closing…"):(state.requested?"Waiting for the app to start…":"Off")}</div>
+      <div class="stg-note">Launch or quit the native menu app. Open at Login is a separate, optional setting inside that app. Quitting stops only a backend started by the native app.</div>
+      <div id="nativeAppMsg" class="stg-msg"></div>`;
+    document.getElementById("nativeAppToggle").onchange=async event=>{
+      const toggle=event.target, enabled=toggle.checked;
+      toggle.disabled=true;
+      const msg=document.getElementById("nativeAppMsg");
+      try{
+        const response=await fetch("/api/native",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({enabled})});
+        const result=await response.json();
+        if(!response.ok) throw new Error(result.error||"Could not change the native app.");
+        await loadNativeSettings();
+      }catch(e){ toggle.checked=!enabled; toggle.disabled=false; msg.textContent=e.message; msg.className="stg-msg err"; }
+    };
+  }catch(e){ if(box.isConnected) box.innerHTML='<div class="stg-msg err">'+esc(e.message)+'</div>'; }
+}
 function renderSettings(cfg){
+  clearInterval(nativeSettingsTimer);
   const days=cfg.claude_cleanup_days, def=cfg.claude_cleanup_default;
   openDrawer(`
     <div class="eyebrow">Settings</div>
+    <h2 class="stg-h">Menu bar / system tray</h2>
+    <div id="nativeAppBox"><div class="stg-hint">Loading…</div></div>
     <h2 class="stg-h">Claude Code log retention</h2>
     <div class="stg-note">Claude Code deletes its own session transcripts after this
       many days &mdash; the <code>cleanupPeriodDays</code> setting. Codex, by contrast,
@@ -1202,6 +1232,14 @@ function renderSettings(cfg){
     <div class="stg-msg" id="cacheMsg"></div>
     <div class="stg-path"><b>Cache file</b><span>${esc(cfg.cache_path||"")}</span></div>
   `);
+  loadNativeSettings();
+  nativeSettingsTimer=setInterval(()=>{
+    if(!document.getElementById("nativeAppBox")){ clearInterval(nativeSettingsTimer); return; }
+    // Do not replace controls or their errors while a user is operating them.
+    const toggle=document.getElementById("nativeAppToggle");
+    if(toggle?.disabled || document.getElementById("nativeAppMsg")?.textContent) return;
+    loadNativeSettings();
+  },4000);
   const msgEl=document.getElementById("stgMsg");
   const msg=(t,cls)=>{ msgEl.textContent=t; msgEl.className="stg-msg"+(cls?" "+cls:""); };
   const send=async(value,okText,btn)=>{

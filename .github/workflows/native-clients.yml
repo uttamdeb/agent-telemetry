@@ -1,0 +1,26 @@
+name: Native clients
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  backend:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python -m unittest discover -s tests -v
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node tests/test_frontend.js
+      - if: runner.os == 'Windows'
+        run: python windows/tray.py --self-test
+      - if: runner.os == 'Windows'
+        run: python install.py --no-launch
+      - if: runner.os == 'macOS'
+        run: swift build --package-path macos/AgentTelemetryMac

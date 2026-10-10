@@ -1,6 +1,11 @@
 import AppKit
 import SwiftUI
 
+@MainActor
+private final class DisclosureState: ObservableObject {
+    @Published var expanded = false
+}
+
 struct StatusMenu: View {
     @ObservedObject var backend: BackendController
     @ObservedObject var settings: AppSettings
@@ -8,11 +13,15 @@ struct StatusMenu: View {
     let quit: () -> Void
     let onDisclosureChange: (Bool) -> Void
 
-    @State private var detailsExpanded = false
+    @StateObject private var disclosure = DisclosureState()
+    private var detailsExpanded: Bool {
+        get { disclosure.expanded }
+        nonmutating set { disclosure.expanded = newValue }
+    }
 
     private var monitoringBinding: Binding<Bool> {
         Binding(
-            get: { backend.status.isActive },
+            get: { backend.isMonitoring },
             set: { enabled in enabled ? backend.start() : backend.stop() }
         )
     }
@@ -130,7 +139,7 @@ struct StatusMenu: View {
                 .labelsHidden()
                 .toggleStyle(.switch)
                 .disabled(backend.status == .starting || backend.status == .stopping)
-                .accessibilityLabel(backend.status.isActive ? "Stop monitoring" : "Start monitoring")
+                .accessibilityLabel(backend.isMonitoring ? "Stop monitoring" : "Start monitoring")
         }
         .padding(.bottom, 2)
     }
@@ -141,6 +150,10 @@ struct StatusMenu: View {
                 .font(.system(size: 8, weight: .bold))
                 .tracking(1)
                 .foregroundStyle(.secondary)
+            if backend.summaryStale {
+                Text("Last successful refresh; figures may be out of date")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
             HStack(alignment: .center, spacing: 0) {
                 metric(title: "Tokens used", value: summaryValue(tokens: true))
                 Divider().frame(height: 34).padding(.horizontal, 12)

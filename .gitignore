@@ -21,4 +21,8 @@ _*.png
 macos/**/.build/
 macos/**/build/
 dist/
+native-control.json
+native-status.json
+native-install.json
+tray-settings.json
 .DS_Store
