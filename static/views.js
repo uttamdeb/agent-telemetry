@@ -229,6 +229,50 @@ function renderHeat(d){
   document.getElementById("hmHint").textContent =
     "tokens by local time × weekday · darker means more" + (dimFiltered()?" · tool + date filters only":"");
 }
+function renderActivityPatterns(d){
+  const host=document.getElementById("activityPatterns");
+  const hint=document.getElementById("activityPatternsHint");
+  const rangeSeg=document.getElementById("activityRangeSeg");
+  const viewSeg=document.getElementById("activityViewSeg");
+  if(!host||!hint||!rangeSeg||!viewSeg) return;
+  [...rangeSeg.children].forEach(b=>b.classList.toggle("on",b.dataset.ar===S.activityRange));
+  [...viewSeg.children].forEach(b=>b.classList.toggle("on",b.dataset.av===S.activityView));
+
+  let rows=[];
+  if(S.activityView==="time"){
+    const buckets=Array.from({length:8},(_,i)=>({label:`${i*3%12||12} ${i<4?"AM":"PM"}`,value:0}));
+    for(const h of d.hourly){ const i=Math.max(0,Math.min(7,Math.floor(+h.hour/3))); buckets[i].value+=h.tokens||0; }
+    rows=buckets;
+    hint.textContent="tokens grouped into 3-hour local time windows"+(dimFiltered()?" · tool + date filters only":"");
+  }else{
+    const grouped={};
+    for(const r of d.recs){
+      const date=new Date(r.date+"T00:00:00");
+      let key=r.date;
+      if(S.activityRange==="year") key=r.date.slice(0,4);
+      else if(S.activityRange==="month") key=r.date.slice(0,7);
+      else { const day=(date.getDay()+6)%7; date.setDate(date.getDate()-day); key=dkey(date); }
+      grouped[key]=(grouped[key]||0)+recTokens(r);
+    }
+    const keys=Object.keys(grouped).sort();
+    const formatKey=key=>{
+      if(S.activityRange==="year") return key;
+      if(S.activityRange==="month"){ const [y,m]=key.split("-"); return `${MONTHS[+m-1]} ${y}`; }
+      const date=new Date(key+"T00:00:00"); return `Week of ${MONTHS[date.getMonth()]} ${date.getDate()}`;
+    };
+    rows=keys.slice(-12).map(key=>({label:formatKey(key),value:grouped[key]}));
+    hint.textContent=`tokens grouped by ${S.activityRange} in the selected range`+(keys.length>12?" · showing latest 12":"");
+  }
+  const max=Math.max(...rows.map(r=>r.value),0);
+  host.innerHTML=rows.some(r=>r.value)
+    ? `<div class="activity-pattern-list">${rows.map(r=>`
+        <div class="activity-pattern-row">
+          <span class="activity-pattern-label">${esc(r.label)}</span>
+          <span class="activity-pattern-track"><span class="activity-pattern-fill" style="width:${max?Math.max(1,r.value/max*100):0}%"></span></span>
+          <span class="activity-pattern-value">${fmtTok(r.value)}</span>
+        </div>`).join("")}</div>`
+    : `<div class="empty activity-pattern-empty">No activity in this range.</div>`;
+}
 function renderComposition(d){
   const KINDS=[["in","Input","--k-in"],["cr","Cache read","--k-cr"],
                ["cc","Cache write","--k-cw"],["out","Output","--k-out"]];
@@ -261,7 +305,7 @@ function viewOverview(d){
     byDay[r.date]=(byDay[r.date]||0)+recTokens(r); max=Math.max(max,byDay[r.date]);
   }
   renderCalendar(byDay, max, day=>{ S.preset="custom"; S.from=day; S.to=day; syncRangeUI(); renderAll(); });
-  renderDaily(d); renderToolShare(d); renderHeat(d); renderComposition(d);
+  renderDaily(d); renderToolShare(d); renderHeat(d); renderActivityPatterns(d); renderComposition(d);
 }
 
 /* ---------------- helpers shared by the analytic views ---------------- */
@@ -1209,6 +1253,10 @@ document.addEventListener("click",e=>{
     if(p.id==="rateSeg") S.rateMetric=seg.dataset.m;
     if(p.id==="ideMetricSeg") S.ideMetric=seg.dataset.m;
     [...p.children].forEach(x=>x.classList.toggle("on",x===seg)); renderAll(); return; }
+  const activityRange=e.target.closest("#activityRangeSeg button");
+  if(activityRange){ S.activityRange=activityRange.dataset.ar; renderAll(); return; }
+  const activityView=e.target.closest("#activityViewSeg button");
+  if(activityView){ S.activityView=activityView.dataset.av; renderAll(); return; }
   const lg=e.target.closest(".li[data-lg]");
   if(lg){ const id=lg.dataset.lg, k=lg.dataset.k;
     S.muted[id]=S.muted[id]||new Set();

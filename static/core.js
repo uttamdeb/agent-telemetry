@@ -86,6 +86,7 @@ const S = {
   search:"",
   exactOnly:false,
   metric:"tokens", projMetric:"tokens", provMetric:"cost", rateMetric:"all", ideMetric:"tokens",
+  activityRange:"month", activityView:"period",
   live:true,
   muted:{},             // chartId -> Set of muted series labels
   sessSort:{key:"end",dir:-1}, modelSort:{key:"cost",dir:-1},

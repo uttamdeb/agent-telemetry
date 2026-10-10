@@ -177,6 +177,23 @@
           </div>
           <div class="hm-wrap" id="heatmap"></div>
         </div>
+        <div class="card col-12 activity-pattern-card">
+          <div class="head">
+            <div><h3>Activity patterns</h3><div class="hint" id="activityPatternsHint">tokens grouped by month in the selected range</div></div>
+            <div class="activity-pattern-controls">
+              <div class="seg" id="activityRangeSeg" aria-label="Activity grouping">
+                <button data-ar="week">Week</button>
+                <button data-ar="month" class="on">Month</button>
+                <button data-ar="year">Year</button>
+              </div>
+              <div class="seg" id="activityViewSeg" aria-label="Activity view">
+                <button data-av="period" class="on">Periods</button>
+                <button data-av="time">Time of day</button>
+              </div>
+            </div>
+          </div>
+          <div id="activityPatterns"></div>
+        </div>
         <div class="card col-8">
           <div class="head">
             <div><h3>Daily activity</h3><div class="hint" id="dailyHint">stacked by tool</div></div>
