@@ -155,6 +155,8 @@ background_mode = api(G, "SetBkMode", C.c_int, W.HDC, C.c_int)
 show_scrollbar = api(U, "ShowScrollBar", W.BOOL, W.HWND, C.c_int, W.BOOL)
 set_scroll = api(U, "SetScrollInfo", C.c_int, W.HWND, C.c_int, C.POINTER(SCROLLINFO), W.BOOL)
 get_scroll = api(U, "GetScrollInfo", W.BOOL, W.HWND, C.c_int, C.POINTER(SCROLLINFO))
+round_region = api(G, "CreateRoundRectRgn", W.HANDLE, C.c_int, C.c_int, C.c_int, C.c_int, C.c_int, C.c_int)
+set_region = api(U, "SetWindowRgn", C.c_int, W.HWND, W.HANDLE, W.BOOL)
 
 
 def enable_dpi_awareness():

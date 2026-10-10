@@ -4,6 +4,7 @@ Standard button/combobox HWNDs provide keyboard navigation and accessibility nam
 owner drawing supplies the shared card layout instead of a long system context menu.
 Network, parsing and shutdown work stays on Tray's existing serialized worker.
 """
+from pathlib import Path
 import time
 import traceback
 
@@ -49,6 +50,9 @@ class Popover:
         self.scale = 1
         self.dark = None  # OS preference; explicit overrides used only by fixtures.
         self.colors = palette()
+        self.header_icon = w.load_image(None, str(Path(__file__).parent / "assets" / "TrayIcon.ico"), 1, 64, 64, 0x10)
+        if not self.header_icon:
+            raise C.WinError(C.get_last_error())
         self.fonts = {}
         self.controls = {}
         self.labels = {}
@@ -207,6 +211,10 @@ class Popover:
     def reposition(self):
         x, y = position(self.anchor, self.work, (self.p(WIDTH), self.p(self.geometry["height"])), self.p(8))
         w.set_position(self.window, W.HWND(-1), x, y, self.p(WIDTH), self.p(self.geometry["height"]), 0x10)
+        region = w.round_region(0, 0, self.p(WIDTH) + 1, self.p(self.geometry["height"]) + 1, self.p(18), self.p(18))
+        if region and not w.set_region(self.window, region, True):
+            w.delete_object(region)
+        # SetWindowRgn owns a successfully installed region; do not delete it.
 
     def show(self):
         if w.is_visible(self.window):
@@ -266,10 +274,10 @@ class Popover:
     def paint(self, dc):
         g, colors, snapshot = self.geometry, self.colors, self.snapshot
         w.fill_rect(dc, C.byref(self.rect(0, 0, WIDTH, g["height"])), self.brush)
-        w.draw_icon(dc, self.p(14), self.p(19), self.tray.base_icon, self.p(28), self.p(28), 0, None, 3)
+        w.draw_icon(dc, self.p(14), self.p(19), self.header_icon, self.p(28), self.p(28), 0, None, 3)
         self.text(dc, "AgentTelemetry", self.rect(51, 18, 186, 18), 13, 600)
         status = snapshot["status"]
-        title = "Needs attention" if self.warning else "Starting…" if status.startswith("Starting") else "Saving history…" if self.tray.quitting or status.startswith("Stopping") else status
+        title = "Needs attention" if self.warning else "Starting…" if status.startswith("Starting") else "Saving history…" if self.tray.quitting or status.startswith("Stopping") else "History imported" if status.startswith("History imported") else status
         tone = "warning" if self.warning else "good" if snapshot["requested"] else "muted"
         self.box(dc, self.rect(51, 39, 5, 5), colors[tone], 2)
         self.text(dc, title, self.rect(60, 35, 178, 16), 10, tone=tone)
@@ -305,7 +313,7 @@ class Popover:
             on = self.snapshot["requested"]
             track = self.rect(5, 5, 40, 20)
             self.box(dc, track, self.colors["accent"] if on and enabled else self.colors["line"], 10)
-            self.box(dc, self.rect(27 if on else 7, 7, 16, 16), self.colors["on_accent"] if on else self.colors["bg"], 8)
+            self.box(dc, self.rect(27 if on else 7, 7, 16, 16), w.system_color(14) if self.colors["bg"] == w.system_color(5) else color("ffffff"), 8)
         elif identifier in (5, 6):
             checked = self.tray.settings.get("auto_start", False) if identifier == 5 else self.tray.login_enabled()
             self.box(dc, self.rect(0, 6, 14, 14), self.colors["accent"] if checked else self.colors["bg"], 3, self.colors["line"])
@@ -462,3 +470,4 @@ class Popover:
             w.delete_object(font)
         self.fonts.clear()
         w.delete_object(self.brush)
+        w.destroy_icon(self.header_icon)

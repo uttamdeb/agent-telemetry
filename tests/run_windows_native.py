@@ -55,7 +55,7 @@ class BITMAPINFO(C.Structure):
         ("used", W.DWORD), ("important", W.DWORD), ("colors", W.DWORD * 3)]
 
 
-def screenshot(window, destination):
+def screenshot(window, destination, background=None):
     rect = W.RECT()
     assert w.api(w.U, "GetWindowRect", W.BOOL, W.HWND, C.POINTER(W.RECT))(window, C.byref(rect))
     width, height = rect.right - rect.left, rect.bottom - rect.top
@@ -74,6 +74,10 @@ def screenshot(window, destination):
         data = raw.raw
         # A blank window/failed owner draw must not pass as a screenshot test.
         assert len({data[i:i+3] for i in range(0, len(data), 4)}) > 100
+        if background is not None:
+            i = ((height - 5) * width + width // 2) * 4
+            actual = data[i + 2] | data[i + 1] << 8 | data[i] << 16
+            assert actual == background, ("Footer area was not painted", actual, background)
         rows = bytearray()
         for y in range(height):
             rows.append(0)
@@ -177,7 +181,7 @@ def main():
                         assert panel.error is None, panel.error
                         print("Capture", dark, scale, expanded, panel.geometry)
                         screenshot(panel.window, options.screenshots / ("%s-%s-%s.png" % (
-                            "dark" if dark else "light", int(scale * 100), "expanded" if expanded else "collapsed")))
+                            "dark" if dark else "light", int(scale * 100), "expanded" if expanded else "collapsed")), panel.colors["bg"])
                         assert panel.expanded == expanded, "Printing toggled settings"
             # Failure retains the last figures and exposes Retry, not a blank card.
             app.monitor._state("Dashboard unavailable; showing the last successful refresh. Retrying…", True)
@@ -186,6 +190,31 @@ def main():
             screenshot(panel.window, options.screenshots / "dark-200-stale.png")
             click(panel, 12)
             assert app.calls[-1] == ("start", None)
+            # An actual clipped settings HWND on a small 200% work area; footer
+            # remains visible and keyboard focus scrolls Import into view.
+            panel.work = (0, 0, 1600, 960)
+            panel.anchor = (1500, 940, 1532, 960)
+            panel.update(force=True)
+            assert panel.geometry["height"] <= 480
+            assert panel.geometry["settings_height"] < 178
+            w.set_focus(panel.controls[7])
+            assert panel.scroll > 0
+            assert w.is_visible(panel.controls[8])
+            pump()
+            screenshot(panel.window, options.screenshots / "dark-200-small-screen.png", panel.colors["bg"])
+            app.monitor.request(False)
+            app.monitor._state("Monitoring off", False)
+            panel.update(force=True)
+            app.choose_import = lambda: app.calls.append(("import-dialog", None))
+            click(panel, 7)
+            assert app.calls[-1] == ("import-dialog", None)
+            assert not w.is_visible(panel.window)
+            panel.dismissed_at = 0
+            panel.show()
+            click(panel, 1)
+            assert app.calls[-1] == ("open", None) and not w.is_visible(panel.window)
+            panel.dismissed_at = 0
+            panel.show()
             # Busy shutdown must leave Quit visible and prevent a duplicate Quit.
             app.quitting = True
             panel.update(force=True)
@@ -204,7 +233,7 @@ def main():
             w.send(panel.window, 6, 0, 0)
             assert not w.is_visible(panel.window), "Outside activation must dismiss"
             assert panel.error is None, panel.error
-            print("PASS Windows native popover actions, focus, Escape/outside dismissal, stale/saving states and 14 real rendering fixtures")
+            print("PASS Windows native popover actions, focus, Escape/outside dismissal, scrolling, stale/saving states and 15 real rendering fixtures")
         finally:
             w.destroy_window(app.window)
 
