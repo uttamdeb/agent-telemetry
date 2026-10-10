@@ -25,4 +25,5 @@ native-control.json
 native-status.json
 native-install.json
 tray-settings.json
+windows-ui-fixtures/
 .DS_Store

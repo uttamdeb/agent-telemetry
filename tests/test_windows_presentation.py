@@ -46,6 +46,13 @@ class TrayPresentationTests(unittest.TestCase):
                 self.assertLessEqual(offset + length, len(raw))
             self.assertTrue({16, 20, 24, 32, 48, 64, 256} <= sizes)
 
+    def test_small_work_area_scrolls_settings_keeps_footer_visible(self):
+        g = layout(True, True, True, max_height=480)
+        self.assertEqual(g["height"], 480)
+        self.assertLess(g["settings_height"], 178)
+        self.assertGreater(g["settings_height"], 0)
+        self.assertLess(g["footer"] + 26, 480)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -132,7 +132,7 @@ def main():
             click(panel, 6)
             assert app.fixture_login is True
             w.send(panel.combo, 0x14e, 4, 0)
-            w.send(panel.window, 0x111, 20 | 1 << 16, panel.combo)
+            w.send(panel.panel, 0x111, 20 | 1 << 16, panel.combo)
             assert app.calls[-1] == ("interval", 0)
             app.monitor.interval = 0
             panel.update(force=True)

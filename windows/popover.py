@@ -43,7 +43,9 @@ class Popover:
     def __init__(self, tray):
         self.tray = tray
         self.window = None
+        self.panel = None
         self.expanded = False
+        self.scroll = 0
         self.scale = 1
         self.dark = None  # OS preference; explicit overrides used only by fixtures.
         self.colors = palette()
@@ -68,23 +70,33 @@ class Popover:
         if not self.window:
             raise C.WinError(C.get_last_error())
         self.brush = w.solid_brush(self.colors["bg"])
+        panel_class = w.WNDCLASS(0, self.callback, 0, 0, tray.instance, None,
+                                 cls.cursor, None, None, "AgentTelemetrySettings")
+        if not w.register_class(C.byref(panel_class)):
+            raise C.WinError(C.get_last_error())
+        self.panel = w.create_window(0x10000, panel_class.name, "Details and settings", 0x42000000,
+                                     0, 0, 0, 0, self.window, None, tray.instance, None)
+        if not self.panel:
+            raise C.WinError(C.get_last_error())
         # Standard HWNDs retain focus, keyboard and accessibility behavior.
         for identifier, title in ((2, "Start monitoring"), (9, "Details & settings"),
             (1, "Open dashboard"), (3, "Refresh now"), (8, "Quit AgentTelemetry"),
             (10, "Icon"), (11, "Numbers"), (6, "Open at login"),
             (5, "Start monitoring automatically"), (7, "Import existing data…"), (12, "Retry")):
-            handle = w.create_window(0, "BUTTON", title, 0x5001000b, 0, 0, 0, 0,
-                                      self.window, identifier, tray.instance, None)
+            handle = w.create_window(0, "BUTTON", title, 0x5001400b, 0, 0, 0, 0,
+                                      self.panel if identifier in (5, 6, 7, 10, 11) else self.window,
+                                      identifier, tray.instance, None)
             if not handle:
                 raise C.WinError(C.get_last_error())
             self.controls[identifier] = handle
             self.labels[identifier] = title
         self.combo = w.create_window(0, "COMBOBOX", "Shared refresh", 0x50210313,
-                                      0, 0, 200, 180, self.window, 20, tray.instance, None)
+                                      0, 0, 200, 180, self.panel, 20, tray.instance, None)
         if not self.combo:
             raise C.WinError(C.get_last_error())
         for _, title in INTERVALS:
             w.send_text(self.combo, 0x143, 0, title)  # CB_ADDSTRING
+        w.set_position(self.panel, self.controls[9], 0, 0, 0, 0, 0x13)  # Dialog tab order: header, details, settings, footer.
         self._fonts()
         self.update(force=True)
 
@@ -129,17 +141,13 @@ class Popover:
         status = snapshot["status"]
         self.warning = snapshot["stale"] or not (status in ("Monitoring on", "Monitoring off", "Using existing dashboard")
             or status.startswith(("Starting", "Stopping", "History imported")))
-        self.geometry = layout(self.expanded, snapshot["stale"], self.warning)
+        self.geometry = layout(self.expanded, snapshot["stale"], self.warning,
+                               int((self.work[3] - self.work[1]) / self.scale))
         details, settings, dashboard, footer = (self.geometry[k] for k in ("details", "settings", "dashboard", "footer"))
         self._place(2, 244, 19, 50, 28)
         self._place(9, 14, details, 282, 32)
         self._place(12, 244, details - 29, 52, 24, self.warning)
-        self._place(10, 35, settings + 4, 128, 28, self.expanded)
-        self._place(11, 163, settings + 4, 133, 28, self.expanded)
-        self._place(20, 143, settings + 43, 153, 170, self.expanded)
-        self._place(6, 35, settings + 79, 261, 26, self.expanded)
-        self._place(5, 35, settings + 108, 261, 26, self.expanded)
-        self._place(7, 35, settings + 142, 261, 28, self.expanded)
+        self.place_settings()
         self._place(1, 14, dashboard, 282, 30)
         self._place(3, 14, footer, 101, 26)
         self._place(8, 126, footer, 170, 26)
@@ -172,6 +180,29 @@ class Popover:
         w.invalidate(self.window, None, False)
         for handle in self.controls.values():
             w.invalidate(handle, None, False)
+        w.invalidate(self.panel, None, False)
+
+    def place_settings(self):
+        g = self.geometry
+        height = g["settings_height"]
+        self.scroll = min(self.scroll, max(0, 178 - height))
+        scrolling = self.expanded and height < 178
+        w.set_position(self.panel, None, self.p(14), self.p(g["settings"]), self.p(282), self.p(height), 0x14)
+        w.show_scrollbar(self.panel, 1, scrolling)
+        w.show_window(self.panel, 5 if self.expanded else 0)
+        # The scrollbar only takes space on small/high-DPI screens.
+        inset = 18 if scrolling else 0
+        half = (261 - inset) // 2
+        y = -self.scroll
+        self._place(10, 21, y + 4, half, 28, self.expanded)
+        self._place(11, 21 + half, y + 4, 261 - inset - half, 28, self.expanded)
+        self._place(20, 129, y + 43, 153 - inset, 170, self.expanded)
+        self._place(6, 21, y + 79, 261 - inset, 26, self.expanded)
+        self._place(5, 21, y + 108, 261 - inset, 26, self.expanded)
+        self._place(7, 21, y + 142, 261 - inset, 28, self.expanded)
+        info = w.SCROLLINFO(C.sizeof(w.SCROLLINFO), 7, 0, 177, height, self.scroll, 0)
+        w.set_scroll(self.panel, 1, C.byref(info), True)
+        w.invalidate(self.panel, None, False)
 
     def reposition(self):
         x, y = position(self.anchor, self.work, (self.p(WIDTH), self.p(self.geometry["height"])), self.p(8))
@@ -257,9 +288,11 @@ class Popover:
         if self.warning:
             self.text(dc, status, self.rect(14, 60 + g["card"][3] + 14, 282, 34), 11,
                       tone="warning", flags=0x10)  # wrapped, never painted over controls
-        if self.expanded:
-            self.text(dc, "Shared refresh", self.rect(35, g["settings"] + 45, 104, 24), 11, tone="muted")
         self.box(dc, self.rect(14, g["footer"] - 3, 282, 1), colors["line"])
+
+    def paint_settings(self, dc):
+        w.fill_rect(dc, C.byref(self.rect(0, 0, 282, self.geometry["settings_height"])), self.brush)
+        self.text(dc, "Shared refresh", self.rect(21, 45 - self.scroll, 104, 24), 11, tone="muted")
 
     def draw_button(self, item):
         identifier, dc, rect = item.id, item.dc, item.rect
@@ -305,6 +338,7 @@ class Popover:
     def command(self, identifier):
         if identifier == 9:
             self.expanded = not self.expanded
+            self.scroll = 0
             self.update(force=True)
         elif identifier in (10, 11):
             self.tray.settings["display"] = "icon" if identifier == 10 else "numbers"
@@ -321,13 +355,13 @@ class Popover:
     def window_proc(self, window, message, wparam, lparam):
         try:
             if message == 0x318 and hasattr(self, "geometry"):  # WM_PRINTCLIENT for fixture screenshots.
-                self.paint(wparam)
+                (self.paint_settings if window == self.panel else self.paint)(wparam)
                 return 0
             if message == 0xf and hasattr(self, "geometry"):
                 paint = w.PAINTSTRUCT()
                 dc = w.begin_paint(window, C.byref(paint))
                 try:
-                    self.paint(dc)
+                    (self.paint_settings if window == self.panel else self.paint)(dc)
                 finally:
                     w.end_paint(window, C.byref(paint))
                 return 0
@@ -343,8 +377,37 @@ class Popover:
                 else:
                     self.draw_button(item)
                 return 1
+            if window == self.panel and message in (0x115, 0x20a):
+                limit = max(0, 178 - self.geometry["settings_height"])
+                if message == 0x20a:
+                    delta = C.c_short((wparam >> 16) & 0xffff).value
+                    self.scroll -= int(delta / 120) * 24
+                else:
+                    code = wparam & 0xffff
+                    if code in (0, 1, 2, 3):
+                        self.scroll += (-1 if code in (0, 2) else 1) * (24 if code in (0, 1) else self.geometry["settings_height"])
+                    elif code in (4, 5):
+                        info = w.SCROLLINFO(C.sizeof(w.SCROLLINFO), 0x10, 0, 0, 0, 0, 0)
+                        w.get_scroll(self.panel, 1, C.byref(info))
+                        self.scroll = info.track
+                    elif code in (6, 7):
+                        self.scroll = 0 if code == 6 else limit
+                self.scroll = min(max(0, self.scroll), limit)
+                self.place_settings()
+                return 0
             if message == 0x111:
                 identifier, event = wparam & 0xffff, (wparam >> 16) & 0xffff
+                if window == self.panel and (event == 6 or (identifier == 20 and event == 3)):
+                    # Tab into a clipped setting scrolls it into view.
+                    top = {10: 4, 11: 4, 20: 43, 6: 79, 5: 108, 7: 142}.get(identifier)
+                    if top is not None:
+                        height = self.geometry["settings_height"]
+                        if top < self.scroll:
+                            self.scroll = top
+                        elif top + 28 > self.scroll + height:
+                            self.scroll = top + 28 - height
+                        self.place_settings()
+                    return 0
                 if identifier == 20 and event == 1:
                     selected = w.send(self.combo, 0x147, 0, 0)
                     if 0 <= selected < len(INTERVALS):
@@ -355,7 +418,7 @@ class Popover:
                 elif identifier in self.controls and event == 0:
                     self.command(identifier)
                 return 0
-            if message == 6 and wparam & 0xffff == 0 and self.window:
+            if message == 6 and wparam & 0xffff == 0 and window == self.window:
                 # Owned dropdown windows do not count as leaving the popover.
                 if not lparam or w.get_ancestor(lparam, 3) != self.window:
                     self.hide()

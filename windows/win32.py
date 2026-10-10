@@ -38,7 +38,9 @@ class BROWSEINFO(C.Structure):
 
 
 def api(dll, name, result, *arguments):
-    function = getattr(dll, name)
+    # Attribute access caches a shared function object. Indexing returns a fresh
+    # binding, so SendMessage's string overload cannot overwrite its integer ABI.
+    function = dll[name]
     function.restype, function.argtypes = result, list(arguments)
     return function
 
@@ -110,6 +112,11 @@ class HIGHCONTRAST(C.Structure):
     _fields_ = [("size", W.UINT), ("flags", W.DWORD), ("scheme", W.LPWSTR)]
 
 
+class SCROLLINFO(C.Structure):
+    _fields_ = [("size", W.UINT), ("mask", W.UINT), ("min", C.c_int), ("max", C.c_int),
+                ("page", W.UINT), ("position", C.c_int), ("track", C.c_int)]
+
+
 load_image = api(U, "LoadImageW", W.HANDLE, W.HINSTANCE, W.LPCWSTR, W.UINT, C.c_int, C.c_int, W.UINT)
 icon_rect = api(S, "Shell_NotifyIconGetRect", C.c_long, C.POINTER(NOTIFYICONIDENTIFIER), C.POINTER(W.RECT))
 monitor_from_rect = api(U, "MonitorFromRect", W.HANDLE, C.POINTER(W.RECT), W.DWORD)
@@ -145,6 +152,9 @@ ellipse = api(G, "Ellipse", W.BOOL, W.HDC, C.c_int, C.c_int, C.c_int, C.c_int)
 move_to = api(G, "MoveToEx", W.BOOL, W.HDC, C.c_int, C.c_int, C.POINTER(W.POINT))
 line_to = api(G, "LineTo", W.BOOL, W.HDC, C.c_int, C.c_int)
 background_mode = api(G, "SetBkMode", C.c_int, W.HDC, C.c_int)
+show_scrollbar = api(U, "ShowScrollBar", W.BOOL, W.HWND, C.c_int, W.BOOL)
+set_scroll = api(U, "SetScrollInfo", C.c_int, W.HWND, C.c_int, C.POINTER(SCROLLINFO), W.BOOL)
+get_scroll = api(U, "GetScrollInfo", W.BOOL, W.HWND, C.c_int, C.POINTER(SCROLLINFO))
 
 
 def enable_dpi_awareness():

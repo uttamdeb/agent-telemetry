@@ -20,15 +20,18 @@ def figures(snapshot, today=None):
     return compact(snapshot["tokens"]), "$%.2f" % snapshot["spend"]
 
 
-def layout(expanded=False, stale=False, warning=False):
+def layout(expanded=False, stale=False, warning=False, max_height=None):
     """Logical pixels; footer stays outside the expandable settings region."""
     card_height = 102 if stale else 82
     details = 60 + card_height + 8 + (66 if warning else 0)
     settings = details + 32
-    dashboard = settings + (178 if expanded else 0) + 8
+    viewport = 178 if expanded else 0
+    if max_height is not None:
+        viewport = min(viewport, max(0, max_height - settings - 86))
+    dashboard = settings + viewport + 8
     return {"card": (14, 60, 282, card_height), "details": details,
             "settings": settings, "dashboard": dashboard,
-            "footer": dashboard + 38, "height": dashboard + 78}
+            "settings_height": viewport, "footer": dashboard + 38, "height": dashboard + 78}
 
 
 def position(anchor, work, size, gap=8):
