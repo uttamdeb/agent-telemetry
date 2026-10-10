@@ -194,6 +194,7 @@ def main():
             # remains visible and keyboard focus scrolls Import into view.
             panel.work = (0, 0, 1600, 960)
             panel.anchor = (1500, 940, 1532, 960)
+            app.monitor.request(False)  # Import can receive focus only when enabled.
             panel.update(force=True)
             assert panel.geometry["height"] <= 480
             assert panel.geometry["settings_height"] < 178
@@ -216,6 +217,10 @@ def main():
             panel.dismissed_at = 0
             panel.show()
             # Busy shutdown must leave Quit visible and prevent a duplicate Quit.
+            panel.scale = 2
+            panel._fonts()
+            panel.work = (0, 0, 2400, 1600)
+            panel.anchor = (2000, 1540, 2032, 1572)
             app.quitting = True
             panel.update(force=True)
             assert w.is_visible(panel.controls[8]) and not w.is_enabled(panel.controls[8])
@@ -224,10 +229,12 @@ def main():
             app.quitting = False
             panel.update(force=True)
             # Actual dialog keyboard routing closes the popup on Escape.
+            previous_calls = list(app.calls)
             msg = W.MSG()
             msg.hWnd, msg.message, msg.wParam = panel.window, 0x100, 0x1b
             assert w.dialog_message(panel.window, C.byref(msg))
             assert not w.is_visible(panel.window)
+            assert app.calls == previous_calls, "Escape must not request Stop or Quit"
             panel.dismissed_at = 0
             panel.show()
             w.send(panel.window, 6, 0, 0)
