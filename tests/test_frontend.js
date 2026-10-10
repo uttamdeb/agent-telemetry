@@ -60,3 +60,20 @@ for(const [value,expected] of [['60',60000],['300',300000],['Infinity',300000],[
   assert.equal(vm.runInContext('pollMs()',fixture),expected);
 }
 console.log('Frontend regression checks passed: pricing, precision, scope, model contributions, Optimize, device distribution and bounded native polling.');
+(async()=>{
+  let state={supported:true,installed:true,running:false,requested:false,label:'Menu bar app',error:null};
+  const nodes={nativeAppToggle:{dataset:{}},nativeAppMsg:{}};
+  const box={dataset:{},isConnected:true,set innerHTML(value){nodes.nativeAppToggle={dataset:{}};nodes.nativeAppMsg={};}};
+  const fixture=vm.createContext({esc:value=>String(value),
+    document:{getElementById:id=>id==='nativeAppBox'?box:nodes[id]},
+    fetch:async()=>({ok:true,json:async()=>state})});
+  vm.runInContext(views.slice(views.indexOf('async function loadNativeSettings()'),views.indexOf('function renderSettings(')),fixture);
+  await vm.runInContext('loadNativeSettings()',fixture);
+  const toggle=nodes.nativeAppToggle;
+  await vm.runInContext('loadNativeSettings()',fixture);
+  assert.strictEqual(nodes.nativeAppToggle,toggle,'Idle status polling replaced the focused native toggle');
+  state={...state,running:true,requested:true};
+  await vm.runInContext('loadNativeSettings()',fixture);
+  assert.notStrictEqual(nodes.nativeAppToggle,toggle,'Changed status was not rendered');
+  console.log('Native Settings retains the toggle across unchanged status polls.');
+})().catch(error=>{console.error(error);process.exitCode=1;});
