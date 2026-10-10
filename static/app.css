@@ -77,11 +77,17 @@ button{cursor:pointer}
 .num{font-variant-numeric:tabular-nums}
 .muted{color:var(--text-2)}
 .dim{color:var(--text-3)}
-.wrap{max-width:1480px;margin:0 auto;padding:0 24px 96px}
+.wrap{--page-max:1480px;max-width:var(--page-max);margin:0 auto;padding:0 24px 96px}
+
+/* Full-width chrome with the same inner alignment as the dashboard content. */
+header.top,nav.tabs,.filters{margin-left:calc(50% - 50vw);margin-right:calc(50% - 50vw);
+  padding-left:max(24px,calc((100vw - 1480px)/2 + 24px));
+  padding-right:max(24px,calc((100vw - 1480px)/2 + 24px))}
 
 /* ---------- header ---------- */
 header.top{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;
-  flex-wrap:wrap;padding:22px 0 14px}
+  flex-wrap:wrap;padding-top:22px;padding-bottom:16px;background:var(--surface);
+  border-bottom:1px solid var(--border)}
 .brand{display:flex;align-items:center;gap:11px}
 .brand h1{font-size:19px;font-weight:660;margin:0;letter-spacing:-.2px}
 .livedot{width:8px;height:8px;border-radius:50%;background:var(--good);flex:none;
@@ -127,6 +133,7 @@ input[type=date]{color-scheme:inherit}
 
 /* ---------- tabs ---------- */
 nav.tabs{display:flex;gap:2px;border-bottom:1px solid var(--border);margin-bottom:0;
+  background:var(--surface);
   overflow-x:auto;scrollbar-width:none}
 nav.tabs::-webkit-scrollbar{display:none}
 nav.tabs button{background:none;border:none;border-bottom:2px solid transparent;
@@ -139,7 +146,7 @@ nav.tabs .cnt{color:var(--text-3);font-size:11px;margin-left:6px}
 
 /* ---------- filter bar ---------- */
 .filters{position:sticky;top:0;z-index:40;background:var(--bg);
-  padding:12px 0;border-bottom:1px solid var(--border);margin-bottom:18px}
+  padding-top:12px;padding-bottom:12px;border-bottom:1px solid var(--border);margin-bottom:18px}
 .filters.stuck{box-shadow:0 6px 18px -12px rgba(0,0,0,.35)}
 .filters.filter-drawer-open{z-index:90}
 .frow{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
