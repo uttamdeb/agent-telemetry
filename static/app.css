@@ -87,7 +87,7 @@ header.top,nav.tabs,.filters{margin-left:calc(50% - 50vw);margin-right:calc(50% 
 /* ---------- header ---------- */
 header.top{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;
   flex-wrap:wrap;padding-top:22px;padding-bottom:16px;background:var(--surface);
-  border-bottom:1px solid var(--border)}
+  border-bottom:0}
 .brand{display:flex;align-items:center;gap:11px}
 .brand h1{font-size:19px;font-weight:660;margin:0;letter-spacing:-.2px}
 .livedot{width:8px;height:8px;border-radius:50%;background:var(--good);flex:none;
