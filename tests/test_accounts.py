@@ -138,6 +138,14 @@ class AccountTests(unittest.TestCase):
         self.assertEqual({e["profile"] for e in logs}, {"C:/Users/fixture/.codex", "D:/profiles/work"})
         self.assertEqual(len(logs), 2, "Archived and live copies share a profile; separate profiles do not")
 
+    def test_empty_logs_are_marked_parsed_without_repeated_account_backfill(self):
+        for source in ("codex", "claude"):
+            with self.subTest(source=source):
+                path = self.root / (source + "-empty.jsonl"); path.write_text("")
+                aggregate = P.update_file(None, source, str(path), None, {})
+                self.assertEqual(aggregate["account_metadata_version"], A.METADATA_VERSION)
+                self.assertIs(P.update_file(aggregate, source, str(path), None, {}), aggregate)
+
     def test_opt_in_and_strict_allowlist_for_live_account(self):
         with patch.object(A, "_codex_read", return_value=({"type": "chatgpt", "email": "fixture@example.invalid",
             "planType": "plus", "accessToken": "DO NOT COPY"}, {"rateLimits": limits(camel=True), "secret": "DO NOT COPY"})) as read:

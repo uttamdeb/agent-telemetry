@@ -542,6 +542,8 @@ def _blank_agg(source, path):
     if source in ("claude", "claude-desktop", "codex"):
         # Present and empty means observed zero; absent on an older archive means
         # unknown. Keep event metadata separate from all billed usage counters.
+        if source in ("claude", "codex"):
+            agg["account_metadata_version"] = A.METADATA_VERSION
         agg["compactions"] = {}
     return agg
 
