@@ -275,6 +275,42 @@ so that file stops being a cache and becomes the sole record. Two consequences:
 - Payload construction and cache actions share `_refresh_lock` with parsing. Aggregates
   mutate in place, so copying only the outer file list is not a consistent snapshot.
 
+## Usage explanations, history recovery and source health
+
+`static/insights.js` compares the same `filteredRecords()` as Overview/Cost with
+`prevRange()`. Within each independent project/model/tool/token-type grouping,
+current minus previous must reconcile to the hero delta. Keep decreases, departed
+categories, zero baselines and offsetting changes. These are accounting contributions,
+not causal findings; no account quota is involved. All time has no prior comparison.
+Current and previous drilldowns preserve other filters and use the correct date range.
+
+`ledger_backups.py` keeps private byte-preserving snapshots in `.usage-backups/`
+beside `CACHE_PATH`. Serialize create/preview/restore with `_refresh_lock`. Routine
+saves try one scheduled snapshot per UTC day; failures surface but do not prevent
+saving. Update/cache-reset safety copies are required before destructive work.
+`POST /api/backups` uses `_csrf_ok()`; restoring additionally requires a one-use,
+five-minute preview ticket bound to the candidate/disk digests and parser generation.
+Keep the current ledger before replacing it, and retain every validated restored
+entry, including old live/archived entries. Never rebuild to restore. A corrupt-file
+safeguard is retained but is not an in-app restore candidate. Backups are private user
+data; never commit, share or package them. They do not alter the ledger schema.
+
+`session_timeline.py` supplies on-demand `GET /api/session-timeline` detail only
+after resolving the full native ID, source device, ledger entry and discovered
+source path. Never accept a caller-supplied filename. Reads are bounded and return
+only event kinds/timestamps/model/tool labels/numeric usage, not prompts, arguments
+or account data. Keep token-count/usage-record handover and fork/block dedup aligned
+with `parser.py`. Date bounds filter returned events, not the parsing state needed
+to identify earlier model/replay/usage context. Remote/deleted/unsupported sources
+use retained daily/compaction detail. Missing metadata remains unavailable.
+
+`diagnostics.py` tracks scan counts and static, actionable error categories in memory;
+discard exception messages and paths. `GET /api/diagnostics` is local and origin guarded.
+Never add these details to `/api/health` or peer exports. The maintenance Settings UI
+lives in `static/maintenance.js`. New frontend harnesses run with Node alongside
+`tests/test_frontend.js`: `test_insights_frontend.js`, `test_timeline_frontend.js`,
+and `test_maintenance_frontend.js`. `tests/preview_features.py` uses mock data only.
+
 ## Account snapshots
 
 Cost's bottom subscription-limit card appears only for Codex/Claude sessions active

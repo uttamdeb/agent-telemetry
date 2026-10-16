@@ -80,6 +80,11 @@ fi
 if [[ -f "$AT_REPO_ROOT/accounts.py" ]]; then
   cp "$AT_REPO_ROOT/accounts.py" "$AT_BACKEND_DIR/"
 fi
+for AT_MODULE in ledger_backups.py session_timeline.py diagnostics.py; do
+  if [[ -f "$AT_REPO_ROOT/$AT_MODULE" ]]; then
+    cp "$AT_REPO_ROOT/$AT_MODULE" "$AT_BACKEND_DIR/"
+  fi
+done
 ditto "$AT_REPO_ROOT/static" "$AT_BACKEND_DIR/static"
 
 if [[ -n "${AGENT_TELEMETRY_PYTHON_ARCHIVE:-}" ]]; then
