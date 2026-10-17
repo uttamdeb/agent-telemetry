@@ -63,9 +63,15 @@ class PackagingTests(unittest.TestCase):
             self.assertEqual((payload / "accounts.py").read_bytes(), (ROOT / "accounts.py").read_bytes())
             for name in ("ledger_backups.py", "session_timeline.py", "diagnostics.py"):
                 self.assertEqual((payload / name).read_bytes(), (ROOT / name).read_bytes())
+            self.assertEqual((payload / "local_servers.py").read_bytes(), (ROOT / "local_servers.py").read_bytes())
+            self.assertEqual((payload / "local_servers_windows.py").read_bytes(), (ROOT / "local_servers_windows.py").read_bytes())
             for icon in (ROOT / "static" / "tool-icons").glob("*.svg"):
                 self.assertEqual((payload / "static" / "tool-icons" / icon.name).read_bytes(), icon.read_bytes())
-            self.assertFalse(any(p.name in {".usage_cache.json", ".usage-backups", ".peers.json", ".peers", "server.log"} for p in payload.rglob("*")))
+            self.assertFalse(any(
+                p.name in {".usage-backups", ".usage_cache.json", ".peers.json", ".peers", "server.log", ".local_servers.json"}
+                or p.name.startswith(".local_servers.")
+                for p in payload.rglob("*")
+            ))
 
     def test_runtime_checksum_failure_never_extracts_archive(self):
         with tempfile.TemporaryDirectory() as directory:

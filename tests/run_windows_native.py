@@ -285,6 +285,10 @@ def main():
             assert app.calls[-1] == ("open", None) and not w.is_visible(panel.window)
             panel.dismissed_at = 0
             panel.show()
+            click(panel, 13)
+            assert app.calls[-1] == ("open", "local-servers") and not w.is_visible(panel.window)
+            panel.dismissed_at = 0
+            panel.show()
             # Busy shutdown must leave Quit visible and prevent a duplicate Quit.
             panel.scale = 2
             panel._fonts()

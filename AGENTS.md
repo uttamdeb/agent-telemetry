@@ -2,8 +2,10 @@
 
 **AgentTelemetry** — a local, **stdlib-only** dashboard that reads the logs your AI coding tools already write
 to this machine and shows tokens, estimated cost, and breakdowns by model / day / tool /
-project / hour. Nothing leaves the machine unless the user turns on sharing (see "Your
-devices") or explicitly requests a one-time account lookup (see "Account snapshots"). Nothing to install.
+project / hour. Inventory and telemetry stay local unless the user turns on sharing (see
+"Your devices") or explicitly requests a one-time account lookup (see "Account snapshots").
+An explicitly started saved server command can access the network with the user's permissions.
+Nothing to install.
 
 ```bash
 python3 dashboard.py            # http://127.0.0.1:7878
@@ -310,6 +312,23 @@ Never add these details to `/api/health` or peer exports. The maintenance Settin
 lives in `static/maintenance.js`. New frontend harnesses run with Node alongside
 `tests/test_frontend.js`: `test_insights_frontend.js`, `test_timeline_frontend.js`,
 and `test_maintenance_frontend.js`. `tests/preview_features.py` uses mock data only.
+## Local server controls
+
+`local_servers.py` owns the private `.local_servers.json` inventory beside
+`--data-dir`; `local_servers_windows.py` implements Win32 listener discovery and
+identity-checked control. macOS and Windows support lifecycle actions; Linux
+returns `supported:false`. Windows asks for a working folder (never read foreign
+process memory), starts commands in a job assigned before resuming, and validates
+Stop against ownership and creation time on one held handle. Its immediate Stop
+behavior must be disclosed before confirmation. The Windows tray opens the shared
+web controls; macOS also shows pinned controls inline. Both macOS UI surfaces use the
+Python API; do not reintroduce a separate native scanner/writer when the backend is
+unavailable. Saved commands never belong in the ledger, health, summary or peer exports.
+All endpoints are loopback-only; writes use `_csrf_ok()`. Start/Stop/Restart require
+`confirmed:true`, and Restart also supplies the confirmed `serverId`. Keep process
+identity checks, per-profile lifecycle serialization, inventory thread/file locks,
+and failure preservation. No command inference, environment capture, auto-start,
+force-kill on timeout or ledger rebuild. See docs/local-servers.md.
 
 ## Account snapshots
 

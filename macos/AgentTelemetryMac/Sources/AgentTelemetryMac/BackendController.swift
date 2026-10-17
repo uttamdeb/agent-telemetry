@@ -109,6 +109,7 @@ final class BackendController: ObservableObject {
     @Published private(set) var summary = DailySummary.empty
     @Published private(set) var summaryStale = false
     @Published private(set) var lastSummaryUpdate: Date?
+    @Published private(set) var refreshGeneration = 0
     // Owned restarts can recreate the WebView; retain its current filters and tab.
     var lastDashboardURL: URL?
 
@@ -323,7 +324,8 @@ final class BackendController: ObservableObject {
         child.environment = ProcessInfo.processInfo.environment.merging([
             "PYTHONUNBUFFERED": "1",
             "PYTHONDONTWRITEBYTECODE": "1",
-            "AGENT_TELEMETRY_VERSION": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "development"
+            "AGENT_TELEMETRY_VERSION": Bundle.main.infoDictionary?["AgentTelemetryBuildVersion"] as? String
+                ?? Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "development"
         ]) { _, new in new }
 
         let output = Pipe()
@@ -503,6 +505,7 @@ final class BackendController: ObservableObject {
             }
             summaryStale = false
             lastSummaryUpdate = Date()
+            refreshGeneration += 1
             status = ownsProcess ? .running : .connectedToExisting
         } catch {
             guard !Task.isCancelled, lifecycle == attempt, summaryRequest == requestID else { return }

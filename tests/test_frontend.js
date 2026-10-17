@@ -147,12 +147,12 @@ const costShell=shell.slice(shell.indexOf('id="v-cost"'),shell.indexOf('id="v-mo
 assert.doesNotMatch(overviewShell,/accountLimitsCard/);
 assert.ok(costShell.indexOf('accountLimitsCard')>costShell.indexOf('tv-dailyCost'),'Limits must follow every other Cost card');
 {
-  const host={innerHTML:costShell,dataset:{}}, node={}, today=run('dkey(new Date())');
+  const host={innerHTML:costShell,dataset:{}}, filtersNode={style:{display:""},classList:{toggle(){}}}, node={textContent:""}, today=run('dkey(new Date())');
   let costRenders=0;
   const emptyCost=vm.createContext({Date,Set,console,Object,dkey:date=>run(`dkey(new Date(${date.getTime()}))`),
     RAW:{records:[],device:{id:'local'},sessions:[{source:'codex',days:{[today]:[1]}}]},
     S:{view:'cost',devs:new Set(),tools:new Set(['codex'])},VIEW_TITLES:{cost:'Cost',overview:'Overview'},
-    document:{querySelectorAll:()=>[],getElementById:id=>id==='v-cost'?host:node},
+    document:{querySelectorAll:()=>[],getElementById:id=>id==='v-cost'?host:id==='filters'?filtersNode:node},
     syncRangeUI(){},syncMetricUI(){},buildFilterPanels(){},renderPills(){},renderSidebarDevices(){},filtersToURL(){},
     runFinders:()=>[],slice:()=>({recs:[],sessions:[]}),viewCost(){costRenders++;}});
   emptyCost.hasPrev=()=>false;
@@ -160,6 +160,7 @@ assert.ok(costShell.indexOf('accountLimitsCard')>costShell.indexOf('tv-dailyCost
   vm.runInContext(views.slice(views.indexOf('const VIEW_HTML={};'),views.indexOf('function syncSearchBoxes(')),emptyCost);
   vm.runInContext('renderAll()',emptyCost);
   assert.equal(costRenders,1,'An empty historical date range must not suppress current quotas');
+  assert.equal(filtersNode.style.display,'','The Cost view should keep the shared page header visible');
   assert.match(host.innerHTML,/accountLimitsCard/);
   vm.runInContext('RAW.sessions=[];renderAll()',emptyCost);
   assert.match(host.innerHTML,/No activity/,'No current sessions should keep the regular empty view');

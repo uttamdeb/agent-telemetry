@@ -11,6 +11,7 @@ struct MacNativeRegression {
     static func main() async throws {
         _ = NSApplication.shared
         let port = Int(CommandLine.arguments[1])!
+        let base = URL(string: "http://127.0.0.1:\(port)")!
         // Supply the packaged app's real icon to this unbundled test executable.
         let appIcon = NSImage(contentsOfFile: CommandLine.arguments[2])!
         let originalIconSize = appIcon.size
@@ -24,10 +25,19 @@ struct MacNativeRegression {
         settings.menuBarDisplay = .icon
         let backend = BackendController(settings: settings)
         let menu = MenuBarPopoverController()
-        menu.install(backend: backend, settings: settings, openDashboard: {}, quit: {})
+        let localServers = LocalServerMonitor()
+        menu.install(backend: backend, settings: settings, localServers: localServers,
+                     openDashboard: {}, openLocalServers: {}, quit: {})
         backend.start()
         try await Task.sleep(nanoseconds: 1_000_000_000)
         precondition(backend.summary.tokens == 100 && backend.isReady)
+        let localServerDeadline = Date().addingTimeInterval(5)
+        while !localServers.isAvailable && Date() < localServerDeadline {
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        precondition(localServers.isAvailable && localServers.isSupported == true)
+        precondition(localServers.runningServers.first?.id == "server-fixture")
+        precondition(localServers.runningServers.first?.address == "127.0.0.1:3000")
         let reflected = Mirror(reflecting: menu).children.first { $0.label == "statusItem" }!.value
         let statusItem = reflected as! NSStatusItem
         let brandIcon = statusItem.button!.image!
@@ -73,7 +83,44 @@ struct MacNativeRegression {
         precondition(statusItem.button!.toolTip!.contains("100 tokens"), "First menu summary is stale")
         print("PASS actual status-item subscriber renders the first summary")
 
-        let base = URL(string: "http://127.0.0.1:\(port)")!
+        let fixtureServer = localServers.runningServers[0]
+        try await localServers.start(fixtureServer)
+        try await localServers.stop(fixtureServer)
+        try await localServers.restart(fixtureServer)
+        let (actionData, _) = try await URLSession.shared.data(from: base.appendingPathComponent("fixture/local-server-actions"))
+        let actions = try JSONSerialization.jsonObject(with: actionData) as! [[String: Any]]
+        precondition(actions.count == 3)
+        let startBody = actions[0]["body"] as! [String: Any]
+        precondition(actions[0]["path"] as? String == "/api/local-servers/start")
+        precondition(startBody["confirmed"] as? Bool == true && startBody["profileId"] as? String == "profile-fixture")
+        let stopBody = actions[1]["body"] as! [String: Any]
+        precondition(actions[1]["path"] as? String == "/api/local-servers/stop")
+        precondition(stopBody["confirmed"] as? Bool == true && stopBody["id"] as? String == "server-fixture")
+        let restartBody = actions[2]["body"] as! [String: Any]
+        precondition(actions[2]["path"] as? String == "/api/local-servers/restart")
+        precondition(restartBody["confirmed"] as? Bool == true
+            && restartBody["profileId"] as? String == "profile-fixture"
+            && restartBody["serverId"] as? String == "server-fixture")
+        print("PASS local server controls use only the shared backend API and confirm all launch/stop actions")
+
+        _ = try await URLSession.shared.data(from: base.appendingPathComponent("disable-local-server-support"))
+        await localServers.refresh()
+        precondition(!localServers.isAvailable && localServers.isSupported == false && localServers.isStale)
+        precondition(localServers.servers.first?.id == "server-fixture", "Unsupported backend erased the last successful server list")
+        _ = try await URLSession.shared.data(from: base.appendingPathComponent("enable-local-server-support"))
+        await localServers.refresh()
+        precondition(localServers.isAvailable && localServers.isSupported == true && !localServers.isStale)
+        settings.refreshIntervalSeconds = 0
+        backend.refreshIntervalDidChange()
+        try await Task.sleep(nanoseconds: 1_300_000_000)
+        let (beforePollData, _) = try await URLSession.shared.data(from: base.appendingPathComponent("fixture/local-server-count"))
+        let beforePoll = (try JSONSerialization.jsonObject(with: beforePollData) as! [String: Int])["count"]!
+        try await Task.sleep(nanoseconds: 1_300_000_000)
+        let (afterPollData, _) = try await URLSession.shared.data(from: base.appendingPathComponent("fixture/local-server-count"))
+        let afterPoll = (try JSONSerialization.jsonObject(with: afterPollData) as! [String: Int])["count"]!
+        precondition(beforePoll == afterPoll, "Manual refresh mode kept polling local server inventory")
+        print("PASS unsupported capability preserves stale data, recovers, and Manual mode stops background polling")
+
         _ = try await URLSession.shared.data(from: base.appendingPathComponent("advance"))
         try await Task.sleep(nanoseconds: 1_300_000_000)
         precondition(backend.summary.tokens == 200, "Shared tick did not update the menu")
@@ -110,6 +157,7 @@ struct MacNativeRegression {
         precondition(!backend.summaryStale && backend.isReady && backend.lastSummaryUpdate != nil)
         print("PASS summary failure retains data and retries after a cadence change during an outage")
         backend.stop()
+        precondition(!localServers.isAvailable && localServers.isStale)
         precondition(statusItem.button!.image === brandIcon, "Stopping replaced the app mark")
         precondition(statusItem.button!.toolTip!.contains("Monitoring off"))
         settings.refreshIntervalSeconds = 300

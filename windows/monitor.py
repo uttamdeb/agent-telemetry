@@ -224,12 +224,12 @@ class Monitor:
             if self._active(intent):
                 self._state(str(error), True)
 
-    def open_dashboard(self, intent=None, opener=None):
+    def open_dashboard(self, intent=None, opener=None, view=None):
         intent = self.intent if intent is None else intent
         # First-run parsing can take a minute. Open only once the service is ready,
         # and never open it on behalf of an older, canceled Start request.
         if self.start(intent) and self._active(intent):
-            (opener or webbrowser.open)(self.url)
+            (opener or webbrowser.open)(self.url + ("#local-servers" if view == "local-servers" else ""))
 
     def refresh(self, parse=False, intent=None):
         intent = self.intent if intent is None else intent

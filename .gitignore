@@ -8,6 +8,10 @@
 .peers.json
 .peers.json.tmp
 .peers/
+.local_servers.json
+.local_servers.json.lock
+.local_servers.json.lock.start.*
+.local_servers.*.tmp
 
 # runtime / local
 server.log

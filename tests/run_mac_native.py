@@ -18,7 +18,8 @@ if options.screenshots:
     options.screenshots.mkdir(parents=True, exist_ok=True)
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "macos/AgentTelemetryMac/Sources/AgentTelemetryMac"
-state = {"failed": False, "delay": False, "seconds": 15, "revision": 0, "tokens": 100}
+state = {"failed": False, "delay": False, "seconds": 15, "revision": 0, "tokens": 100,
+         "localServerSupported": True, "localServerGets": 0, "localServerActions": []}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -31,6 +32,42 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/delay": state["delay"] = True
         if self.path == "/advance": state["tokens"] = 200; state["revision"] += 1
         if self.path == "/raw-advance": state["tokens"] = 250
+        if self.path == "/disable-local-server-support": state["localServerSupported"] = False
+        if self.path == "/enable-local-server-support": state["localServerSupported"] = True
+        if self.path == "/fixture/local-server-actions":
+            body = json.dumps(state["localServerActions"]).encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if self.path == "/fixture/local-server-count":
+            body = json.dumps({"count": state["localServerGets"]}).encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if self.path == "/api/local-servers":
+            state["localServerGets"] += 1
+            body = json.dumps({
+                "supported": state["localServerSupported"],
+                "message": None if state["localServerSupported"] else "Local server inventory is unsupported in this fixture.",
+                "updatedAt": "2026-10-10T12:00:00Z",
+                "servers": [{
+                    "id": "server-fixture", "pid": 123, "process": "vite", "cwd": "/tmp/Fixture",
+                    "project": "Fixture", "host": "127.0.0.1", "port": 3000,
+                    "startedAt": "2026-10-10T11:00:00Z", "state": "running",
+                    "firstSeen": "2026-10-10T11:00:00Z", "lastSeen": "2026-10-10T12:00:00Z",
+                    "stoppedAt": None, "profileId": "profile-fixture", "isConfigured": True,
+                    "isPinned": True,
+                }] if state["localServerSupported"] else [],
+            }).encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if self.path.startswith("/api/"):
             if self.path == "/api/health" and state["delay"]:
                 time.sleep(0.35)
@@ -51,6 +88,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         raw = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        if self.path.startswith("/api/local-servers/"):
+            state["localServerActions"].append({"path": self.path, "body": json.loads(raw or b"{}")})
+            body = b'{"ok":true}'
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if not state["failed"]:
             if self.path == "/api/sync": state["seconds"] = json.loads(raw)["seconds"]
             state["revision"] += 1
@@ -72,6 +117,7 @@ try:
             "AgentTelemetryAppIcon.swift",
             "CacheMigration.swift",
             "DashboardWebView.swift",
+            "LocalServerMonitor.swift",
             "StatusMenu.swift",
             "MenuBarPopoverController.swift",
             "NativeControl.swift",
@@ -84,6 +130,6 @@ try:
                str(ROOT / "macos/AgentTelemetryMac/Resources/AppIcon.png")]
         if options.screenshots:
             run.append(str(options.screenshots.resolve()))
-        subprocess.run(run, check=True, timeout=30)
+        subprocess.run(run, check=True, timeout=60)
 finally:
     server.shutdown()

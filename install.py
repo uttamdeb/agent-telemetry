@@ -11,10 +11,22 @@ import native
 
 ROOT = Path(__file__).resolve().parent
 BACKEND_FILES = ("dashboard.py", "parser.py", "native.py", "session_names.py", "accounts.py",
-                 "ledger_backups.py", "session_timeline.py", "diagnostics.py", "index.html", "chart.umd.min.js",
+                 "local_servers.py", "local_servers_windows.py", "ledger_backups.py",
+                 "session_timeline.py", "diagnostics.py", "index.html", "chart.umd.min.js",
                  "manifest.json", "sw.js", "LICENSE")
 WINDOWS_FILES = ("tray.py", "monitor.py", "win32.py", "popover.py", "presentation.py")
 WINDOWS_ASSETS = ("AgentTelemetry.ico", "TrayIcon.ico")
+PRIVATE_TELEMETRY_NAMES = {".usage-backups", ".usage_cache.json", ".peers.json", ".peers", "server.log"}
+
+
+def _is_private_telemetry(path):
+    name = Path(path).name
+    return name in PRIVATE_TELEMETRY_NAMES or name == ".local_servers.json" or name.startswith(".local_servers.")
+
+
+def _validate_windows_payload(destination):
+    if any(_is_private_telemetry(path) for path in Path(destination).rglob("*")):
+        raise ValueError("Refusing to install a payload containing personal telemetry.")
 
 
 def copy_windows_payload(destination):
@@ -31,9 +43,7 @@ def copy_windows_payload(destination):
     for name in WINDOWS_ASSETS:
         shutil.copy2(str(ROOT / "windows" / "assets" / name),
                      str(destination / "windows" / "assets" / name))
-    forbidden = {".usage_cache.json", ".usage-backups", ".peers.json", ".peers", "server.log"}
-    if any(path.name in forbidden for path in destination.rglob("*")):
-        raise ValueError("Refusing to install a payload containing personal telemetry.")
+    _validate_windows_payload(destination)
 
 
 def install_windows():

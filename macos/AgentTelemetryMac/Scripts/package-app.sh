@@ -43,6 +43,10 @@ rm -rf "$AT_APP_PATH"
 mkdir -p "$AT_APP_PATH/Contents/MacOS" "$AT_APP_PATH/Contents/Resources"
 cp "$AT_EXECUTABLE" "$AT_APP_PATH/Contents/MacOS/AgentTelemetryMac"
 cp "$AT_PACKAGE_DIR/Resources/Info.plist" "$AT_APP_PATH/Contents/Info.plist"
+AT_BUILD_VERSION="$(git -C "$AT_REPO_ROOT" describe --tags --always --dirty 2>/dev/null \
+  || git -C "$AT_REPO_ROOT" rev-parse --short HEAD)"
+/usr/libexec/PlistBuddy -c "Add :AgentTelemetryBuildVersion string $AT_BUILD_VERSION" \
+  "$AT_APP_PATH/Contents/Info.plist"
 
 # Build a complete macOS icon set from the supplied 1024px master image.
 AT_ICONSET_DIR="$AT_TEMP_DIR/AppIcon.iconset"
@@ -70,6 +74,7 @@ cp "$AT_ICON_MASTER" "$AT_ICONSET_DIR/icon_512x512@2x.png"
 AT_BACKEND_DIR="$AT_APP_PATH/Contents/Resources/AgentTelemetry"
 mkdir -p "$AT_BACKEND_DIR"
 cp "$AT_REPO_ROOT/dashboard.py" "$AT_REPO_ROOT/parser.py" "$AT_REPO_ROOT/native.py" \
+   "$AT_REPO_ROOT/local_servers.py" "$AT_REPO_ROOT/local_servers_windows.py" \
    "$AT_REPO_ROOT/index.html" "$AT_REPO_ROOT/chart.umd.min.js" \
    "$AT_REPO_ROOT/manifest.json" "$AT_REPO_ROOT/sw.js" \
    "$AT_REPO_ROOT/LICENSE" "$AT_BACKEND_DIR/"
@@ -115,7 +120,8 @@ EOF
 "$AT_APP_PATH/Contents/Resources/AgentTelemetryRuntime/bin/python3" --version
 
 if find "$AT_APP_PATH/Contents/Resources" \( -name .usage_cache.json -o -name server.log \
-     -o -name .peers.json -o -name .peers \) -print -quit | grep -q .; then
+     -o -name .peers.json -o -name .peers -o -name .local_servers.json \
+     -o -name '.local_servers.*' \) -print -quit | grep -q .; then
   echo "Refusing to package user telemetry data." >&2
   exit 1
 fi
