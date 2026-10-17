@@ -98,3 +98,8 @@ outside the ledger. `.github/workflows/release-downloads.yml` builds from an exi
 release tag and runs `tests/run_windows_installer.py`: real install, packaged Win32 UI,
 running-client refusal, upgrade and uninstall against invented archived data. It only
 uploads CI artifacts; publishing release assets is a separate explicit action.
+
+The **Local servers** button opens `#local-servers` in the browser once the backend
+is ready. Windows can discover your TCP listeners and configure, pin, start, stop
+or restart them there. Configuration asks for a working folder; Stop ends the
+selected process immediately after confirmation. See [local server controls](../docs/local-servers.md).

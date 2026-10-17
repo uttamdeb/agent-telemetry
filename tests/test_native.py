@@ -463,6 +463,13 @@ class MonitorTests(unittest.TestCase):
             self.assertTrue(self.monitor.stop())
             request.assert_not_called()
 
+    def test_local_servers_link_waits_for_ready_and_uses_view_hash(self):
+        from unittest.mock import Mock
+        opener = Mock()
+        with patch.object(self.monitor, "start", return_value=True):
+            self.monitor.open_dashboard(opener=opener, view="local-servers")
+        opener.assert_called_once_with(self.monitor.url + "#local-servers")
+
     def test_owned_stop_uses_token_and_waits_without_force_kill(self):
         from unittest.mock import Mock
         process = Mock()

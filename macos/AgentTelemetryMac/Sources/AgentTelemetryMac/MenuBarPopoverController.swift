@@ -9,6 +9,7 @@ final class MenuBarPopoverController: NSObject, ObservableObject, NSPopoverDeleg
     private var hostingController: NSHostingController<StatusMenu>?
     private var backend: BackendController?
     private var settings: AppSettings?
+    private var localServers: LocalServerMonitor?
     private var subscriptions = Set<AnyCancellable>()
     // Load the bundle resource directly so a stale Launch Services icon cache
     // cannot substitute a different glyph. Copy before sizing the status item.
@@ -22,13 +23,17 @@ final class MenuBarPopoverController: NSObject, ObservableObject, NSPopoverDeleg
     func install(
         backend: BackendController,
         settings: AppSettings,
+        localServers: LocalServerMonitor,
         openDashboard: @escaping () -> Void,
+        openLocalServers: @escaping () -> Void,
         quit: @escaping () -> Void
     ) {
         guard statusItem == nil else { return }
 
         self.backend = backend
         self.settings = settings
+        self.localServers = localServers
+        localServers.connect(to: backend)
 
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem = item
@@ -44,10 +49,16 @@ final class MenuBarPopoverController: NSObject, ObservableObject, NSPopoverDeleg
         let rootView = StatusMenu(
             backend: backend,
             settings: settings,
+            localServers: localServers,
             openDashboard: { [weak self] in
                 guard let self else { return }
                 self.popover.performClose(nil)
                 openDashboard()
+            },
+            openLocalServers: { [weak self] in
+                guard let self else { return }
+                self.popover.performClose(nil)
+                openLocalServers()
             },
             quit: quit,
             onDisclosureChange: { [weak self] _ in self?.resizePopoverFromContent() }
@@ -83,6 +94,10 @@ final class MenuBarPopoverController: NSObject, ObservableObject, NSPopoverDeleg
 
     func popoverDidClose(_ notification: Notification) {
         statusItem?.button?.highlight(false)
+    }
+
+    func popoverDidShow(_ notification: Notification) {
+        Task { await localServers?.refresh() }
     }
 
     private func resizePopoverFromContent() {

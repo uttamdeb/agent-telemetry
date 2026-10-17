@@ -22,6 +22,7 @@ import parser as P
 import native as N
 import session_names as SN
 import accounts as A
+from local_servers import LocalServerInventory
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = HERE
@@ -2193,6 +2194,14 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 import traceback; traceback.print_exc()
                 self._send(500, json.dumps({"error": str(e)}))
+        elif route == "/api/local-servers":
+            if not self._loopback_client():
+                self._send(403, json.dumps({"error": "local server details are available only on this machine"}))
+                return
+            try:
+                self._send(200, json.dumps(LocalServerInventory(DATA_DIR).snapshot()))
+            except Exception as e:
+                self._send(500, json.dumps({"error": str(e)}))
         elif route == "/api/refresh":
             self._send(405, json.dumps({"error": "use POST with a JSON body"}))
         elif route == "/api/data":
@@ -2253,13 +2262,35 @@ class Handler(BaseHTTPRequestHandler):
         ctype = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
         return ctype == "application/json" and self._origin_ok()
 
+    def _loopback_client(self):
+        try:
+            return ipaddress.ip_address(self.client_address[0]).is_loopback
+        except (ValueError, TypeError):
+            return False
+
     def do_POST(self):
         route = self.path.split("?")[0]
-        if route in ("/api/settings", "/api/cache", "/api/update", "/api/devices", "/api/refresh", "/api/native", "/api/shutdown", "/api/sync", "/api/session-name", "/api/accounts"):
+        local_server_routes = {
+            "/api/local-servers/stop",
+            "/api/local-servers/configure",
+            "/api/local-servers/pin",
+            "/api/local-servers/start",
+            "/api/local-servers/restart",
+        }
+        if route in ("/api/settings", "/api/cache", "/api/update", "/api/devices", "/api/refresh", "/api/native", "/api/shutdown", "/api/sync", "/api/session-name", "/api/accounts") or route in local_server_routes:
+            if route in local_server_routes and not self._loopback_client():
+                self._send(403, json.dumps({"error": "local servers can be managed only on this machine"}))
+                return
             if not self._csrf_ok():
                 self._send(403, json.dumps({"error": "cross-site request refused"}))
                 return
-            length = int(self.headers.get("Content-Length", 0) or 0)
+            try:
+                length = int(self.headers.get("Content-Length", 0) or 0)
+                if length < 0 or (route in local_server_routes and length > 16384):
+                    raise ValueError("invalid body length")
+            except ValueError:
+                self._send(400, json.dumps({"error": "invalid request body length"}))
+                return
             raw = self.rfile.read(length) if length else b"{}"
             try:
                 body = json.loads(raw or b"{}")
@@ -2299,6 +2330,20 @@ class Handler(BaseHTTPRequestHandler):
                 elif route == "/api/devices":
                     result = devices_action(body)
                     notify_refresh()
+                elif route.startswith("/api/local-servers/"):
+                    if route in ("/api/local-servers/start", "/api/local-servers/stop", "/api/local-servers/restart") and body.get("confirmed") is not True:
+                        raise ValueError("Confirm this server action before continuing.")
+                    inventory = LocalServerInventory(DATA_DIR)
+                    if route == "/api/local-servers/stop":
+                        result = inventory.stop(body.get("id"))
+                    elif route == "/api/local-servers/configure":
+                        result = inventory.configure(body.get("id"), body.get("command"), body.get("cwd"))
+                    elif route == "/api/local-servers/pin":
+                        result = inventory.set_pinned(body.get("id"), body.get("pinned"))
+                    elif route == "/api/local-servers/start":
+                        result = inventory.start(body.get("profileId"))
+                    else:
+                        result = inventory.restart(body.get("profileId"), body.get("serverId"))
                 else:
                     result = save_claude_cleanup_days(body.get("cleanupPeriodDays"))
                 self._send(200, json.dumps(result))

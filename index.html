@@ -7,6 +7,18 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="AgentTelemetry">
+<style>
+  #file-open-notice{display:none}
+  html.file-open{min-height:100%;background:#111317;color:#f2f4f7;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+  html.file-open body{min-height:100vh;margin:0;display:grid;place-items:center;padding:24px;box-sizing:border-box}
+  html.file-open body>:not(#file-open-notice){display:none!important}
+  html.file-open #file-open-notice{display:block;width:min(560px,100%);box-sizing:border-box;padding:32px;border:1px solid #30343b;border-radius:18px;background:#171a20;box-shadow:0 24px 80px #0008}
+  #file-open-notice h1{margin:0 0 12px;font-size:25px;letter-spacing:-.5px}
+  #file-open-notice p{margin:0 0 22px;color:#aab0ba;line-height:1.6}
+  #file-open-notice a{display:inline-flex;align-items:center;min-height:42px;padding:0 16px;border-radius:9px;background:#2675e8;color:white;text-decoration:none;font-weight:650}
+  #file-open-notice small{display:block;margin-top:18px;color:#858c98;line-height:1.5}
+</style>
+<script>if(location.protocol==="file:")document.documentElement.classList.add("file-open");</script>
 <title>AgentTelemetry</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%228%22%20fill%3D%22%23111317%22%2F%3E%3Cpath%20d%3D%22M5.5%2018h4.2l2.8-7.5%204.6%2013%203.2-8.5h2.2%22%20fill%3D%22none%22%20stroke%3D%22%23f2f4f7%22%20stroke-width%3D%222.6%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%2F%3E%3Ccircle%20cx%3D%2225.2%22%20cy%3D%2215%22%20r%3D%222.9%22%20fill%3D%22%233fb96f%22%2F%3E%3C%2Fsvg%3E">
 <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
@@ -15,6 +27,12 @@
 <script src="/chart.js"></script>
 </head>
 <body>
+<main id="file-open-notice" role="alert">
+  <h1>Open AgentTelemetry from the app</h1>
+  <p>This HTML file is only the dashboard interface. The AgentTelemetry app needs to be running to collect data and manage local servers.</p>
+  <a href="http://127.0.0.1:7878/">Open the running dashboard</a>
+  <small>If the dashboard does not open, launch <strong>AgentTelemetry.app</strong> first, then try again.</small>
+</main>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <defs>
     <symbol id="i-overview" viewBox="0 0 16 16"><rect x="2.2" y="2.2" width="4.8" height="4.8" rx="1.2"/><rect x="9" y="2.2" width="4.8" height="4.8" rx="1.2"/><rect x="2.2" y="9" width="4.8" height="4.8" rx="1.2"/><rect x="9" y="9" width="4.8" height="4.8" rx="1.2"/></symbol>
@@ -25,6 +43,7 @@
     <symbol id="i-sessions" viewBox="0 0 16 16"><path d="M6 4h7.5M6 8h7.5M6 12h7.5"/><path d="M2.6 4h.8M2.6 8h.8M2.6 12h.8"/></symbol>
     <symbol id="i-optimize" viewBox="0 0 16 16"><path d="M8 1.9l1.4 4.2 4.3 1.4-4.3 1.4L8 13.2 6.6 8.9 2.3 7.5l4.3-1.4z"/></symbol>
     <symbol id="i-storage" viewBox="0 0 16 16"><ellipse cx="8" cy="3.9" rx="5.2" ry="1.9"/><path d="M2.8 3.9v8.2c0 1.1 2.3 1.9 5.2 1.9s5.2-.8 5.2-1.9V3.9M2.8 8c0 1.1 2.3 1.9 5.2 1.9s5.2-.8 5.2-1.9"/></symbol>
+    <symbol id="i-servers" viewBox="0 0 16 16"><rect x="2.3" y="2.2" width="11.4" height="4.1" rx="1.2"/><rect x="2.3" y="9.7" width="11.4" height="4.1" rx="1.2"/><path d="M4.5 4.2h.1M4.5 11.7h.1M7.2 4.2h4.2M7.2 11.7h4.2"/></symbol>
     <symbol id="i-refresh" viewBox="0 0 16 16"><path d="M13.2 8a5.2 5.2 0 1 1-1.6-3.8"/><path d="M13.2 2.6v2.9h-2.9"/></symbol>
     <symbol id="i-theme" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.6"/><path d="M8 2.4v11.2a5.6 5.6 0 0 0 0-11.2z" fill="currentColor" stroke="none"/></symbol>
     <symbol id="i-settings" viewBox="0 0 16 16"><path d="M12.76 6.86 L14.34 7.15 L14.34 8.85 L12.76 9.14 L12.18 10.56 L13.09 11.88 L11.88 13.09 L10.56 12.18 L9.14 12.76 L8.85 14.34 L7.15 14.34 L6.86 12.76 L5.44 12.18 L4.12 13.09 L2.91 11.88 L3.82 10.56 L3.24 9.14 L1.66 8.85 L1.66 7.15 L3.24 6.86 L3.82 5.44 L2.91 4.12 L4.12 2.91 L5.44 3.82 L6.86 3.24 L7.15 1.66 L8.85 1.66 L9.14 3.24 L10.56 3.82 L11.88 2.91 L13.09 4.12 L12.18 5.44Z" stroke-linejoin="round"/><circle cx="8" cy="8" r="2.1"/></symbol>
@@ -65,6 +84,7 @@
       <button data-v="projects"><svg class="ic"><use href="#i-projects"/></svg><span>Projects</span></button>
       <button data-v="sessions"><svg class="ic"><use href="#i-sessions"/></svg><span>Sessions</span></button>
       <button data-v="optimize"><svg class="ic"><use href="#i-optimize"/></svg><span>Optimize</span><span class="nav-count" id="optCount"></span></button>
+      <button data-v="local-servers"><svg class="ic"><use href="#i-servers"/></svg><span>Local servers</span><span class="nav-count" id="localServerCount"></span></button>
       <button data-v="storage"><svg class="ic"><use href="#i-storage"/></svg><span>Storage</span></button>
     </nav>
 
@@ -417,6 +437,11 @@
             <div id="cleanup"></div>
           </div>
         </div>
+      </section>
+
+      <!-- ================= LOCAL SERVERS ================= -->
+      <section class="view" id="v-local-servers">
+        <div id="localServersRoot"></div>
       </section>
 
     <details class="note" id="pricingBox"><summary>How these numbers are computed, and what to distrust</summary>

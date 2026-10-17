@@ -114,7 +114,7 @@ class Tray:
                     result = self.monitor.apply_command(operation, intent)
                     quit_ok = operation == "quit" and result
                 elif operation == "open":
-                    self.monitor.open_dashboard(intent, webbrowser.open)
+                    self.monitor.open_dashboard(intent, webbrowser.open, view=argument)
                 elif operation == "refresh":
                     self.monitor.refresh(parse=True, intent=intent)
                 elif operation == "poll":
@@ -199,6 +199,8 @@ class Tray:
     def command(self, command):
         if command == 1:
             self.submit("open")
+        elif command == 13:
+            self.submit("open", "local-servers")
         elif command == 2:
             self.submit("stop" if self.monitor.requested.is_set() else "start")
         elif command == 3:

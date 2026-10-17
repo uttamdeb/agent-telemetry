@@ -7,6 +7,7 @@ struct AgentTelemetryApp: App {
     @Environment(\.openWindow) private var openWindow
     @StateObject private var settings: AppSettings
     @StateObject private var backend: BackendController
+    @StateObject private var localServers = LocalServerMonitor()
     @StateObject private var menuBarPopover = MenuBarPopoverController()
     @StateObject private var nativeControl = NativeControl()
 
@@ -24,7 +25,9 @@ struct AgentTelemetryApp: App {
         let _ = menuBarPopover.install(
             backend: backend,
             settings: settings,
+            localServers: localServers,
             openDashboard: { openDashboard() },
+            openLocalServers: { openDashboard(view: "local-servers") },
             quit: { quit() }
         )
         let _ = nativeControl.start(quit: { quit() })
@@ -37,7 +40,10 @@ struct AgentTelemetryApp: App {
         }
     }
 
-    private func openDashboard() {
+    private func openDashboard(view: String? = nil) {
+        if let view {
+            backend.lastDashboardURL = URL(string: backend.dashboardURL.absoluteString + "/#" + view)
+        }
         backend.start(openDashboard: {
             openWindow(id: "dashboard")
             NSApp.activate(ignoringOtherApps: true)

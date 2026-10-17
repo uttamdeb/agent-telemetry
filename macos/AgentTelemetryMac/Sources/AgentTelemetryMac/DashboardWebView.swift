@@ -20,6 +20,7 @@ struct DashboardWebView: NSViewRepresentable {
     func makeNSView(context: Context) -> WKWebView {
         let view = WKWebView(frame: .zero)
         view.navigationDelegate = context.coordinator
+        view.uiDelegate = context.coordinator
         context.coordinator.observe(view)
         view.load(URLRequest(url: pageURL))
         return view
@@ -30,7 +31,7 @@ struct DashboardWebView: NSViewRepresentable {
         // it or reset its filters, scroll position, drawers and table state.
     }
 
-    final class Coordinator: NSObject, WKNavigationDelegate {
+    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
         private let host: String
         private let port: Int
         private let onNavigate: ((URL) -> Void)?
@@ -65,6 +66,25 @@ struct DashboardWebView: NSViewRepresentable {
                 NSWorkspace.shared.open(url)
             }
             decisionHandler(.cancel)
+        }
+
+        func webView(_ webView: WKWebView,
+                     runJavaScriptAlertPanelWithMessage message: String,
+                     initiatedByFrame frame: WKFrameInfo,
+                     completionHandler: @escaping () -> Void) {
+            let alert = NSAlert()
+            alert.messageText = "AgentTelemetry"
+            alert.informativeText = message
+            alert.addButton(withTitle: "OK")
+            present(alert, in: webView.window) { _ in completionHandler() }
+        }
+
+        private func present(_ alert: NSAlert, in window: NSWindow?, completion: @escaping (NSApplication.ModalResponse) -> Void) {
+            if let window {
+                alert.beginSheetModal(for: window, completionHandler: completion)
+            } else {
+                completion(alert.runModal())
+            }
         }
     }
 }

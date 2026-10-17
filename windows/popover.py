@@ -86,7 +86,7 @@ class Popover:
             raise C.WinError(C.get_last_error())
         # Standard HWNDs retain focus, keyboard and accessibility behavior.
         for identifier, title in ((2, "Start monitoring"), (9, "Details & settings"),
-            (1, "Open dashboard"), (3, "Refresh now"), (8, "Quit AgentTelemetry"),
+            (1, "Open dashboard"), (13, "Local servers"), (3, "Refresh now"), (8, "Quit AgentTelemetry"),
             (10, "Icon"), (11, "Numbers"), (6, "Open at login"),
             (5, "Start monitoring automatically"), (7, "Import existing data…"), (12, "Retry")):
             handle = w.create_window(0, "BUTTON", title, 0x5001400b, 0, 0, 0, 0,
@@ -159,7 +159,8 @@ class Popover:
             self._place(9, 14, details, 282, 32)
             self._place(12, 244, details - 29, 52, 24, self.warning)
             self.place_settings()
-            self._place(1, 14, dashboard, 282, 30)
+            self._place(1, 14, dashboard, 138, 30)
+            self._place(13, 160, dashboard, 136, 30)
             self._place(3, 14, footer, 101, 26)
             self._place(8, 126, footer, 170, 26)
         requested = snapshot["requested"]
@@ -169,6 +170,7 @@ class Popover:
         w.enable_window(self.combo, requested and not busy and not closing)
         w.enable_window(self.controls[7], not requested and not self.tray.monitor.process and not busy and not closing)
         w.enable_window(self.controls[1], not busy and not closing)
+        w.enable_window(self.controls[13], not busy and not closing)
         w.enable_window(self.controls[12], not busy and not closing)
         w.enable_window(self.controls[8], not closing)
         for identifier in (5, 6, 10, 11):
@@ -335,6 +337,9 @@ class Popover:
         elif identifier == 1:
             self.box(dc, rect, self.colors["accent"] if enabled else self.colors["line"], 6)
             self.text(dc, "Open dashboard  ↗", rect, 12, 600, "on_accent" if enabled else "muted", 0x25)
+        elif identifier == 13:
+            self.box(dc, rect, self.colors["hover"] if pressed else self.colors["card"], 6, self.colors["line"])
+            self.text(dc, "Local servers", rect, 12, 600, tone, 0x25)
         elif identifier == 9:
             self.text(dc, ("⌄" if self.expanded else "›") + "   Details & settings", rect, 12, 600, tone)
         else:
@@ -360,7 +365,7 @@ class Popover:
             self.tray.save_settings()
             self.tray.update_icon()
             self.update(force=True)
-        elif identifier in (1, 7):
+        elif identifier in (1, 7, 13):
             self.hide()
             self.tray.command(identifier)
         else:
