@@ -52,7 +52,7 @@ def check_archive(path):
             assert data == (ROOT / relative).read_bytes(), relative
         for name in names:
             assert not any(part in {".usage_cache.json", ".peers.json", ".peers", ".usage-backups",
-                                    ".local_servers.json", "mcp-access.json", "mcp-access.lock",
+                                    ".local_servers.json", "mcp-access.json", "mcp-access.lock", "project-names.json",
                                     "server.log", "node_modules", ".git", "test", "tests",
                                     "__pycache__"} or part.startswith(".mcp-access-")
                                for part in name.split("/")), name

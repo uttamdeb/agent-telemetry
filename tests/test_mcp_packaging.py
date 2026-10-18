@@ -27,7 +27,7 @@ class MCPPackagingTests(unittest.TestCase):
         for name in MCP_RUNTIME_FILES:
             with self.subTest(mac_module=name):
                 self.assertIn(f'"$AT_REPO_ROOT/{name}"', mac_package)
-        for private_pattern in ("mcp-access.json", "mcp-access.lock", ".mcp-access-*"):
+        for private_pattern in ("mcp-access.json", "mcp-access.lock", ".mcp-access-*", "project-names.json"):
             with self.subTest(mac_private_pattern=private_pattern):
                 self.assertIn(private_pattern, mac_package)
 
@@ -47,7 +47,7 @@ class MCPPackagingTests(unittest.TestCase):
             forbidden_files = (
                 ".usage_cache.json", ".peers.json", ".local_servers.json",
                 ".local_servers.secret", "mcp-access.json", "mcp-access.lock",
-                ".mcp-access-stage.tmp", "server.log",
+                ".mcp-access-stage.tmp", "server.log", "project-names.json",
             )
             for name in forbidden_files:
                 with self.subTest(name=name):

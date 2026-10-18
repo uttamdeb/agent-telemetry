@@ -134,6 +134,7 @@ function multiPanel(panelId, items, set, isTools){
     </div>`).join("") || `<div class="dd-item dim">nothing in this range</div>`;
 }
 function buildFilterPanels(){
+  canonicalProjectFilters();
   const r = range();
   const tokBySrc = {}, tokByProv = {}, tokByProj = {}, tokByModel = {}, tokByIde = {}, tokByDev = {}, seen = new Set();
   for(const x of RAW.records){
@@ -1787,6 +1788,7 @@ function renderSettings(cfg){
   const days=cfg.claude_cleanup_days, def=cfg.claude_cleanup_default;
   openDrawer(`
     <div class="eyebrow">Settings</div>
+    ${cfg.project_names_error?`<div class="stg-note" role="alert">${esc(cfg.project_names_error)}</div>`:""}
     <h2 class="stg-h">Menu bar / system tray</h2>
     <div id="nativeAppBox"><div class="stg-hint">Loading…</div></div>
     <h2 class="stg-h">Claude Code log retention</h2>

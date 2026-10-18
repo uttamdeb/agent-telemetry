@@ -126,7 +126,7 @@ EOF
 if find "$AT_APP_PATH/Contents/Resources" \( -name .usage_cache.json -o -name .usage-backups -o -name server.log \
      -o -name .peers.json -o -name .peers -o -name .local_servers.json \
      -o -name '.local_servers.*' -o -name mcp-access.json -o -name mcp-access.lock \
-     -o -name '.mcp-access-*' \) -print -quit | grep -q .; then
+     -o -name '.mcp-access-*' -o -name project-names.json \) -print -quit | grep -q .; then
   echo "Refusing to package user telemetry data." >&2
   exit 1
 fi

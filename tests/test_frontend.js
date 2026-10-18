@@ -10,6 +10,9 @@ vm.runInContext(fs.readFileSync(path.join(root,'static/insights.js'),'utf8'),con
 const views=fs.readFileSync(path.join(root,'static/views.js'),'utf8');
 vm.runInContext(views.slice(0,views.indexOf('document.getElementById("tabs").addEventListener')),context);
 const run=code=>vm.runInContext(code,context);
+assert.equal(run(`RAW={project_aliases:{old:'current'}}; S.projs=new Set(['old','current']); canonicalProjectFilters(); [...S.projs].join(',')`),'current');
+assert.equal(run(`RAW={project_aliases:{a:'b',b:'a'}}; S.projs=new Set(['a']); canonicalProjectFilters(); [...S.projs].join(',')`),'a');
+run(`RAW=null; S.projs=new Set()`);
 assert.equal(run(`SRC.codex.icon`),'openai');
 assert.equal(run(`SRC.opencode.label`),'OpenCode');
 assert.match(run(`toolLabel('opencode')`),/>OpenCode</);

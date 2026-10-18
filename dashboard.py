@@ -814,6 +814,8 @@ def build_editor_snapshot(query):
         with _lock:
             items = list(_state["files"].items())
         local, aliases, alias_error = _local_id(), {}, False
+        preferences, project_error = _project_preferences()
+        items = N.project_items(items, local, preferences)
         try:
             names = SN.display_names()
         except ValueError:
@@ -835,6 +837,8 @@ def build_editor_snapshot(query):
                                    display_aliases=aliases)
         if alias_error:
             result["limitations"].append("Saved session display names could not be read; recorded titles are shown.")
+        if project_error:
+            result["limitations"].append(project_error)
         return result
 
 
@@ -963,6 +967,14 @@ def _claude_parent_descriptors(files, local):
     return {key: values[0] for key, values in candidates.items() if len(values) == 1}
 
 
+def _project_preferences():
+    try:
+        return N.project_preferences(), None
+    except ValueError as error:
+        sys.stderr.write("[projects] " + str(error) + "\n")
+        return {"version": 1, "aliases": {}, "roots": {}}, str(error)
+
+
 def _build_payload_locked():
     try:
         display_names, display_name_error = SN.display_names(), ""
@@ -988,11 +1000,13 @@ def _build_payload_locked():
 
     with _lock:
         items = list(_state["files"].items())
+    local = _local_id()
+    preferences, project_error = _project_preferences()
     # a connected device's aggregates join the loop under its own id; everything
     # below is keyed by device the same way it is by IDE
     items += _peer_items()
+    items = N.project_items(items, local, preferences)
     files = _one_per_conversation(items)
-    local = _local_id()
     claude_children = _claude_child_transcript_counts(files, local)
     claude_parents = _claude_parent_descriptors(files, local)
 
@@ -1249,6 +1263,8 @@ def _build_payload_locked():
         "generated_at": time.time(),
         "meta": dict(_meta),
         "cache_error": _cache_error["v"] or _meta.get("cache_error"),
+        "project_names_error": project_error,
+        "project_aliases": preferences["aliases"],
         "device": dict(DEVICE, id=local),
         # every device in the data: this one first, then each connected one
         "devices": _devices_meta(),
@@ -1667,7 +1683,9 @@ def _codex_config():
 
 def build_settings():
     cur = _read_claude_settings()
+    _, project_error = _project_preferences()
     return {
+        "project_names_error": project_error,
         "claude_settings_path": CLAUDE_SETTINGS_PATH,
         "claude_settings_exists": os.path.exists(CLAUDE_SETTINGS_PATH),
         "claude_cleanup_days": cur.get("cleanupPeriodDays"),
@@ -1821,7 +1839,9 @@ def build_storage():
     # Only scalar aggregate fields are used below; copy them under the refresh
     # lock, then release it before the filesystem scans.
     with _refresh_lock, _lock:
-        files = [dict(a) for a in _state["files"].values()]
+        items = list(_state["files"].items())
+        preferences, _ = _project_preferences()
+        files = [a for _, a in N.project_items(items, _local_id(), preferences)]
     per, rows, growth = {}, [], {}
     for agg in files:
         src = agg.get("source", "?")
