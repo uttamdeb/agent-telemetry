@@ -1,0 +1,158 @@
+/* Motion enhances feedback. All content is readable before this file's JS opts in. */
+:root {
+  --motion-ease: cubic-bezier(.2,.7,.2,1);
+  --motion-settle: cubic-bezier(.22,1,.36,1);
+}
+
+/* The product arrives as one scene; the headline and controls are immediately usable. */
+html.motion-ready:not(.motion-intro-complete) .site-header { animation: header-arrive 360ms var(--motion-settle) backwards; }
+html.motion-ready:not(.motion-intro-complete) .hero-copy { animation: copy-arrive 520ms var(--motion-settle) backwards; }
+html.motion-ready:not(.motion-intro-complete) .hero-actions { animation: action-arrive 480ms 90ms var(--motion-settle) backwards; }
+html.motion-ready:not(.motion-intro-complete) .dashboard-showcase.motion-first-view { animation: product-arrive 640ms 100ms var(--motion-settle) backwards; }
+
+/* Only off-screen card groups are prepared for a reveal. Reading never waits for text. */
+html.motion-ready .motion-reveal {
+  opacity: .4;
+  translate: 0 12px;
+  transition: opacity 420ms ease, translate 520ms var(--motion-settle);
+}
+html.motion-ready .motion-reveal.is-visible,
+html.motion-ready .motion-reveal:focus-within {
+  opacity: 1;
+  translate: 0 0;
+}
+html.motion-ready .motion-staggered > :is(.step, .download-platform, li) {
+  animation: card-arrive 440ms var(--motion-settle) backwards;
+  animation-delay: calc(var(--motion-index, 0) * 45ms);
+}
+
+/* One initial trace demonstrates the chart; subsequent exploration is immediate. */
+html.motion-ready .demo-chart.motion-chart-run .chart-line {
+  stroke-dasharray: var(--motion-chart-length, 1200);
+  animation: chart-draw 760ms var(--motion-ease) both;
+}
+html.motion-ready .demo-chart.motion-chart-run .chart-line-blue { animation-delay: 80ms; }
+html.motion-ready :is(.sample-number, .demo-metric strong) { font-variant-numeric: tabular-nums; }
+html.motion-ready .demo-panel.motion-arriving {
+  animation: panel-arrive 220ms var(--motion-settle) both;
+}
+
+/* Selection travels between controls while the actual controls remain in place. */
+html.motion-ready :is(.demo-tabs, .demo-view-nav) { position: relative; isolation: isolate; }
+html.motion-ready .demo-tabs::before,
+html.motion-ready .demo-view-nav::before {
+  position: absolute;
+  z-index: -1;
+  top: 0;
+  left: 0;
+  content: "";
+  pointer-events: none;
+  opacity: 0;
+  transition: transform 240ms var(--motion-settle), width 220ms var(--motion-settle),
+    height 220ms var(--motion-settle), opacity 140ms ease;
+}
+html.motion-ready .demo-tabs::before {
+  width: var(--active-tab-width, 0px);
+  height: var(--active-tab-height, 0px);
+  transform: translate(var(--active-tab-left, 0px), var(--active-tab-top, 0px));
+  border: 1px solid rgb(182 239 211 / 22%);
+  border-radius: 6px;
+  background: rgb(182 239 211 / 13%);
+}
+html.motion-ready .demo-view-nav::before {
+  right: 0;
+  height: var(--active-view-height, 0px);
+  transform: translateY(var(--active-view-top, 0px));
+  border: 1px solid rgb(182 239 211 / 15%);
+  border-radius: 8px;
+  background: linear-gradient(90deg, rgb(182 239 211 / 12%), rgb(182 239 211 / 4%));
+}
+html.motion-ready .demo-tabs.has-active-tab::before,
+html.motion-ready .demo-view-nav.has-active-view::before { opacity: 1; }
+html.motion-ready .demo-tabs.has-active-tab button[aria-selected="true"],
+html.motion-ready .demo-view-nav.has-active-view .demo-side-item.active { border-color: transparent; background: transparent; }
+
+/* Press and download feedback stay local to the action, with no decorative ripple. */
+html.motion-ready :is(.button, .nav-cta, .download-link, .menu-toggle, .window-control, [data-copy-command]) {
+  transition-property: background, border-color, color, box-shadow, scale;
+  transition-duration: 160ms;
+  transition-timing-function: ease;
+}
+html.motion-ready :is(.button, .nav-cta, .download-link, .menu-toggle, .window-control, [data-copy-command]):active:not(:disabled) {
+  scale: .985;
+  transition-duration: 80ms;
+}
+html.motion-ready .download-arrow svg { transition: translate 180ms var(--motion-settle); }
+html.motion-ready .download-link:is(:hover, :focus-visible) .download-arrow svg { translate: 0 2px; }
+html.motion-ready [data-copy-state="copied"] { border-color: rgb(182 239 211 / 50%); color: var(--mint-bright); }
+
+/* The glass chooser opens from its trigger, including when placed above it. */
+.install-popover { --popover-enter-y: -6px; }
+.install-popover[data-placement="above"] { --popover-enter-y: 6px; transform-origin: var(--popover-origin-x, 32px) bottom; }
+.install-popover[data-placement="below"] { transform-origin: var(--popover-origin-x, 32px) top; }
+.install-popover:popover-open { max-height: var(--install-max-height, calc(100dvh - 24px)); }
+html.motion-ready .install-menu[open] .install-popover {
+  animation: popover-arrive 220ms var(--motion-settle) backwards;
+}
+
+@media (max-width: 760px) {
+  html.motion-ready .site-nav {
+    display: flex;
+    visibility: visible;
+    opacity: 1;
+    translate: 0 0;
+    transform-origin: top right;
+    transition: opacity 160ms ease, translate 200ms var(--motion-settle), visibility 200ms;
+  }
+  html.motion-ready.is-menu-closed .site-nav {
+    visibility: hidden;
+    opacity: 0;
+    translate: 0 -6px;
+    pointer-events: none;
+  }
+}
+
+html.motion-ready .faq-list > details > summary::after {
+  transition: transform 220ms var(--motion-settle), color 160ms ease;
+}
+html.motion-ready .faq-list > details[open] > summary::after { transform: translateY(-50%); }
+html.motion-ready .faq-list > details[open] > .faq-answer { animation: answer-arrive 200ms ease; }
+
+@keyframes header-arrive { from { opacity: .4; translate: 0 -5px; } to { opacity: 1; translate: 0 0; } }
+@keyframes copy-arrive { from { opacity: .45; translate: 0 10px; } to { opacity: 1; translate: 0 0; } }
+@keyframes action-arrive { from { opacity: .6; translate: 0 6px; } to { opacity: 1; translate: 0 0; } }
+@keyframes product-arrive { from { opacity: .6; translate: 0 16px; } to { opacity: 1; translate: 0 0; } }
+@keyframes card-arrive { from { opacity: .65; translate: 0 8px; } to { opacity: 1; translate: 0 0; } }
+@keyframes chart-draw { from { stroke-dashoffset: var(--motion-chart-length, 1200); } to { stroke-dashoffset: 0; } }
+@keyframes panel-arrive {
+  from { opacity: .55; translate: calc(var(--panel-direction, 1) * 5px) 0; }
+  to { opacity: 1; translate: 0 0; }
+}
+@keyframes popover-arrive {
+  from { translate: 0 var(--popover-enter-y); scale: .985; }
+  to { translate: 0 0; scale: 1; }
+}
+@keyframes answer-arrive { from { opacity: .6; } to { opacity: 1; } }
+
+html.motion-reduced *,
+html.motion-reduced *::before,
+html.motion-reduced *::after {
+  animation: none !important;
+  transition: none !important;
+  scroll-behavior: auto !important;
+}
+html.motion-reduced .motion-reveal { opacity: 1 !important; translate: none !important; }
+html.motion-reduced .demo-panel { translate: none !important; }
+html.motion-suspended *, html.motion-suspended *::before, html.motion-suspended *::after { animation-play-state: paused !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  html.motion-ready *,
+  html.motion-ready *::before,
+  html.motion-ready *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+  html.motion-ready .motion-reveal { opacity: 1 !important; translate: none !important; }
+  html.motion-ready .demo-panel { translate: none !important; }
+}
