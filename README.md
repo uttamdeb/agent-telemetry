@@ -302,6 +302,12 @@ Previous title metadata is backed up privately in
 This supports local Claude Code transcripts, Codex through its installed CLI’s
 [official name API](https://learn.chatgpt.com/docs/app-server), and OpenCode’s SQLite
 session stores. Other formats, remote sessions and deleted logs cannot be edited.
+Recognized local Claude subagent transcripts instead offer **Name in AgentTelemetry**.
+This saves a private display name on this device without editing Claude's transcript,
+native subagent name, or parent session. The preview states this scope explicitly.
+These names live in `AgentTelemetryNative/session-display-names.json`, outside the
+usage ledger, summaries, and device sharing. Enter the source title again to remove
+a display-name override. See [subagent name behavior](docs/subagent-sessions.md).
 Tool/provider icons are bundled locally, including the OpenAI mark for Codex; no remote
 logo requests occur. Their sources and licenses are in `static/tool-icons/README.md`.
 
