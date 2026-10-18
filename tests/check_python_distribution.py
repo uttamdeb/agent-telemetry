@@ -120,15 +120,32 @@ def check_install(wheel, version):
         venv.EnvBuilder(with_pip=True).create(target)
         scripts = target / ("Scripts" if os.name == "nt" else "bin")
         python = scripts / ("python.exe" if os.name == "nt" else "python")
-        subprocess.run([str(python), "-m", "pip", "install", "--no-index", "--no-deps", str(wheel)],
-                       check=True, cwd=root, env=environment, capture_output=True, text=True)
+        # Package-install tooling can create its own cache/config directories.
+        # Keep those outside the application's empty mock home so the no-write
+        # check measures AgentTelemetry, not whichever pip ships with the runner.
+        installer_home = root / "installer-home"
+        installer_home.mkdir()
+        installer_environment = environment.copy()
+        for name in ("HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "XDG_STATE_HOME", "XDG_DATA_HOME", "XDG_CONFIG_HOME"):
+            installer_environment[name] = str(installer_home)
+        subprocess.run([str(python), "-m", "pip", "--isolated", "--disable-pip-version-check",
+                        "--no-cache-dir", "install", "--no-index", "--no-deps", str(wheel)],
+                       check=True, cwd=root, env=installer_environment, capture_output=True, text=True)
+
+        def assert_home_empty(stage):
+            paths = sorted(str(path.relative_to(home)) for path in home.rglob("*"))
+            assert not paths, f"{stage} wrote mock user state: {paths}"
+
+        assert_home_empty("Package installation")
         for command in ("agenttelemetry-app", "agenttelemetry", "agent-telemetry"):
             executable = scripts / (command + (".exe" if os.name == "nt" else ""))
             result = subprocess.run([str(executable), "--help"], check=True, cwd=root,
                                     env=environment, capture_output=True, text=True)
             assert "--data-dir" in result.stdout and "--port" in result.stdout
+            assert_home_empty(command + " --help")
         subprocess.run([str(python), "-m", "agent_telemetry", "--help"], check=True,
                        cwd=root, env=environment, capture_output=True, text=True)
+        assert_home_empty("python -m agent_telemetry --help")
         paths = ["/", "/chart.js", "/manifest.json", "/sw.js", "/api/health"]
         paths += ["/" + asset for asset in sorted(ASSETS) if asset.startswith("static/")]
         code = "EXPECTED_VERSION = " + repr(version) + "\nRESOURCE_PATHS = " + repr(paths) + "\n" + SMOKE
@@ -136,7 +153,7 @@ def check_install(wheel, version):
                                 env=environment, capture_output=True, text=True)
         if result.returncode:
             raise RuntimeError(result.stderr or result.stdout)
-        assert not list(home.iterdir()), "Help or resource serving wrote user state"
+        assert_home_empty("Installed imports and HTTP resources")
         print(result.stdout.strip())
 
 
