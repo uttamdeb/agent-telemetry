@@ -1,9 +1,9 @@
 # AgentTelemetry landing page
 
-This directory is a standalone, static marketing page for AgentTelemetry v2.0.0. It does
-not start or connect to the dashboard and contains no personal usage records. Dashboard
-figures shown in the interactive preview are illustrative sample data written directly
-in the page.
+This directory is a standalone, static marketing page for the AgentTelemetry 2.0.0 app
+and the 2.0.1 desktop editor extension. It does not start or connect to the dashboard
+and contains no personal usage records. Dashboard figures shown in the interactive
+preview are illustrative sample data written directly in the page.
 
 ## Preview locally
 
@@ -33,13 +33,18 @@ settings with the source. Keep API tokens outside the repository and deployment 
 The files are ready to host as a static site. Download links point to the existing
 AgentTelemetry v2.0.0 release: macOS 13+ Apple Silicon and Intel DMGs, and a Windows
 10/11 x64 installer. Those downloads are unsigned/unnotarized; see the repository README
-for installation notes and checksums. The hero install chooser is native HTML and works
-without JavaScript; it links to those same release assets and to the Linux/source
-alternative. Native downloads use prominent labeled buttons. The source card and FAQ
-lead with `pip install agenttelemetry-app`, followed by the `agenttelemetry` launch step;
-`uvx agenttelemetry-app` is a secondary disclosure. Both have copy controls. The first-party Python package
-is published as [agenttelemetry-app 2.0.0](https://pypi.org/project/agenttelemetry-app/2.0.0/).
-Fresh `uvx` and `pip` installations from the public index have been verified.
+for installation notes and checksums. The hero install chooser works without JavaScript
+and links to those assets, the editor card, and the Linux/source alternative. The
+editor card links to the [Visual Studio Marketplace extension](https://marketplace.visualstudio.com/items?itemName=agenttelemetry-team.agenttelemetry)
+and the [universal 2.0.1 VSIX](https://github.com/uttamdeb/agent-telemetry/releases/download/v2.0.0/agenttelemetry-2.0.1.vsix)
+with its desktop editor install guide. It supports desktop VS Code 1.85+ and compatible
+desktop forks. Starting local monitoring from the editor needs Python 3.9+ or a supported
+installed AgentTelemetry runtime; the extension does not bundle or install Python or
+start monitoring automatically. The dashboard/native app version remains 2.0.0;
+the immutable PyPI distribution revision is [agenttelemetry-app 2.0.0.post1](https://pypi.org/project/agenttelemetry-app/2.0.0.post1/).
+The source card and FAQ lead with `pip install agenttelemetry-app`, followed by the
+`agenttelemetry` launch step; `uvx agenttelemetry-app` is a secondary disclosure. Both
+source commands have copy controls.
 
 ## Product limits and privacy
 
@@ -47,8 +52,13 @@ The dashboard runs locally and reads the coding-tool logs already on that comput
 figures are estimates at API list prices; subscription users do not pay per token, and
 some source usage is unavailable in the logs. Optional device sharing is opt-in over a
 local network. Optional account snapshots make a provider lookup only after the user
-confirms it. The marketing preview does none of these things and never reads a real
-ledger.
+confirms it. The stdio MCP bridge is off by default, requires a running dashboard, and
+returns requested analytics to the configured client after the user enables access in
+Settings. A cloud-backed client may forward those results to its provider. Project/device
+display names and connected-device usage have separate opt-ins; MCP results exclude
+prompts, session titles, native IDs, paths, credentials, and account identities. The editor extension
+shows recorded usage and does not start monitoring on installation or opening. The
+marketing preview does none of these things and never reads a real ledger.
 
 ## Assets
 
@@ -104,9 +114,17 @@ its full design.
   and mobile selector.
 - Test preview minimize/restore, expand/collapse with Escape, and reset to Overview; check
   labels and pressed/expanded states stay synchronized.
-- Open the hero install chooser and verify all three release downloads, their platform and
-  file-type labels, and the Linux/source link. Follow the source link and check the visible
-  pip command and launch step, copy status, and expandable uvx alternative.
+- Open the hero install chooser and verify all three native downloads, their platform and
+  file-type labels, the editor link, and the Linux/source link. Follow the editor link;
+  check the Marketplace target, universal VSIX download, desktop editor guide, and the
+  separate app/extension version labels.
+- On a fresh page load, follow both hero links to the editor and MCP cards; their
+  headings must settle below the fixed navigation at desktop and mobile widths.
+- Check the MCP setup card and guide link. Confirm the off-by-default state, running
+  dashboard requirement, consent path, separate name/device opt-ins, and cloud-client
+  forwarding warning appear near the setup entry point and in the privacy section/FAQ.
+- Follow the source link and check the visible pip command and launch step, copy status,
+  and expandable uvx alternative.
 - Try command copying in a secure browser context, then with clipboard access unavailable;
   verify success is announced only after copying and the fallback selects the command.
 - Check download links, text contrast, and both regular and reduced-motion settings.
