@@ -66,6 +66,14 @@ test('snapshot schema strips unknown private fields and preserves typed optional
   assert.equal(value.sessions[0].end, '2026-10-18T10:01:00Z');
   delete fixture.sessions[0].end; assert.equal(validateSnapshot(fixture).sessions[0].end, null);
 });
+test('Copilot inclusive child usage and unavailable status survive validation', () => {
+  const fixture = validSnapshot();
+  Object.assign(fixture.sessions[0], {source: 'copilot', usage_in_parent: true, usage_status: 'unavailable'});
+  const child = validateSnapshot(fixture).sessions[0];
+  assert.equal(child.usage_in_parent, true); assert.equal(child.usage_status, 'unavailable');
+  fixture.sessions[0].usage_status = 'made-up';
+  assert.throws(() => validateSnapshot(fixture), {code: 'SCHEMA'});
+});
 test('all rendered snapshot fields reject malformed nested types without TypeError', () => {
   const mutations = [
     value => {value.sessions[0].end = {};}, value => {value.sessions[0].title = [];}, value => {value.sessions[0].efforts = [{}];},

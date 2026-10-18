@@ -650,7 +650,12 @@ Use tests/preview_accounts.py for web checks with mock data only.
   model request, credential read or automatic OTel setting change. Source ids and
   palette stay `copilot`; unavailable/partial/error sessions carry a tooltip.
   Cache **58** adds optional SDK coverage metadata and retains all v53–57 entries;
-  peers 52–57 remain readable. Do not rebuild. See docs/copilot-sdk.md.
+  peers 52–57 remain readable. Cache 61 retains all v53–60 entries and peers 52–60.
+  SDK revision 3 backfills the private parent cwd and named, explicit agent IDs.
+  Copilot child receipts/compactions are inclusive breakdowns, not extra summary usage.
+  Agent desk projects these as linked child rows and marks unavailable/partial usage.
+  Parent and child compaction timing is isolated by agent ID. Never rebuild.
+  See docs/copilot-sdk.md.
   Still not read: JetBrains and `GitHub.copilot-chat/transcripts/` (turns only).
 - **OpenCode**: current versions use one SQLite `opencode.db`; older ones use
   `storage/message/<session>/msg_*.json`. All are read. The DB parser supports both

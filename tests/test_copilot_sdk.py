@@ -93,6 +93,67 @@ class CopilotSDKTests(unittest.TestCase):
         self.assertNotIn("Prompt 1", json.dumps(agg["state"]))
         self.assertAlmostEqual(D._cost("copilot", "GLM 5.3", 90, 20, 10, 0, 0), .0002166)
 
+    def test_workspace_path_backfills_and_child_context_never_overrides_parent(self):
+        self.turn(1)
+        agg = self.parse()
+        self.assertEqual(agg["cwd"], r"C:\Users\fixture\repos\demo")
+        agg["copilot_sdk"]["version"] = 2
+        agg.pop("cwd")
+        newer = self.parse(agg, write=False)
+        self.assertEqual(newer["cwd"], r"C:\Users\fixture\repos\demo")
+        self.events += [self.event("session.context_changed", "move", 4, {"cwd": "/fixtures/other"}),
+                        self.event("session.context_changed", "child-move", 5, {"cwd": "/private/child"}, agentId="child")]
+        self.assertEqual(self.parse(newer)["cwd"], "/fixtures/other")
+
+    def test_three_named_sdk_children_are_breakdowns_not_extra_usage(self):
+        self.turn(1)
+        for i in range(3):
+            aid = "child-" + str(i)
+            self.events += [self.event("subagent.started", "spawn-" + aid, 3,
+                {"agentDisplayName": "Review " + str(i), "model": self.MODEL}, agentId=aid),
+                self.event("assistant.message", "reply-" + aid, 4,
+                    {"content": "PRIVATE CHILD CONTENT", "model": self.MODEL, "apiCallId": "call-" + aid}, agentId=aid),
+                self.event("session.usage_record", "usage-" + aid, 4,
+                    {"usage": {"model": self.MODEL, "apiCallId": "call-" + aid,
+                     "inputTokens": 100, "outputTokens": 20, "cacheReadTokens": 10}}, agentId=aid)]
+        replay = copy.deepcopy(self.events[-1]); replay["id"] = "replayed-receipt"
+        self.events.append(replay)
+        spawn = copy.deepcopy(self.events[-4]); spawn["id"] = "replayed-spawn"
+        self.events.append(spawn)
+        self.events += [self.event("session.compaction_start", "child-compact-start", 5, {}, agentId="child-0"),
+            self.event("session.compaction_complete", "child-compact", 6,
+                {"success": True, "compactionTokensUsed": {"model": self.MODEL,
+                 "inputTokens": 10, "outputTokens": 2}}, agentId="child-0")]
+        agg = self.parse()
+        children = agg["copilot_sdk"]["agents"]
+        self.assertEqual(len(children), 3)
+        self.assertEqual(agg["sessions"][0]["subagents"], 3)
+        self.assertEqual([a["title"] for a in children], ["Review 0", "Review 1", "Review 2"])
+        self.assertTrue(all(a["model"] == "GLM 5.3" and a["usage_status"] == "recorded" for a in children))
+        self.assertEqual((agg["totals"]["in"], agg["totals"]["out"], agg["totals"]["cr"]), (280, 62, 30))
+        self.assertEqual(len(children[0]["compactions"]), 1)
+        self.assertEqual(children[0]["compactions"][0]["duration_ms"], 60000)
+        self.assertEqual(agg["sessions"][0]["compactions"], [])
+        self.assertNotIn("PRIVATE CHILD CONTENT", json.dumps(children))
+
+    def test_child_without_receipts_stays_unavailable(self):
+        self.events.append(self.event("subagent.started", "spawn", 2,
+            {"agentDisplayName": "Research", "model": self.MODEL}, agentId="child"))
+        self.assertEqual(self.parse()["copilot_sdk"]["agents"][0]["usage_status"], "unavailable")
+
+    def test_child_compaction_usage_does_not_double_count_inclusive_host_totals(self):
+        self.turn(1)
+        self.events += [self.event("subagent.started", "spawn", 3, {"model": self.MODEL}, agentId="child"),
+            self.event("session.compaction_complete", "compact", 4, {"success": True,
+                "compactionTokensUsed": {"model": self.MODEL, "inputTokens": 10, "outputTokens": 2}}, agentId="child")]
+        con = self.store()
+        self.usage(con, 1, inp=1000, out=100, cachedTokens=0)
+        agg = self.parse()
+        self.assertEqual((agg["totals"]["in"], agg["totals"]["out"]), (1000, 100))
+        child = agg["copilot_sdk"]["agents"][0]
+        self.assertEqual(child["usage_status"], "partial")
+        self.assertEqual(sum(r["in"] + r["out"] for r in child["records"].values()), 12)
+
     def test_wal_only_updates_and_idempotent_refresh(self):
         self.turn(1)
         con = self.store()
@@ -530,7 +591,7 @@ class CopilotSDKTests(unittest.TestCase):
         agg["copilot_sdk"]["version"] = 1
         newer = self.parse(agg, write=False)
         self.assertIsNot(newer, agg)
-        self.assertEqual(newer["copilot_sdk"]["version"], 2)
+        self.assertEqual(newer["copilot_sdk"]["version"], 3)
         saved = copy.deepcopy(newer)
         self.events.append(self.receipt("broken", 3, inp=-1))
         with self.assertRaises(ValueError): self.parse(newer)
@@ -556,12 +617,13 @@ class CopilotSDKTests(unittest.TestCase):
         cache = self.root / "cache.json"
         files = {"live": {"source": "copilot", "totals": {"in": 500}},
                  "archived": {"source": "codex", "archived": True, "totals": {"in": 123}}}
-        cache.write_text(json.dumps({"version": 57, "files": files}))
-        with patch.object(D, "CACHE_PATH", str(cache)), patch.dict(D._state, {"files": {}}), patch.dict(D._dirty, {"v": False}):
-            D.load_cache()
-            self.assertEqual(D._state["files"], files)
-            self.assertTrue(D._dirty["v"])
-            self.assertTrue(D._peer_cache_ok(57))
+        for version in (57, 60):
+            cache.write_text(json.dumps({"version": version, "files": files}))
+            with patch.object(D, "CACHE_PATH", str(cache)), patch.dict(D._state, {"files": {}}), patch.dict(D._dirty, {"v": False}):
+                D.load_cache()
+                self.assertEqual(D._state["files"], files)
+                self.assertTrue(D._dirty["v"])
+                self.assertTrue(D._peer_cache_ok(version))
 
 
 if __name__ == "__main__": unittest.main()

@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.2
+
+- Attribute Copilot SDK sessions to their recorded workspace instead of excluding them from the workspace brief.
+- Show named Copilot SDK subagents linked to their parent, with recorded usage and compactions. Child usage remains an inclusive breakdown and is never added to overall totals again.
+- Show unavailable and partial usage explicitly; preserve retained history during the optional metadata backfill.
+
 ## 2.0.1
 
 - Update the bundled shared backend with the optional read-only MCP analytics bridge and its dashboard Settings controls. MCP stays disabled until explicitly enabled, with separate scopes for display names and paired-device data.

@@ -29,7 +29,7 @@ code --install-extension agenttelemetry-team.agenttelemetry
 
 ### Install a VSIX in another desktop editor
 
-Use the provided `agenttelemetry-2.0.1.vsix` in a **desktop** VS Code, Cursor, Antigravity or compatible VS Code fork supporting the VS Code 1.85+ API and a local extension host.
+Use the provided `agenttelemetry-2.0.2.vsix` in a **desktop** VS Code, Cursor, Antigravity or compatible VS Code fork supporting the VS Code 1.85+ API and a local extension host.
 
 1. Open the editor's Extensions view.
 2. Choose **Install from VSIX…** from the Extensions menu or Command Palette.

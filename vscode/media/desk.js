@@ -244,8 +244,8 @@
     const role = session.subagent ? 'Subagent' : 'Main agent';
     const relation = session.subagent && !graph.parent.has(session.key) ? allGraph.parent.has(session.key) ? ' · parent hidden by filter' : session.parent_status === 'outside_scope' ? ' · parent outside scope' : session.parent_status === 'linked' ? ' · parent outside shown list' : ' · parent unavailable' : '';
     copy.append(el('span', 'tree-title', title), el('span', 'tree-meta', role + ' · ' + sourceLabel(session.source) + relation));
-    const amount = el('span', 'tree-amount', compact(session.tokens)); amount.append(el('small', '', 'tokens'));
-    line.append(copy, amount); line.title = title + '\n' + role + ' · ' + sourceLabel(session.source) + relation + '\n' + n(session.tokens).toLocaleString('en-US') + ' recorded tokens';
+    const amount = el('span', 'tree-amount', session.usage_status === 'unavailable' ? '—' : compact(session.tokens)); amount.append(el('small', '', session.usage_status === 'unavailable' ? 'unavailable' : 'tokens'));
+    line.append(copy, amount); line.title = title + '\n' + role + ' · ' + sourceLabel(session.source) + relation + '\n' + (session.usage_status === 'unavailable' ? 'Usage unavailable' : n(session.tokens).toLocaleString('en-US') + ' recorded tokens');
     item.append(line);
     if (children.length) { const group = el('div', 'tree-group'); group.setAttribute('role', 'group'); group.hidden = !expanded; for (const child of children) group.append(treeItem(child, level + 1)); item.append(group); }
     return item;
@@ -281,19 +281,23 @@
       const button = el('button', 'text-button', text(owner.title) || 'Untitled session'); button.type = 'button'; button.dataset.parent = owner.key; button.dataset.focus = 'parent:' + session.key; parent.append(button); nodes.push(parent);
     } else if (session.subagent) nodes.push(el('p', 'detail-parent', session.parent_status === 'outside_scope' ? 'Parent is outside the selected workspace or date range.' : session.parent_status === 'linked' ? 'The recorded parent is not included in this session list.' : 'Parent link unavailable in the recorded local metadata.'));
     const stats = el('div', 'detail-stats');
-    for (const [value, label] of [[compact(session.tokens), 'recorded tokens'], [money(session.cost), 'estimated API cost']]) { const stat = el('p'); stat.append(el('strong', '', value), el('span', '', label)); stats.append(stat); }
+    for (const [value, label] of [[session.usage_status === 'unavailable' ? '—' : compact(session.tokens), 'recorded tokens'], [session.usage_status === 'unavailable' ? '—' : money(session.cost), 'estimated API cost']]) { const stat = el('p'); stat.append(el('strong', '', value), el('span', '', label)); stats.append(stat); }
     nodes.push(stats);
     const metadata = el('dl', 'metadata');
     const efforts = Array.isArray(session.efforts) ? session.efforts.filter(value => typeof value === 'string') : [];
     const compactions = typeof session.compactions === 'number' && Number.isFinite(session.compactions) && session.compactions >= 0 ? n(session.compactions).toLocaleString('en-US') + ' recorded' : 'Unavailable';
     const entries = [['Model', text(session.model) || 'Not recorded'], ['Recorded effort', efforts.length ? efforts.map(effortLabel).join(' · ') : 'Not recorded'], ['Compactions', compactions], ['Last record', session.end ? shortDate(session.end.slice(0, 10)) + ' · ' + time(session.end) : 'Unavailable']];
     for (const [label, value] of entries) metadata.append(el('dt', '', label), el('dd', '', value));
-    nodes.push(metadata, renderComposition(session));
+    nodes.push(metadata);
+    if (session.usage_status !== 'unavailable') nodes.push(renderComposition(session));
+    if (session.usage_in_parent) nodes.push(el('p', 'detail-note', 'This child’s recorded usage is already included in its Copilot parent and the overall totals. Do not add it again.'));
+    if (session.usage_status === 'unavailable') nodes.push(el('p', 'detail-note', 'Token usage is unavailable in the recorded data. This is not a known zero.'));
+    if (session.usage_status === 'partial') nodes.push(el('p', 'detail-note', 'Recorded usage is incomplete; these figures are a lower bound.'));
     const scope = state.snapshot && state.snapshot.from !== state.snapshot.to ? shortDate(state.snapshot.from) + ' — ' + shortDate(state.snapshot.to) : RANGE_LABELS[state.range];
     nodes.push(el('p', 'detail-scope', 'Usage & compactions: ' + scope + ' · ' + (state.scope === 'all' ? 'all local projects' : 'this workspace') + '. Effort reflects recorded metadata, never your current settings.'));
     if (session.detail_limited) nodes.push(el('p', 'detail-note', 'Some historical detail is unavailable. Missing metadata has not been reconstructed from other sessions.'));
     if (session.archived) nodes.push(el('p', 'detail-note', 'Retained history: the source log is no longer available. These figures come from your durable local ledger.'));
-    if ((graph.children.get(session.key) || []).length) nodes.push(el('p', 'detail-note', 'Child rows are linked by recorded identities. This figure remains the session’s own recorded usage; child totals are not added here.'));
+    if ((graph.children.get(session.key) || []).length) nodes.push(el('p', 'detail-note', session.source === 'copilot' ? 'Copilot’s recorded parent usage includes its children. Child breakdowns are not added again.' : 'Child rows are linked by recorded identities. This figure remains the session’s own recorded usage; child totals are not added here.'));
     replace(detail, nodes);
   }
   function renderComposition(session) {

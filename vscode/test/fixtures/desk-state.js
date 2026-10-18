@@ -26,6 +26,16 @@ function makeState() {
 }
 function scenario(name) {
   const state = makeState();
+  if (name === 'copilot') {
+    const sessions = state.snapshot.sessions.slice(0, 3).concat(state.snapshot.sessions[4]);
+    for (const row of sessions) { row.source = 'copilot'; row.model = 'GLM 5.3'; row.efforts = []; }
+    for (const row of sessions.slice(1)) {
+      row.parent_key = sessions[0].key; row.parent_status = 'linked'; row.usage_in_parent = true; row.usage_status = 'recorded';
+    }
+    Object.assign(sessions[3], {title: 'Usage not saved', tokens: 0, input: 0, output: 0, cache_read: 0, cache_write: 0, cost: 0, usage_status: 'unavailable'});
+    Object.assign(state.snapshot, {sessions, sessions_total: 4});
+    Object.assign(state.snapshot.summary, {tokens: sessions[0].tokens, cost: sessions[0].cost, sessions: 4, main_agents: 1, subagents: 3});
+  }
   if (name === 'stale') { state.connection.status = 'offline'; state.connection.message = 'The local service could not be reached. Automatic retries are continuing.'; }
   if (name === 'offline' || name === 'restricted' || name === 'upgrade') { state.snapshot = null; state.since = null; state.selected_session = null; state.connection.status = 'offline'; }
   if (name === 'restricted') state.trusted = false;

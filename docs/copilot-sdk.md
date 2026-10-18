@@ -77,9 +77,17 @@ precedence in its existing parser.
 SDK snapshots contain only normalized numeric/model metadata. If an auxiliary
 database disappears, already recovered turn usage survives in the durable ledger.
 Version 58 retains all existing version 53–57 entries and older archived history.
-SDK parser revision 2 reparses available SDK logs even when their file signatures
-are unchanged. It changes no aggregate fields or global cache version; archived
-history stays intact and failed reparses preserve the previous entry for retry.
+SDK parser revision 3 reparses available SDK logs even when their file signatures
+are unchanged. Cache 61 retains existing v53–60 entries, including deleted archives;
+failed reparses preserve the previous entry for retry. The recorded parent cwd
+is private workspace-attribution metadata and remains excluded from peer exports.
+Explicit `subagent.started` agent IDs identify named child breakdowns. Per-agent
+receipts are deduplicated, and successful child compactions retain their own timing.
+Child compaction request usage enters the inclusive parent accounting once.
+Agent desk projects these children with recorded parent links; child rows never
+increase summary tokens or estimated cost. Missing child receipts remain unavailable,
+and incomplete receipt coverage is partial. Recorded lifecycle events do not prove
+that a worker is still running. Dashboard session details list the recorded identities.
 No rebuild is needed. Parsing never resumes a session, starts a model turn, reads
 credential stores or changes a user's telemetry settings.
 
