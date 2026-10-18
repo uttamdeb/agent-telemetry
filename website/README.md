@@ -16,8 +16,8 @@ python3 -m http.server 8788 --bind 127.0.0.1 --directory website
 Then open <http://127.0.0.1:8788>. The page has no build step, package install, runtime
 dependencies, analytics, API calls, or remote fonts, scripts, or images. Its JavaScript
 handles the mobile menu, sample-dashboard views and window controls, command copying, and
-finite product entrances, sliding selections, chart drawing and interruptible
-disclosures. All page assets are served from this directory. CSS and JavaScript URLs carry
+scroll reveals, sample-number entrances, animated disclosures and optional ambient
+motion. All page assets are served from this directory. CSS and JavaScript URLs carry
 content versions so browser caches do not hide preview updates.
 
 ## Vercel hosting
@@ -67,39 +67,28 @@ Team portraits in `assets/team/` are local copies of public GitHub profile image
 manually curated order requested for the page. This order is static; the page serves its
 local portraits and does not query GitHub at runtime.
 
-## Design direction and research
+## Design references
 
-The page is organized around a local developer's usage instrument: a compact,
-specific introduction, the interactive dashboard, the supported tools, concrete
-usage questions, the native companion, local processing/privacy, and installation.
-The sample dashboard is the main visual. It contains invented figures and never
-connects to a visitor's dashboard. Graphite surfaces, restrained mint accents,
-system sans headings and monospace metadata give prose, data and actions distinct
-roles. The team order remains Uttam, Shad, Moshiur and Niloy, without ranking labels.
+`glass.css` owns the material layer: a mint/cyan light field behind translucent
+surfaces, background frost, reflected highlights and rim lighting. The floating
+navigation remains available while scrolling; dense chart and command content keeps
+its contrast layers. The install chooser uses the browser's top layer when available
+so its frost samples the actual page, with viewport-aware placement and a native
+`details` fallback. Reduced-transparency and increased-contrast preferences use solid
+surfaces; reduced-motion remains supported independently.
 
-The research informed the hierarchy and material choices rather than supplying a
-layout to copy:
+This material pass follows [NN/G's glassmorphism guidance](https://www.nngroup.com/articles/glassmorphism/)
+and [Apple's material principles](https://developer.apple.com/videos/play/wwdc2025/219/).
+The homepage and Work page of [uttamdeb.com](https://uttamdeb.com/) were inspected
+for the relationship between its coloured environment, translucent navigation and
+floating foreground cards.
 
-- [NN/G: homepage principles](https://www.nngroup.com/articles/homepage-design-principles/)
-  and [information scent](https://www.nngroup.com/articles/information-scent/): say
-  what the product does early, show useful context, and make actions explicit.
-- [Linear: interface hierarchy](https://linear.app/now/behind-the-latest-design-refresh):
-  let supporting navigation recede and vary visual weight by importance.
-- [Linear: its approach to glass](https://linear.app/now/linear-liquid-glass),
-  [Apple: materials](https://developer.apple.com/videos/play/wwdc2025/219/), and
-  [NN/G: glassmorphism](https://www.nngroup.com/articles/glassmorphism/): reserve
-  translucent depth for floating controls, with stable contrast for dense content.
-- [Resend](https://resend.com/), [Raycast](https://www.raycast.com/), and
-  [uttamdeb.com](https://uttamdeb.com/): foreground tangible product artifacts,
-  use specific language, and establish a clear relationship between a surface
-  and what sits behind it. No layouts or artwork were copied.
-
-`styles.css` owns layout, typography and solid surfaces. `glass.css` owns the
-foreground materials and solid fallbacks for increased contrast or reduced
-transparency. The install chooser uses the browser's top layer where available,
-with viewport-aware placement and a native `details` fallback. `motion.js` and
-`motion.css` handle purposeful entrances and interaction feedback, respecting
-reduced motion and changes to that preference while the page is open.
+The visual direction draws on [Diponkar](https://diponkar.com/) for bold typography and
+beveled glass controls, [uttamdeb.com](https://uttamdeb.com/) for editorial serif/sans
+contrast and layered glass depth, and [Codeburn](https://codeburn.app/) for product-led
+storytelling and clear download choices. [evasanchez.info](https://evasanchez.info/) was
+also checked, but access stopped at a robot challenge, so this page makes no claim about
+its full design.
 
 ## Manual QA checklist
 
@@ -108,7 +97,7 @@ reduced motion and changes to that preference while the page is open.
 - At a narrow viewport, open and close the navigation by button, section link, and
   Escape; confirm the button label and `aria-expanded` stay in sync and Escape returns
   focus to the button. Check that desktop navigation stays visible after resizing.
-- Use the eight sidebar views, the Devices tab and all nine choices in the mobile
+- Use all eight sample views from the desktop sidebar and all nine choices in the mobile
   selector; confirm the selected view changes and every panel remains keyboard reachable.
 - Use the Overview, Sessions, and Devices tabs by click, arrow keys, Home, and End; confirm
   only the selected panel is shown and tab selection stays synchronized with the sidebar
@@ -124,15 +113,8 @@ reduced motion and changes to that preference while the page is open.
   With JavaScript disabled, verify the navigation, sample panels, native install chooser,
   source command and uvx disclosure, and page content remain readable. The preview
   should not contact the dashboard or send analytics requests.
-- Follow all three usage-question links; confirm each selects its corresponding sample
-  view and scrolls to the product. Copy the hero pip command as well as the source-card
-  install commands and readable launch steps.
-- Check finite entrances, the one-time chart trace, sliding selection, accordion
-  opening/closing and button feedback. Rapidly toggle a disclosure and change
+- Check normal-motion entrances, sample counters, chart drawing, sliding tab selection,
+  accordion opening/closing and button feedback. Rapidly toggle a disclosure and change
   reduced-motion preference while it animates; final native open/closed state must agree
-  with its visible content. Animations settle after interactions and stop under reduced
-  motion. `motion.js` owns motion; `site.js` owns controls.
-- Inspect glass over visible background detail in the navigation, chooser and companion
-  popover. Verify opaque fallbacks under increased contrast or reduced transparency.
-  At 320, 390, 768, 1024, 1280 and 1440 pixels, check actual document and body widths,
-  legible commands, aligned workflow steps and the full footer wordmark.
+  with its visible content. Ambient hero motion pauses off screen and all motion stops
+  under reduced motion. `motion.js` owns reveals; `site.js` only enhances controls.

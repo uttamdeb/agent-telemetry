@@ -3,18 +3,18 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Tokens, time and estimated API cost across your AI coding tools. A free, open source dashboard built from the logs on your computer.">
-  <meta property="og:title" content="AgentTelemetry — Your AI coding, in plain numbers.">
-  <meta property="og:description" content="Tokens, time and estimated API cost across your AI coding tools, read from the logs already on your computer.">
+  <meta name="description" content="A private, local dashboard for tokens, time and estimated cost across your AI coding tools. Free and open source.">
+  <meta property="og:title" content="AgentTelemetry — Every agent. One clear picture.">
+  <meta property="og:description" content="See the tokens, time, and estimated cost behind your AI coding. One private dashboard, right on your machine.">
   <meta property="og:type" content="website">
-  <meta name="theme-color" content="#111613">
-  <title>AgentTelemetry — Your AI coding, in plain numbers.</title>
+  <meta name="theme-color" content="#070d0d">
+  <title>AgentTelemetry — Every agent. One clear picture.</title>
   <link rel="icon" type="image/png" href="assets/app-icon.png">
-  <link rel="stylesheet" href="styles.css?v=34035ef69b51">
-  <link rel="stylesheet" href="glass.css?v=d29e0baa5821">
-  <link rel="stylesheet" href="motion.css?v=23147f0c2ebf">
-  <script src="site.js?v=24cd30de5ba8" defer></script>
-  <script src="motion.js?v=d5b10511bde7" defer></script>
+  <link rel="stylesheet" href="styles.css?v=8e23d28657f0">
+  <link rel="stylesheet" href="glass.css?v=39611be7afad">
+  <link rel="stylesheet" href="motion.css?v=6a8d95d4f3ba">
+  <script src="site.js?v=093df9fe99a9" defer></script>
+  <script src="motion.js?v=71572e25f74d" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
@@ -32,19 +32,19 @@
       <a href="#faq">FAQ</a>
       <a href="#team">Team</a>
       <a class="nav-github" href="https://github.com/uttamdeb/agent-telemetry" target="_blank" rel="noopener noreferrer">GitHub <span aria-hidden="true">↗</span></a>
-      <a class="nav-cta" href="#download">Download the app <span aria-hidden="true">↓</span></a>
+      <a class="nav-cta" href="#download">Install the app <span aria-hidden="true">↗</span></a>
     </nav>
   </header>
 
   <main id="main">
     <section class="hero" id="top" aria-labelledby="hero-title">
       <div class="hero-copy" data-reveal>
-        <p class="eyebrow">LOCAL USAGE DASHBOARD <span aria-hidden="true">/</span> V2.0.0</p>
-        <h1 id="hero-title">Your AI coding,<br>in plain numbers.</h1>
-        <p class="hero-intro">Tokens, time, and estimated API cost across your AI coding tools. Read from the logs already on your computer.</p>
+        <p class="eyebrow"><span class="live-dot" aria-hidden="true"></span>Your AI work, in focus</p>
+        <h1 id="hero-title">Every agent.<br><em>One clear</em><br>picture.</h1>
+        <p class="hero-intro">See the tokens, time, and estimated cost behind your AI coding. One private dashboard, right on your machine.</p>
         <div class="hero-actions">
           <details class="install-menu" data-install-menu>
-            <summary class="button button-primary install-trigger" aria-controls="install-popover"><span class="install-trigger-copy"><b>Download the app</b><small>macOS &amp; Windows</small></span><svg class="install-chevron" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
+            <summary class="button button-primary install-trigger" aria-controls="install-popover"><span class="install-trigger-copy"><b>Install the app</b><small>Choose your platform</small></span><svg class="install-chevron" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
             <div class="install-popover" id="install-popover">
               <p class="install-popover-label">Choose your version</p>
               <a class="install-option" href="https://github.com/uttamdeb/agent-telemetry/releases/download/v2.0.0/AgentTelemetry-2.0.0-macos-arm64.dmg">
@@ -56,32 +56,49 @@
               <a class="install-option" href="https://github.com/uttamdeb/agent-telemetry/releases/download/v2.0.0/AgentTelemetry-2.0.0-windows-x64-setup.exe">
                 <span class="install-option-copy"><b>Windows · x64</b><small>Windows 10/11 · Python included</small></span><span class="install-type">EXE</span><span class="install-option-arrow" aria-hidden="true">↓</span>
               </a>
-              <a class="install-source-link" href="#source-install">Linux &amp; terminal install <span aria-hidden="true">↗</span></a>
+              <a class="install-source-link" href="#source-install">Run in the terminal <span aria-hidden="true">↗</span></a>
             </div>
           </details>
-          <a class="text-link" href="#product">Try the sample <span aria-hidden="true">↘</span></a>
+          <a class="text-link" href="#source-install"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="m7 9 3 3-3 3m6 0h4"/></svg>Install with pip <span aria-hidden="true">↘</span></a>
         </div>
-        <p class="hero-meta">Free &amp; open source <span aria-hidden="true">·</span> Local by default</p>
+        <p class="hero-meta">Free &amp; open source <span aria-hidden="true">·</span> macOS, Windows &amp; Linux</p>
       </div>
-      <aside class="hero-terminal" aria-labelledby="hero-terminal-title" data-reveal>
-        <div class="hero-terminal-head"><span class="source-kicker">TERMINAL</span><a href="#source-install">Python 3.9+ <span aria-hidden="true">↗</span></a></div>
-        <h2 class="hero-terminal-title" id="hero-terminal-title">Or run it with pip.</h2>
-        <div class="code-wrap">
-          <p class="command-platform-label">01 <span>INSTALL</span></p>
-          <pre><code id="hero-pip-command">pip install <span class="package-name">agenttelemetry-app</span></code></pre>
-          <button type="button" data-copy-command data-command-target="hero-pip-command" data-copy-status="hero-copy-status" data-js-only aria-label="Copy pip install command"><svg class="copy-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></svg> Copy</button>
-          <p class="copy-status" id="hero-copy-status" role="status" aria-live="polite"></p>
-          <p class="command-launch"><span>02 <b>LAUNCH</b></span><code>agenttelemetry</code></p>
+      <div class="hero-art" aria-label="Illustrative dashboard preview">
+        <div class="art-orbit orbit-one" aria-hidden="true"></div>
+        <div class="art-orbit orbit-two" aria-hidden="true"></div>
+        <img class="signal-art" src="assets/signal-glass.svg" alt="" aria-hidden="true">
+        <div class="sample-float glass-surface" aria-label="Illustrative sample data: Today, 2.4 million tokens and 3 dollars 21 cents estimated API cost">
+          <div class="sample-float-top"><img class="app-icon-mark" src="assets/app-icon.png" alt="" aria-hidden="true"><span>Today</span><span class="sample-live"><i></i> SAMPLE</span></div>
+          <div class="sample-number" data-count="2.4" data-decimals="1">2.4<span>M</span></div>
+          <div class="sample-label">tokens <span>·</span> <b>$3.21</b> est. API cost</div>
+          <div class="sample-spark" aria-hidden="true"><i style="--h:26%"></i><i style="--h:43%"></i><i style="--h:37%"></i><i style="--h:61%"></i><i style="--h:48%"></i><i style="--h:73%"></i><i style="--h:54%"></i><i style="--h:84%"></i><i style="--h:65%"></i><i style="--h:100%"></i><i style="--h:76%"></i><i style="--h:90%"></i></div>
+          <p class="illustrative-note">Illustrative preview</p>
         </div>
-        <p class="hero-terminal-note">macOS, Windows &amp; Linux. After launch, open <code>127.0.0.1:7878</code>.</p>
-      </aside>
+        <span class="art-coordinate coordinate-a" aria-hidden="true">01 / SIGNAL</span>
+        <span class="art-coordinate coordinate-b" aria-hidden="true">LOCAL · PRIVATE</span>
+      </div>
+      <div class="hero-foot"><span>Less guesswork. More perspective.</span><a href="#tools" aria-label="Scroll to supported tools"><span class="scroll-line" aria-hidden="true"></span>SCROLL TO EXPLORE</a></div>
+    </section>
+
+    <section class="tool-band" id="tools" aria-label="Supported AI coding tools">
+      <p>One view across your tools</p>
+      <ul class="tool-list">
+        <li><img src="assets/tool-icons/claude.svg" alt="" aria-hidden="true"><span>Claude Code</span></li>
+        <li><img src="assets/tool-icons/openai.svg" alt="" aria-hidden="true"><span>Codex</span></li>
+        <li><img src="assets/tool-icons/copilot.svg" alt="" aria-hidden="true"><span>Copilot</span></li>
+        <li><img src="assets/tool-icons/cursor.svg" alt="" aria-hidden="true"><span>Cursor</span></li>
+        <li><img src="assets/tool-icons/opencode.svg" alt="" aria-hidden="true"><span>OpenCode</span></li>
+        <li><img src="assets/tool-icons/hermes.svg" alt="" aria-hidden="true"><span>Hermes</span></li>
+        <li><img src="assets/tool-icons/openclaw.svg" alt="" aria-hidden="true"><span>OpenClaw</span></li>
+      </ul>
     </section>
 
     <section class="product-section section-shell" id="product" aria-labelledby="product-title">
       <div class="section-intro" data-reveal>
+        <div class="section-index"><span>01</span><span class="index-rule"></span><span>The dashboard</span></div>
         <div class="section-intro-grid">
-          <h2 id="product-title">Explore a day of coding.</h2>
-          <p>An interactive preview with illustrative data. Switch views to see how the dashboard organizes your usage.</p>
+          <h2 id="product-title">A little perspective.<br><em>A lot more clarity.</em></h2>
+          <p>Bring usage from your coding tools into one calm view. Follow tokens and estimated cost by model, project, session, day, and more — using the logs already on your computer.</p>
         </div>
       </div>
 
@@ -249,62 +266,22 @@
         </div>
         <div class="showcase-foot"><span><i></i> SAMPLE DATA · NO PERSONAL USAGE SHOWN</span><span>AgentTelemetry v2.0</span></div>
       </div>
-      <div class="product-caption"><span class="caption-mark" aria-hidden="true">↳</span><p>Eight usage views, plus optional device sharing. Your installed dashboard starts with the logs on your computer.</p><span class="caption-side">TOKENS · TIME · COST</span></div>
-    </section>
-
-    <section class="tool-band" id="tools" aria-label="Supported AI coding tools">
-      <p>Reads the tools you already use</p>
-      <ul class="tool-list">
-        <li><img src="assets/tool-icons/claude.svg" alt="" aria-hidden="true"><span>Claude Code</span></li>
-        <li><img src="assets/tool-icons/openai.svg" alt="" aria-hidden="true"><span>Codex</span></li>
-        <li><img src="assets/tool-icons/copilot.svg" alt="" aria-hidden="true"><span>Copilot</span></li>
-        <li><img src="assets/tool-icons/cursor.svg" alt="" aria-hidden="true"><span>Cursor</span></li>
-        <li><img src="assets/tool-icons/opencode.svg" alt="" aria-hidden="true"><span>OpenCode</span></li>
-        <li><img src="assets/tool-icons/hermes.svg" alt="" aria-hidden="true"><span>Hermes</span></li>
-        <li><img src="assets/tool-icons/openclaw.svg" alt="" aria-hidden="true"><span>OpenClaw</span></li>
-      </ul>
-    </section>
-
-    <section class="questions-section section-shell" aria-labelledby="questions-title">
-      <div class="questions-heading" data-reveal>
-        <p class="eyebrow">FOLLOW THE WORK</p>
-        <h2 id="questions-title">From the daily total to the details.</h2>
-        <p>Keep the same date range and filters as you move between views.</p>
-      </div>
-      <div class="question-grid" data-reveal>
-        <article class="question-block">
-          <span class="question-label">TOOLS &amp; MODELS</span>
-          <h3>Which tool did the work?</h3>
-          <p>Compare usage by coding tool and billed model. A model used inside Copilot stays attributed to Copilot.</p>
-          <a class="question-link text-link" href="#product" data-demo-go="tools">Compare tools <span aria-hidden="true">↗</span></a>
-        </article>
-        <article class="question-block">
-          <span class="question-label">PROJECTS &amp; PERIODS</span>
-          <h3>Where did the tokens go?</h3>
-          <p>Compare projects and periods to see which work accounts for your usage and estimated cost.</p>
-          <a class="question-link text-link" href="#product" data-demo-go="projects">Explore projects <span aria-hidden="true">↗</span></a>
-        </article>
-        <article class="question-block">
-          <span class="question-label">SESSIONS &amp; ACTIVITY</span>
-          <h3>What happened in this session?</h3>
-          <p>Follow a session’s recorded usage, models, and activity over time. Timeline detail depends on the records available.</p>
-          <a class="question-link text-link" href="#product" data-demo-go="sessions">See sample sessions <span aria-hidden="true">↗</span></a>
-        </article>
-      </div>
+      <div class="product-caption"><span class="caption-mark" aria-hidden="true">↳</span><p>Eight views, one consistent picture. Compare tools, models, projects, sessions, and time without leaving your machine.</p><span class="caption-side">TOKENS · TIME · COST</span></div>
     </section>
 
     <section class="how-section section-shell" id="how-it-works" aria-labelledby="how-title">
-      <div class="how-heading" data-reveal><h2 id="how-title">Reads your logs.<br>Runs on your computer.</h2><p>Install the native app or run the local dashboard. AgentTelemetry finds supported tool logs and summarizes the usage they contain. No account or API key required.</p></div>
+      <div class="section-index"><span>02</span><span class="index-rule"></span><span>Simple by design</span></div>
+      <div class="how-heading" data-reveal><h2 id="how-title">Already on your machine.<br><em>Finally in view.</em></h2><p>No account to create. No API key to paste. AgentTelemetry reads the usage records your tools have already saved.</p></div>
       <div class="steps" data-reveal>
-        <article class="step"><span class="step-num">01</span><div class="step-icon step-install" aria-hidden="true"><i></i><i></i><i></i></div><h3>Read existing logs</h3><p>Usage comes from the records your supported coding tools already write.</p><span class="step-detail">EXISTING RECORDS</span></article>
+        <article class="step"><span class="step-num">01</span><div class="step-icon step-install" aria-hidden="true"><i></i><i></i><i></i></div><h3>Install or run</h3><p>Choose the native menu bar or system tray app, or start the local dashboard with one command.</p><span class="step-detail">YOUR COMPUTER</span></article>
         <div class="step-connector" aria-hidden="true"><span></span></div>
-        <article class="step"><span class="step-num">02</span><div class="step-icon step-read" aria-hidden="true"><i></i><i></i><i></i></div><h3>Keep a local ledger</h3><p>Summaries are stored on your device, keeping your parsed usage history together.</p><span class="step-detail">ON YOUR DEVICE</span></article>
+        <article class="step"><span class="step-num">02</span><div class="step-icon step-read" aria-hidden="true"><i></i><i></i><i></i></div><h3>Reads existing logs</h3><p>Usage is parsed and summarized on your device, then kept in a local ledger you control.</p><span class="step-detail">NO NEW TRACKER</span></article>
         <div class="step-connector" aria-hidden="true"><span></span></div>
-        <article class="step"><span class="step-num">03</span><div class="step-icon step-pattern" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div><h3>Open the dashboard</h3><p>Explore the details in your browser, or check today’s totals from the native app.</p><span class="step-detail">READY TO EXPLORE</span></article>
+        <article class="step"><span class="step-num">03</span><div class="step-icon step-pattern" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div><h3>Find your patterns</h3><p>See where time and tokens go, compare your tools, and notice what changes.</p><span class="step-detail">YOUR OWN PICTURE</span></article>
       </div>
 
       <div class="companion glass-surface" data-reveal>
-        <div class="companion-copy"><span class="mini-kicker">NATIVE COMPANION</span><h3>Today’s usage,<br>at a glance.</h3><p>Keep today’s tokens and estimated API cost in your macOS menu bar or Windows system tray. Open the full dashboard whenever you want more detail.</p><a class="text-link" href="#download">Download the app <span aria-hidden="true">↓</span></a></div>
+        <div class="companion-copy"><span class="mini-kicker"><i></i> A QUIETER WAY TO CHECK IN</span><h3>At a glance.<br><em>When you need it.</em></h3><p>The optional macOS menu bar and Windows system tray app brings today’s usage close by. Open the full dashboard whenever you want more detail.</p><a class="text-link" href="#download">Install the app <span aria-hidden="true">↗</span></a></div>
         <div class="companion-visual">
           <div class="companion-glow" aria-hidden="true"></div>
           <div class="menu-bar-mock"><img class="menu-bar-app-icon" src="assets/app-icon.png" alt="" aria-hidden="true"><span class="menu-bar-value">2.4M</span><span class="menu-bar-dots">•••</span></div>
@@ -322,35 +299,17 @@
     </section>
 
     <section class="privacy-section section-shell" id="privacy" aria-labelledby="privacy-title">
+      <div class="section-index"><span>03</span><span class="index-rule"></span><span>Private by default</span></div>
       <div class="privacy-layout">
-        <div class="privacy-copy" data-reveal>
-          <p class="eyebrow">YOUR DATA</p>
-          <h2 id="privacy-title">Local by default.</h2>
-          <p class="privacy-lede">Your usage is read and stored on your device. You choose whether to share with your other devices or request an account lookup.</p>
-          <div class="privacy-points">
-            <div><p><b>Optional device sharing</b><br>Connect your own devices over your local network only when you turn sharing on.</p></div>
-            <div><p><b>Account checks with consent</b><br>A one-time provider lookup contacts that provider only after you explicitly request it.</p></div>
-          </div>
-        </div>
-        <div class="privacy-art" role="img" aria-label="Existing tool logs become a local usage ledger and dashboard on your computer.">
-          <div class="local-boundary">
-            <span class="boundary-label">YOUR COMPUTER</span>
-            <div class="local-flow">
-              <div class="flow-node">Existing<br><b>tool logs</b></div>
-              <span class="flow-arrow" aria-hidden="true">→</span>
-              <div class="flow-node">Local<br><b>usage ledger</b></div>
-              <span class="flow-arrow" aria-hidden="true">→</span>
-              <div class="flow-node">Your<br><b>dashboard</b></div>
-            </div>
-            <p class="privacy-footnote">LOCAL BY DEFAULT <span aria-hidden="true">·</span> SHARING OPTIONAL</p>
-          </div>
-        </div>
+        <div class="privacy-copy" data-reveal><p class="eyebrow">A clear boundary, by design</p><h2 id="privacy-title">Your work stays<br><em>your business.</em></h2><p class="privacy-lede">AgentTelemetry reads and summarizes logs on your computer. Optional LAN sharing lets your devices share usage with each other. Provider account lookups contact that provider only when you explicitly request one.</p><div class="privacy-points"><div><span class="point-index">01</span><p><b>Local by default</b><br>Your usage ledger stays on your device. No AgentTelemetry account or API key required.</p></div><div><span class="point-index">02</span><p><b>Sharing is a choice</b><br>Optional device sharing is enabled by you and works across your local network.</p></div><div><span class="point-index">03</span><p><b>Account checks need consent</b><br>One-time provider lookups run only after you explicitly ask for them.</p></div></div></div>
+        <div class="privacy-art" aria-hidden="true"><div class="privacy-horizon"></div><div class="privacy-ring ring-a"></div><div class="privacy-ring ring-b"></div><div class="privacy-ring ring-c"></div><div class="privacy-core"><img src="assets/app-icon.png" alt="" aria-hidden="true"></div><div class="privacy-orbit-label label-top">YOUR DEVICE</div><div class="privacy-orbit-label label-bottom">YOUR CHOICE</div><div class="privacy-footnote">PRIVATE BY DEFAULT <span>·</span> SHARING OPTIONAL</div></div>
       </div>
-      <div class="honesty-note"><span class="honesty-symbol" aria-hidden="true">ⓘ</span><p><b>About the numbers.</b> Cost is an estimate at published API list prices; subscriptions and actual bills can differ. Coverage depends on what each tool records.</p><a href="https://github.com/uttamdeb/agent-telemetry#data-sources" target="_blank" rel="noopener noreferrer">Data sources &amp; limits <span aria-hidden="true">↗</span></a></div>
+      <div class="honesty-note"><span class="honesty-symbol" aria-hidden="true">◌</span><p><b>Honest numbers.</b> Costs are estimates at published API list prices; subscription plans can work differently. Recorded usage, estimates, and unavailable data are distinguished.</p><a href="https://github.com/uttamdeb/agent-telemetry#data-sources" target="_blank" rel="noopener noreferrer">How the data works <span aria-hidden="true">↗</span></a></div>
     </section>
 
     <section class="download-section section-shell" id="download" aria-labelledby="download-title">
-      <div class="download-heading" data-reveal><p class="eyebrow">GET STARTED <span aria-hidden="true">/</span> V2.0.0</p><h2 id="download-title">Install AgentTelemetry.</h2><p>Choose a native app, or run the dashboard from your terminal.</p></div>
+      <div class="download-orbit" aria-hidden="true"><div></div><div></div><div></div></div>
+      <div class="download-heading" data-reveal><div class="section-index"><span>04</span><span class="index-rule"></span><span>Get started</span></div><p class="eyebrow">AGENTTELEMETRY · V2.0.0</p><h2 id="download-title">Meet your new<br><em>point of view.</em></h2><p>Free, open source, and ready to run on your machine.</p></div>
       <div class="download-options" data-reveal>
         <div class="download-platform">
           <div class="platform-heading"><span class="platform-mark apple-mark" aria-hidden="true"><img src="assets/platform-icons/apple.svg" width="24" height="24" alt=""></span><div><h3>macOS</h3><p>Native menu bar app · macOS 13+</p></div></div>
@@ -366,7 +325,7 @@
         </div>
       </div>
       <div class="source-download" id="source-install" data-reveal>
-        <div class="source-copy"><span class="source-kicker">TERMINAL</span><h3>Install with pip</h3><p>Install the package, then launch your local dashboard.</p><span class="source-requirement">Python 3.9+ · macOS, Windows &amp; Linux</span></div>
+        <div class="source-copy"><span class="source-kicker">PREFER THE TERMINAL?</span><h3>Install with pip</h3><p>One command to install. Your own usage, ready to explore.</p><span class="source-requirement">Python 3.9+ · macOS, Windows &amp; Linux</span></div>
         <div class="command-options">
           <div class="code-wrap command-primary">
             <p class="command-platform-label">01 <span>INSTALL</span></p>
@@ -393,14 +352,14 @@
     </section>
 
     <section class="faq-section section-shell" id="faq" aria-labelledby="faq-title">
-      <div class="faq-heading" data-reveal><p class="eyebrow">GOOD TO KNOW</p><h2 id="faq-title">Before you install.</h2><p>A few details about privacy, pricing estimates, and coverage.</p></div>
+      <div class="faq-heading" data-reveal><div class="section-index"><span>05</span><span class="index-rule"></span><span>Good to know</span></div><h2 id="faq-title">A few clear<br><em>answers.</em></h2><p>Know what to expect before you bring your usage into focus.</p></div>
       <div class="faq-list" data-reveal>
         <details><summary><span>01</span>Is AgentTelemetry free?</summary><div class="faq-answer"><p>Yes. AgentTelemetry is free and open source under the MIT license. You can inspect the code, run it from source, or use the native installer on macOS and Windows.</p></div></details>
         <details><summary><span>02</span>Does it upload my usage?</summary><div class="faq-answer"><p>Usage is read and stored locally by default. Optional LAN device sharing only starts when you turn it on. A one-time provider account lookup can contact that provider, and runs only after you explicitly request it. No AgentTelemetry account is needed.</p></div></details>
         <details><summary><span>03</span>Is estimated cost my actual bill?</summary><div class="faq-answer"><p>No. Cost uses published API list prices as an estimate. Subscription plans, negotiated rates, and provider billing details may differ. Some per-request pricing rules cannot be represented exactly in daily summaries.</p></div></details>
         <details><summary><span>04</span>Which tools and usage are covered?</summary><div class="faq-answer"><p>It reads logs from Claude Code and Claude Desktop agent mode, Codex, GitHub Copilot, Cursor, OpenCode, Hermes Agent, and OpenClaw. Coverage depends on what each tool records: some sources provide partial usage or estimates, and recorded, estimated, and unavailable data are distinguished.</p></div></details>
         <details><summary><span>05</span>How do I get started?</summary><div class="faq-answer">
-          <a class="button faq-install-cta" href="#download">Download the app <span aria-hidden="true">↓</span></a>
+          <a class="button faq-install-cta" href="#download">Install the app <span aria-hidden="true">↗</span></a>
           <p>Or install with pip (Python 3.9+):</p>
           <div class="command-options faq-command-options">
             <div class="code-wrap command-primary">
@@ -428,13 +387,14 @@
     </section>
 
     <section class="team-section section-shell" id="team" aria-labelledby="team-title">
+      <div class="section-index"><span>06</span><span class="index-rule"></span><span>The people</span></div>
       <div class="team-heading" data-reveal>
         <div>
-          <p class="eyebrow">THE PEOPLE</p>
-          <h2 id="team-title">Building AgentTelemetry.</h2>
+          <p class="eyebrow">PEOPLE BEHIND AGENTTELEMETRY</p>
+          <h2 id="team-title">A small team.<br><em>A shared point of view.</em></h2>
         </div>
         <div class="team-heading-copy">
-          <p>A small team working across data, design, and developer tools.</p>
+          <p>Design, data, and product come together to make AI coding work easier to understand.</p>
         </div>
       </div>
       <ol class="team-grid" data-reveal>
@@ -444,7 +404,7 @@
               <span class="team-photo-frame"><img src="assets/team/uttamdeb.jpg" width="400" height="400" loading="lazy" alt=""></span>
               <span class="team-name-row"><span class="team-name">Uttam Deb</span><span class="team-link-icon" aria-hidden="true">↗</span></span>
             </a>
-            <p class="team-bio">Creator and data analyst.</p>
+            <p class="team-bio">Data analyst and AgentTelemetry creator, making AI coding usage easier to understand.</p>
           </article>
         </li>
         <li>
@@ -453,7 +413,7 @@
               <span class="team-photo-frame"><img src="assets/team/Shad-Iqbal.png" width="400" height="400" loading="lazy" alt=""></span>
               <span class="team-name-row"><span class="team-name">Shad Iqbal</span><span class="team-link-icon" aria-hidden="true">↗</span></span>
             </a>
-            <p class="team-bio">Product and UX systems designer for the macOS companion.</p>
+            <p class="team-bio">Product and UX systems designer behind the macOS companion.</p>
           </article>
         </li>
         <li>
@@ -462,7 +422,7 @@
               <span class="team-photo-frame"><img src="assets/team/moshiur-hridoy.jpg" width="400" height="400" loading="lazy" alt=""></span>
               <span class="team-name-row"><span class="team-name">Moshiur Hridoy</span><span class="team-link-icon" aria-hidden="true">↗</span></span>
             </a>
-            <p class="team-bio">Product designer for the dashboard.</p>
+            <p class="team-bio">Product designer shaping the dashboard’s everyday experience.</p>
           </article>
         </li>
         <li>
@@ -471,7 +431,7 @@
               <span class="team-photo-frame"><img src="assets/team/niloy-biswas.jpg" width="400" height="400" loading="lazy" alt=""></span>
               <span class="team-name-row"><span class="team-name">Niloy Biswas</span><span class="team-link-icon" aria-hidden="true">↗</span></span>
             </a>
-            <p class="team-bio">Data analyst working on AI agents and Hermes support.</p>
+            <p class="team-bio">Data analyst building AI agents, data systems, and Hermes support.</p>
           </article>
         </li>
       </ol>
@@ -479,8 +439,9 @@
   </main>
 
   <footer class="site-footer">
-    <div class="footer-brand"><a class="footer-wordmark" href="#top"><img src="assets/app-icon.png" width="29" height="29" alt=""><span>Agent<span>Telemetry</span></span></a><p>Local usage analytics for your AI coding tools.</p></div>
+    <div class="footer-brand"><a class="footer-wordmark" href="#top"><img src="assets/app-icon.png" width="29" height="29" alt=""><span>Agent<span>Telemetry</span></span></a><p>One clear picture of your AI coding work.</p></div>
     <div class="footer-topline"><span>LOCAL BY DEFAULT</span><span>OPEN SOURCE · MIT</span><span>V2.0.0</span></div>
+    <div class="footer-large" aria-hidden="true">AgentTelemetry</div>
     <div class="footer-bottom"><span>© 2026 AgentTelemetry</span><div><a href="https://github.com/uttamdeb/agent-telemetry" target="_blank" rel="noopener noreferrer">GitHub ↗</a><a href="https://github.com/uttamdeb/agent-telemetry#readme" target="_blank" rel="noopener noreferrer">Documentation ↗</a><a href="https://github.com/uttamdeb/agent-telemetry/releases" target="_blank" rel="noopener noreferrer">Releases ↗</a></div><span>Made by the AgentTelemetry Team</span></div>
   </footer>
 </body>

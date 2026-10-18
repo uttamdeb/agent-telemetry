@@ -20,10 +20,6 @@
       if (event.target.closest("a[href^='#']")) setMenuOpen(false);
     });
 
-    document.addEventListener("click", (event) => {
-      if (!siteNav.contains(event.target) && !menuToggle.contains(event.target)) setMenuOpen(false);
-    });
-
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape" && menuToggle.getAttribute("aria-expanded") === "true") {
         setMenuOpen(false, true);
@@ -45,123 +41,58 @@
 
   const installMenus = Array.from(document.querySelectorAll("[data-install-menu]"));
   if (installMenus.length) {
-    const closeInstallMenu = (menu, returnFocus = false) => {
-      menu.open = false;
-      const panel = menu.querySelector(".install-popover");
-      if (typeof panel?.hidePopover === "function" && panel.matches(":popover-open")) panel.hidePopover();
-      if (returnFocus) menu.querySelector("summary")?.focus();
-    };
     document.addEventListener("click", (event) => {
       installMenus.forEach((menu) => {
-        if (menu.open && !menu.contains(event.target)) closeInstallMenu(menu);
-      });
-    });
-    document.addEventListener("focusin", (event) => {
-      installMenus.forEach((menu) => {
-        if (menu.open && !menu.contains(event.target)) closeInstallMenu(menu);
+        if (menu.open && !menu.contains(event.target)) menu.open = false;
       });
     });
 
     installMenus.forEach((menu) => {
       menu.addEventListener("click", (event) => {
-        if (event.target.closest("a[href]")) closeInstallMenu(menu);
+        if (event.target.closest("a[href]")) menu.open = false;
       });
 
       // The top layer lets frost sample the actual page behind the chooser,
       // beyond the hero's animated stacking contexts. Native details is the fallback.
       const panel = menu.querySelector(".install-popover");
       const trigger = menu.querySelector("summary");
-      if (!panel || !trigger) return;
-      let topLayer = typeof panel.showPopover === "function";
-      if (topLayer) panel.setAttribute("popover", "manual");
+      if (!panel || !trigger || typeof panel.showPopover !== "function") return;
+      panel.setAttribute("popover", "manual");
       let placementFrame = 0;
-      let focusOnOpen = null;
       const placePanel = () => {
         placementFrame = 0;
-        if (!topLayer || !panel.matches(":popover-open")) return;
+        if (!panel.matches(":popover-open")) return;
         const anchor = trigger.getBoundingClientRect();
-        const viewport = window.visualViewport;
-        const left = viewport?.offsetLeft || 0;
-        const top = viewport?.offsetTop || 0;
-        const width = viewport?.width || window.innerWidth;
-        const height = viewport?.height || window.innerHeight;
-        const right = left + width, bottom = top + height;
-        if (anchor.bottom < top || anchor.top > bottom || anchor.right < left || anchor.left > right) {
-          closeInstallMenu(menu);
+        if (anchor.bottom < 0 || anchor.top > window.innerHeight) {
+          menu.open = false;
+          panel.hidePopover();
           return;
         }
-        const gap = 10, edge = 12;
-        const panelWidth = Math.min(width <= 480 ? Math.max(anchor.width, 320) : 420, width - edge * 2);
-        panel.style.setProperty("--install-width", `${panelWidth}px`);
-        const style = getComputedStyle(panel);
-        const border = (parseFloat(style.borderTopWidth) || 0) + (parseFloat(style.borderBottomWidth) || 0);
-        const naturalHeight = panel.scrollHeight + border;
-        const below = bottom - anchor.bottom - gap - edge;
-        const above = anchor.top - top - gap - edge;
-        const openAbove = below < naturalHeight && above > below;
-        const maxHeight = Math.min(Math.max(96, openAbove ? above : below), Math.max(0, height - edge * 2));
-        panel.style.setProperty("--install-max-height", `${maxHeight}px`);
-        const panelHeight = panel.offsetHeight;
-        const panelLeft = Math.max(left + edge, Math.min(anchor.left, right - panelWidth - edge));
-        const panelTop = openAbove ? anchor.top - gap - panelHeight : anchor.bottom + gap;
-        panel.style.setProperty("--install-left", `${panelLeft}px`);
-        panel.style.setProperty("--install-top", `${Math.max(top + edge, Math.min(panelTop, bottom - panelHeight - edge))}px`);
-        panel.style.setProperty("--popover-origin-x", `${Math.max(18, Math.min(anchor.left + anchor.width / 2 - panelLeft, panelWidth - 18))}px`);
+        const gap = 12, edge = 12;
+        const width = Math.min(window.innerWidth <= 480 ? anchor.width : 420, window.innerWidth - edge * 2);
+        panel.style.setProperty("--install-width", `${width}px`);
+        const height = panel.offsetHeight;
+        const below = window.innerHeight - anchor.bottom - gap - edge;
+        const above = anchor.top - gap - edge;
+        const openAbove = below < height && above >= height;
+        const top = openAbove ? anchor.top - gap - height : Math.min(anchor.bottom + gap, window.innerHeight - height - edge);
+        panel.style.setProperty("--install-left", `${Math.max(edge, Math.min(anchor.left, window.innerWidth - width - edge))}px`);
+        panel.style.setProperty("--install-top", `${Math.max(edge, top)}px`);
         panel.dataset.placement = openAbove ? "above" : "below";
       };
       const requestPlacement = () => {
         if (menu.open && !placementFrame) placementFrame = window.requestAnimationFrame(placePanel);
       };
       menu.addEventListener("toggle", () => {
-        trigger.setAttribute("aria-expanded", String(menu.open));
         if (menu.open) {
-          installMenus.forEach((other) => { if (other !== menu && other.open) closeInstallMenu(other); });
-          if (topLayer) {
-            try {
-              if (!panel.matches(":popover-open")) panel.showPopover();
-              placePanel();
-            } catch (_error) {
-              // A partially supported Popover API must not hide the native chooser.
-              topLayer = false;
-              panel.removeAttribute("popover");
-            }
-          }
-          if (focusOnOpen !== null) {
-            const options = Array.from(panel.querySelectorAll("a[href]"));
-            (focusOnOpen === "last" ? options[options.length - 1] : options[0])?.focus();
-            focusOnOpen = null;
-          }
-        } else {
-          focusOnOpen = null;
-          if (topLayer && panel.matches(":popover-open")) panel.hidePopover();
+          panel.showPopover({ source: trigger });
+          placePanel();
+        } else if (panel.matches(":popover-open")) {
+          panel.hidePopover();
         }
-      });
-      trigger.addEventListener("keydown", (event) => {
-        if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
-        event.preventDefault();
-        const last = event.key === "ArrowUp";
-        if (menu.open) {
-          const options = Array.from(panel.querySelectorAll("a[href]"));
-          (last ? options[options.length - 1] : options[0])?.focus();
-        } else {
-          focusOnOpen = last ? "last" : "first";
-          menu.open = true;
-        }
-      });
-      panel.addEventListener("keydown", (event) => {
-        if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
-        const options = Array.from(panel.querySelectorAll("a[href]"));
-        const index = options.indexOf(document.activeElement);
-        if (index < 0) return;
-        event.preventDefault();
-        const next = event.key === "Home" ? 0 : event.key === "End" ? options.length - 1 :
-          (index + (event.key === "ArrowDown" ? 1 : -1) + options.length) % options.length;
-        options[next]?.focus();
       });
       window.addEventListener("resize", requestPlacement, { passive: true });
       window.addEventListener("scroll", requestPlacement, { passive: true });
-      window.visualViewport?.addEventListener("resize", requestPlacement, { passive: true });
-      window.visualViewport?.addEventListener("scroll", requestPlacement, { passive: true });
     });
 
     document.addEventListener("keydown", (event) => {
@@ -170,7 +101,7 @@
       if (!openMenus.length) return;
 
       const focusedMenu = openMenus.find((menu) => menu.contains(document.activeElement));
-      openMenus.forEach((menu) => closeInstallMenu(menu));
+      openMenus.forEach((menu) => { menu.open = false; });
       if (!focusedMenu) return;
 
       event.preventDefault();
@@ -270,29 +201,9 @@
 
     enabledSidebarButtons.forEach((button) => {
       button.addEventListener("click", () => setActiveView(viewForControl(button)));
-      button.addEventListener("keydown", (event) => {
-        if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
-        event.preventDefault();
-        const index = enabledSidebarButtons.indexOf(button);
-        const nextIndex = event.key === "Home" ? 0 : event.key === "End" ? enabledSidebarButtons.length - 1 :
-          (index + (event.key === "ArrowDown" ? 1 : -1) + enabledSidebarButtons.length) % enabledSidebarButtons.length;
-        const nextButton = enabledSidebarButtons[nextIndex];
-        setActiveView(viewForControl(nextButton), { moveFocus: true, focusTarget: nextButton });
-      });
     });
 
     viewSelect?.addEventListener("change", () => setActiveView(viewSelect.value));
-
-    document.querySelectorAll("[data-demo-go]").forEach((link) => {
-      link.addEventListener("click", () => {
-        if (!panelByView.has(link.dataset.demoGo)) return;
-        if (showcase.classList.contains("is-minimized")) changeWindow("restore", () => {
-          showcase.classList.remove("is-minimized");
-          setActiveView(link.dataset.demoGo);
-        });
-        else setActiveView(link.dataset.demoGo);
-      });
-    });
 
     setActiveView(initialView);
 
@@ -319,36 +230,28 @@
       if (expandButton) expandButton.setAttribute("aria-pressed", String(expanded));
     };
 
-    const changeWindow = (action, change) => {
-      const rect = showcase.getBoundingClientRect();
-      const before = { width: rect.width, height: rect.height, marginLeft: getComputedStyle(showcase).marginLeft };
-      change();
-      syncWindowControls();
-      showcase.dispatchEvent(new CustomEvent("demowindowchange", { bubbles: true, detail: { action, before } }));
-    };
-
     minimizeButton?.addEventListener("click", () => {
-      changeWindow("minimize", () => showcase.classList.add("is-minimized"));
+      showcase.classList.add("is-minimized");
+      syncWindowControls();
       restoreButton?.focus();
     });
 
     restoreButton?.addEventListener("click", () => {
-      changeWindow("restore", () => showcase.classList.remove("is-minimized"));
+      showcase.classList.remove("is-minimized");
+      syncWindowControls();
       minimizeButton?.focus();
     });
 
     expandButton?.addEventListener("click", () => {
-      changeWindow("expand", () => {
-        showcase.classList.remove("is-minimized");
-        showcase.classList.toggle("is-expanded");
-      });
+      showcase.classList.remove("is-minimized");
+      showcase.classList.toggle("is-expanded");
+      syncWindowControls();
     });
 
     resetButton?.addEventListener("click", () => {
-      changeWindow("reset", () => {
-        showcase.classList.remove("is-minimized", "is-expanded");
-        setActiveView("overview");
-      });
+      showcase.classList.remove("is-minimized", "is-expanded");
+      syncWindowControls();
+      setActiveView("overview");
     });
 
     syncWindowControls();
@@ -356,15 +259,14 @@
     document.addEventListener("keydown", (event) => {
       if (event.key !== "Escape" || !showcase.classList.contains("is-expanded")) return;
       const focusWasInsideShowcase = showcase.contains(document.activeElement);
-      changeWindow("collapse", () => showcase.classList.remove("is-expanded"));
+      showcase.classList.remove("is-expanded");
+      syncWindowControls();
       if (focusWasInsideShowcase) expandButton?.focus();
     });
   }
 
   const copyButtons = Array.from(document.querySelectorAll("[data-copy-command]"));
   copyButtons.forEach((button) => {
-    const originalLabel = button.getAttribute("aria-label");
-    let feedbackTimer = 0;
     const codeWrap = button.closest(".code-wrap");
     const commandTargetId = button.getAttribute("data-command-target");
     const statusId = button.getAttribute("data-copy-status");
@@ -380,9 +282,6 @@
     };
 
     const manualCopy = () => {
-      window.clearTimeout(feedbackTimer);
-      delete button.dataset.copyState;
-      if (originalLabel) button.setAttribute("aria-label", originalLabel);
       const selection = window.getSelection();
       if (selection && commandElement) {
         const range = document.createRange();
@@ -407,14 +306,6 @@
 
       try {
         await navigator.clipboard.writeText(command);
-        window.clearTimeout(feedbackTimer);
-        button.dataset.copyState = "copied";
-        button.setAttribute("aria-label", "Command copied");
-        feedbackTimer = window.setTimeout(() => {
-          delete button.dataset.copyState;
-          if (originalLabel) button.setAttribute("aria-label", originalLabel);
-          else button.removeAttribute("aria-label");
-        }, 2400);
         announce("Command copied to clipboard.");
       } catch (_error) {
         manualCopy();

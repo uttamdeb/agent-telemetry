@@ -1,34 +1,173 @@
-/* Material belongs to foreground controls. The ledger and reading surfaces stay solid. */
+/* Material layer: light behind the interface, translucent fill, frost and a lit rim.
+   Component layout lives in styles.css; motion remains in motion.css. */
 :root {
-  --glass-rim: rgb(232 245 236 / 24%);
-  --glass-highlight: rgb(245 255 249 / 34%);
-  --glass-depth: 0 14px 36px rgb(0 0 0 / 18%), inset 0 1px 0 rgb(255 255 255 / 14%);
+  --glass-rim: rgb(227 255 245 / 30%);
+  --glass-light: rgb(247 255 251 / 54%);
+  --glass-reflection: linear-gradient(135deg, rgb(245 255 251 / 17%), rgb(235 255 248 / 3%) 42%, rgb(201 245 239 / 8%));
+  --glass-depth: 0 24px 65px rgb(0 7 6 / 28%), inset 0 1px 0 rgb(255 255 255 / 35%), inset 1px 0 0 rgb(255 255 255 / 13%), inset 0 -1px 0 rgb(178 244 223 / 9%);
 }
+
+/* A restrained mint/cyan environment gives the glass something to transmit.
+   This is one decorative layer behind the content, never an overlay over text. */
+body { isolation: isolate; }
+@supports (overflow-x: clip) { body { overflow-x: clip; } }
+body::before {
+  z-index: -1;
+  opacity: 1;
+  background:
+    radial-gradient(ellipse 58% 65% at 0% 5%, rgb(72 132 153 / 29%), transparent 78%),
+    radial-gradient(ellipse 48% 65% at 100% 40%, rgb(69 161 128 / 25%), transparent 78%),
+    radial-gradient(ellipse 46% 42% at 15% 98%, rgb(82 159 138 / 23%), transparent 80%);
+}
+.hero::before {
+  top: 370px;
+  right: auto;
+  left: -170px;
+  width: 720px;
+  height: 640px;
+  background: radial-gradient(ellipse at 38% 48%, rgb(98 203 166 / 26%), rgb(67 136 152 / 12%) 42%, transparent 72%);
+  filter: none;
+}
+
+/* The navigation stays available while content passes beneath its material. */
 html.is-ready .site-header { position: fixed; }
-.site-header { border-color: var(--glass-rim); border-top-color: var(--glass-highlight); background: #222d25; box-shadow: var(--glass-depth); }
-.install-popover { border-color: rgb(232 245 236 / 34%); border-top-color: rgb(245 255 249 / 54%); background: #26342b; box-shadow: 0 20px 54px rgb(0 0 0 / 28%), inset 0 1px 0 rgb(255 255 255 / 25%), inset 1px 0 0 rgb(255 255 255 / 10%); }
-.menu-bar-mock, .popover-mock { border-color: rgb(236 251 240 / 31%); border-top-color: rgb(246 255 248 / 47%); box-shadow: 0 14px 32px rgb(0 0 0 / 20%), inset 0 1px 0 rgb(255 255 255 / 16%); }
-.button-primary, .download-link:not(.download-link-secondary) { box-shadow: inset 0 1px 0 rgb(255 255 255 / 42%), inset 0 -1px 0 rgb(30 69 43 / 13%); }
+.site-header {
+  border-color: var(--glass-rim);
+  border-top-color: var(--glass-light);
+  background: #182c28;
+  box-shadow: var(--glass-depth);
+}
+.site-nav .nav-cta { border-color: rgb(201 255 226 / 42%); background: rgb(182 239 211 / 14%); }
+.button-primary {
+  border-color: rgb(232 255 245 / 86%);
+  background: linear-gradient(135deg, rgb(215 255 235 / 97%), rgb(157 231 202 / 88%));
+  box-shadow: 0 10px 36px rgb(129 235 189 / 18%), inset 0 2px 0 rgb(255 255 255 / 60%), inset 0 -2px 0 rgb(46 112 85 / 16%);
+}
+.install-popover {
+  width: min(420px, calc(100vw - 42px));
+  padding: 14px;
+  border-color: var(--glass-rim);
+  border-top-color: var(--glass-light);
+  border-radius: 20px;
+  background: #1a302a;
+  box-shadow: var(--glass-depth), 0 8px 20px rgb(0 0 0 / 16%);
+}
+.install-popover-label { margin: 4px 10px 10px; color: #c0d9cd; font-size: 10px; }
+.install-option { min-height: 69px; border-radius: 12px; }
+.install-option-copy b { color: #f1fbf5; font-size: 14px; }
+.install-option-copy small { color: #c0d3c9; font-size: 12px; }
+.install-option:hover, .install-option:focus-visible { border-color: rgb(231 255 245 / 23%); background: rgb(230 255 244 / 10%); box-shadow: inset 0 1px 0 rgb(255 255 255 / 9%); }
+.install-type { border-color: rgb(219 255 238 / 28%); background: rgb(220 255 240 / 8%); color: #d7f9e7; }
+.install-source-link { border-top-color: rgb(235 255 246 / 18%); color: #d4e6dc; font-size: 13px; }
+.install-popover:popover-open {
+  position: fixed;
+  inset: var(--install-top, 12px) auto auto var(--install-left, 12px);
+  width: var(--install-width, 420px);
+  max-height: calc(100dvh - 24px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  margin: 0;
+}
+.install-popover::backdrop { background: transparent; pointer-events: none; }
+.hero-meta { color: #b4cbbd; }
+
+.glass-surface,
+.download-platform,
+.source-download,
+.command-alternative,
+.faq-list > details[open] {
+  border-color: var(--glass-rim);
+  border-top-color: rgb(240 255 249 / 45%);
+  background: #172b26;
+  box-shadow: var(--glass-depth);
+}
+.sample-float { border-radius: 21px; }
+.sample-label, .illustrative-note { color: #c6dbcf; }
+.dashboard-showcase { border-radius: 23px; }
+.showcase-topbar { background: rgb(242 255 248 / 4%); }
+.demo-sidebar { background: rgb(3 14 12 / 29%); }
+.companion { background: #112923; }
+.companion .popover-mock { border-color: rgb(233 255 245 / 40%); }
+
+/* The download scene provides colour behind its individual glass sheets.
+   Dense command text and chart contents keep their quieter contrast layers. */
+.download-section {
+  background: radial-gradient(ellipse at 0% 30%, #24473c, transparent 65%), linear-gradient(125deg, #102a25, #112630 72%, #0c1a1d);
+  border-color: rgb(216 250 233 / 22%);
+}
+.download-platform { border-radius: 20px; }
+.source-download { border-radius: 20px; }
+.platform-heading p, .platform-note, .download-assurance small,
+.source-copy p, .source-requirement, .source-kicker,
+.download-heading > p:last-child { color: #c0d3c8; }
+.command-primary { background: linear-gradient(135deg, rgb(159 244 198 / 6%), transparent 65%), rgb(3 18 13 / 81%); }
+.command-alternative > summary { color: #d5e7dd; }
+.faq-list { border-top: 0; }
+.faq-list > details { margin-bottom: 5px; }
+.faq-list > details[open] > summary { padding-left: 16px; }
+.faq-answer p { color: #c9dcd1; }
+.team-card { border-color: rgb(225 255 243 / 19%); background: linear-gradient(145deg, rgb(236 255 245 / 7%), rgb(236 255 245 / 2%)); }
 
 @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .site-header { background: linear-gradient(125deg, rgb(244 255 248 / 7%), rgb(244 255 248 / 1%) 58%), rgb(26 36 29 / 70%); -webkit-backdrop-filter: blur(20px) saturate(115%); backdrop-filter: blur(20px) saturate(115%); }
-  .install-popover { background: linear-gradient(130deg, rgb(244 255 248 / 11%), rgb(230 255 240 / 2%) 52%, rgb(184 229 204 / 5%)), rgb(19 36 25 / 65%); -webkit-backdrop-filter: blur(28px) saturate(135%); backdrop-filter: blur(28px) saturate(135%); }
-  .menu-bar-mock { background: rgb(235 249 238 / 11%); -webkit-backdrop-filter: blur(14px) saturate(110%); backdrop-filter: blur(14px) saturate(110%); }
-  .popover-mock { background: rgb(26 43 31 / 72%); -webkit-backdrop-filter: blur(20px) saturate(120%); backdrop-filter: blur(20px) saturate(120%); }
+  .site-header,
+  .glass-surface,
+  .download-platform,
+  .source-download,
+  .command-alternative,
+  .faq-list > details[open] {
+    background: var(--glass-reflection), rgb(8 24 21 / 36%);
+    -webkit-backdrop-filter: blur(24px) saturate(150%);
+    backdrop-filter: blur(24px) saturate(150%);
+  }
+  .site-header { background: var(--glass-reflection), rgb(8 24 21 / 30%); }
+  .install-popover {
+    background: var(--glass-reflection), rgb(6 25 20 / 48%);
+    -webkit-backdrop-filter: blur(28px) saturate(160%);
+    backdrop-filter: blur(28px) saturate(160%);
+  }
+  .companion { background: linear-gradient(135deg, rgb(223 255 239 / 9%), rgb(16 41 34 / 42%)); }
+  .companion .popover-mock { background: var(--glass-reflection), rgb(7 23 18 / 48%); }
+  .source-download .command-alternative,
+  .faq-answer .command-alternative {
+    background: rgb(3 17 12 / 38%);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 8%);
+  }
+  .demo-view-select { background-color: rgb(12 33 26 / 46%); }
 }
 
 @media (max-width: 760px) {
-  .site-nav { border-color: var(--glass-rim); border-top-color: var(--glass-highlight); background: #26342b; box-shadow: var(--glass-depth); }
+  .hero::before { top: 250px; left: -100px; width: calc(100% + 100px); height: 670px; }
+  .site-nav { border-color: var(--glass-rim); border-top-color: var(--glass-light); background: #1a302a; box-shadow: var(--glass-depth); }
   @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-    /* An open navigation samples the page independently of its parent header. */
-    .site-header:has(.site-nav.is-open) { -webkit-backdrop-filter: none; backdrop-filter: none; }
-    .site-nav { background: rgb(27 42 32 / 88%); -webkit-backdrop-filter: blur(24px) saturate(120%); backdrop-filter: blur(24px) saturate(120%); }
+    /* A frosted ancestor would prevent the open navigation from sampling the page. */
+    .site-header { -webkit-backdrop-filter: none; backdrop-filter: none; }
+    html.is-ready .site-header:not(:has(.site-nav.is-open)) { -webkit-backdrop-filter: blur(24px) saturate(150%); backdrop-filter: blur(24px) saturate(150%); }
+    .site-nav { background: var(--glass-reflection), rgb(5 25 19 / 51%); -webkit-backdrop-filter: blur(28px) saturate(160%); backdrop-filter: blur(28px) saturate(160%); }
   }
 }
-
-@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
-  .site-header, .site-nav, .install-popover, .menu-bar-mock, .popover-mock { background: #25352a !important; border-color: rgb(232 245 236 / 45%) !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+@media (max-width: 480px) {
+  .install-popover { width: 100%; padding: 11px; }
 }
-@media (forced-colors: active) {
-  .site-header, .site-nav, .install-popover, .dashboard-showcase, .menu-bar-mock, .popover-mock, .button, .download-link { border: 1px solid CanvasText; box-shadow: none; }
+
+/* Honour system requests for a more solid, higher-contrast interface. */
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  .site-header,
+  .site-nav,
+  .install-popover,
+  .glass-surface,
+  .download-platform,
+  .source-download,
+  .command-alternative,
+  .faq-list > details[open] {
+    background: #10261e !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+  .demo-view-select {
+    background-color: #10261e !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
 }
