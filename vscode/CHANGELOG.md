@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.0.1
+
+- Update the bundled shared backend with the optional read-only MCP analytics bridge and its dashboard Settings controls. MCP stays disabled until explicitly enabled, with separate scopes for display names and paired-device data.
+- Include all MCP runtime modules and frontend assets in the verified backend allowlist; retain the app's 2.0.0 version, ledger history and existing Agent desk behavior.
+- Document MCP setup, revocation, privacy, service upgrade requirements and the distinction between extension and application versions.
+- Generate the VSIX filename from its manifest version so packaging and CI stay aligned on future updates.
+
 ## 2.0.0
 
 Initial desktop editor extension package.

@@ -131,7 +131,7 @@ jobs:
         run: npm run package
       - name: Verify VSIX contents, privacy exclusions and source digests
         working-directory: .
-        run: python tests/check_editor_vsix.py dist/agenttelemetry-2.0.0.vsix
+        run: python tests/check_editor_vsix.py dist/*.vsix
       - name: Upload verified installable extension
         uses: actions/upload-artifact@v4
         with:
