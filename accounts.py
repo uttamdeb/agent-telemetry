@@ -18,7 +18,10 @@ import sys
 import threading
 import time
 
-import native as N
+if __package__:
+    from . import native as N
+else:
+    import native as N
 
 STALE_AFTER = 300
 METADATA_VERSION = 1

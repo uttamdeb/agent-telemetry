@@ -1,0 +1,70 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agenttelemetry-app"
+version = "2.0.0"
+description = "A private, local dashboard for AI coding agent usage"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.9"
+dependencies = []
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Utilities",
+]
+
+[project.urls]
+Homepage = "https://github.com/uttamdeb/agent-telemetry"
+Repository = "https://github.com/uttamdeb/agent-telemetry"
+Issues = "https://github.com/uttamdeb/agent-telemetry/issues"
+
+[project.scripts]
+agenttelemetry-app = "agent_telemetry.cli:main"
+agenttelemetry = "agent_telemetry.cli:main"
+agent-telemetry = "agent_telemetry.cli:main"
+
+[tool.setuptools]
+packages = ["agent_telemetry"]
+package-dir = { agent_telemetry = "." }
+include-package-data = false
+
+[tool.setuptools.package-data]
+agent_telemetry = [
+  "chart.umd.min.js",
+  "index.html",
+  "manifest.json",
+  "static/app.css",
+  "static/apple-touch-icon.png",
+  "static/charts.js",
+  "static/core.js",
+  "static/icon-192.png",
+  "static/icon-512.png",
+  "static/insights.js",
+  "static/maintenance.js",
+  "static/timeline.js",
+  "static/tool-icons/LICENSE.hermes.txt",
+  "static/tool-icons/LICENSE.openclaw.txt",
+  "static/tool-icons/LICENSE.simple-icons.txt",
+  "static/tool-icons/README.md",
+  "static/tool-icons/claude.svg",
+  "static/tool-icons/copilot.svg",
+  "static/tool-icons/cursor.svg",
+  "static/tool-icons/hermes.svg",
+  "static/tool-icons/openai.svg",
+  "static/tool-icons/openclaw.svg",
+  "static/tool-icons/opencode.svg",
+  "static/views.js",
+  "sw.js",
+]
