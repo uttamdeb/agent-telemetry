@@ -27,6 +27,40 @@ REGISTER = module("windows_release_register", ROOT / "windows" / "installer" / "
 
 
 class PackagingTests(unittest.TestCase):
+    def test_release_refresh_requires_clean_pinned_descendant_and_preserves_tag(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            def git(*args):
+                return subprocess.check_output(["git", "-C", str(root), *args], text=True).strip()
+            git("init", "-q")
+            git("config", "user.name", "Fixture")
+            git("config", "user.email", "fixture@example.invalid")
+            item = root / "source.txt"
+            item.write_text("original")
+            git("add", ".")
+            git("commit", "-qm", "original")
+            original = git("rev-parse", "HEAD")
+            git("tag", "v2.0.0")
+            self.assertEqual(BUILD.validate_source(root, "v2.0.0"), original)
+            item.write_text("updated")
+            git("commit", "-qam", "update")
+            updated = git("rev-parse", "HEAD")
+            with self.assertRaisesRegex(ValueError, "release tag"):
+                BUILD.validate_source(root, "v2.0.0")
+            for wrong in ("main", updated[:8], original):
+                with self.subTest(commit=wrong), self.assertRaisesRegex(ValueError, "full source commit"):
+                    BUILD.validate_source(root, "v2.0.0", wrong)
+            self.assertEqual(BUILD.validate_source(root, "v2.0.0", updated), updated)
+            self.assertEqual(git("rev-parse", "v2.0.0"), original)
+            item.write_text("dirty")
+            with self.assertRaisesRegex(ValueError, "modified"):
+                BUILD.validate_source(root, "v2.0.0", updated)
+            git("checkout", "--", "source.txt")
+            git("checkout", "-q", "--orphan", "unrelated")
+            git("commit", "-qm", "unrelated root")
+            with self.assertRaisesRegex(ValueError, "descend"):
+                BUILD.validate_source(root, "v2.0.0", git("rev-parse", "HEAD"))
+
     @unittest.skipIf(os.name == "nt", "macOS packaging uses a POSIX shell")
     def test_macos_packaging_guard_refuses_private_ledger_backups(self):
         script = (ROOT / "macos/AgentTelemetryMac/Scripts/package-app.sh").read_text()

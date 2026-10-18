@@ -83,10 +83,12 @@ with contextlib.redirect_stdout(io.StringIO()):
 from agent_telemetry import dashboard as D
 from agent_telemetry import parser as P, native as N, accounts as A, session_names as SN
 from agent_telemetry import __version__
-assert __version__ == EXPECTED_VERSION
+from importlib.metadata import version
+assert version("agenttelemetry-app") == EXPECTED_VERSION
+assert __version__ == EXPECTED_VERSION.split(".post", 1)[0]
 assert D.P is P and D.N is N and D.A is A and D.SN is SN
 assert P.A is A and A.N is N and SN.N is N
-assert D.VERSION == {"git": False, "describe": EXPECTED_VERSION}, D.VERSION
+assert D.VERSION == {"git": False, "describe": __version__}, D.VERSION
 assert not Path(D.CACHE_PATH).exists()
 # Serve the installed resources directly; never discover or parse tool logs.
 server = D.Server(("127.0.0.1", 0), D.Handler)

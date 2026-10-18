@@ -41,7 +41,8 @@ services, give each a distinct `--port` and `--data-dir`.
 ## Maintainer release procedure
 
 Build artifacts from a clean, reviewed source tree after setting the intended package
-version in both `pyproject.toml` and `__init__.py`:
+distribution version in `pyproject.toml`. The application version in `__init__.py`
+stays `2.0.0` for packaging revisions such as `2.0.0.post1`; PyPI files are immutable:
 
 ```sh
 python -m pip install --upgrade build twine
