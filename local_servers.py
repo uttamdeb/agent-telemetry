@@ -427,7 +427,10 @@ def _current_uid():
 
 
 def _windows():
-    import local_servers_windows
+    if __package__:
+        from . import local_servers_windows
+    else:
+        import local_servers_windows
     return local_servers_windows
 
 

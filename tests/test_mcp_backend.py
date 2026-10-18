@@ -206,13 +206,22 @@ class MCPBackendTests(unittest.TestCase):
             self.assertNotIn(secret, rendered)
         self.assertEqual(safe["sources"][0]["hint"], mcp_backend._DIAGNOSTIC_HINTS["permission"])
         self.assertEqual(safe["missing_price_model_count"], 3)
+        self.assertEqual(safe["missing_price_models_observed_count"], 3)
+        self.assertEqual(safe["missing_price_model_count_kind"], "observed")
         self.assertEqual(safe["missing_price_models"], ["gpt-6-sentinel"])
         bounded_models = mcp_backend._safe_diagnostics({
             "missing_prices": [f"model-{index}" for index in range(105)],
         })
         self.assertEqual(bounded_models["missing_price_model_count"], 105)
+        self.assertEqual(bounded_models["missing_price_model_count_kind"], "observed_lower_bound")
         self.assertEqual(len(bounded_models["missing_price_models"]), 100)
         self.assertTrue(bounded_models["missing_price_models_truncated"])
+        source_capped_models = mcp_backend._safe_diagnostics({
+            "missing_prices": [f"model-{index}" for index in range(100)],
+        })
+        self.assertEqual(source_capped_models["missing_price_models_observed_count"], 100)
+        self.assertEqual(source_capped_models["missing_price_model_count_kind"], "observed_lower_bound")
+        self.assertTrue(source_capped_models["missing_price_models_truncated"])
         unknown = mcp_backend._safe_diagnostics({
             "status": "SECRET_STATUS", "generation": "invalid",
             "sources": [{"source": "codex", "status": "SECRET_SOURCE_STATUS", "read": "bad"}],
@@ -330,6 +339,52 @@ class MCPBackendTests(unittest.TestCase):
         self.assertTrue(missing_flags["stale"])
         self.assertTrue(missing_flags["windows"][0]["stale"])
         self.assertNotIn("remaining_percent", missing_flags["windows"][0])
+
+    def test_subscription_limit_caps_are_disclosed_after_source_filtering(self):
+        now = 1792281600
+
+        def snapshot(window_count=1, observed=now):
+            return {
+                "observed_at": observed, "origin": "Codex account API", "stale": False,
+                "windows": [{
+                    "window_minutes": 300 + index, "used_percent": 40,
+                    "resets_at": now + 600, "stale": False,
+                } for index in range(window_count)],
+            }
+
+        entries = [
+            {"source": "codex", "snapshots": [snapshot()], "profile": "private-profile"}
+            for _ in range(101)
+        ]
+        entries.extend(
+            {"source": "claude", "snapshots": [snapshot(14)] + [snapshot() for _ in range(17)],
+             "profile": "another-private-profile"}
+            if index == 0 else
+            {"source": "claude", "snapshots": [snapshot()], "profile": "another-private-profile"}
+            for index in range(101)
+        )
+
+        with patch("mcp_backend.time.time", return_value=now):
+            result = mcp_backend._safe_account_limits({"entries": entries}, {"source": "claude"})
+
+        self.assertEqual(result["source_entries_returned"], 100)
+        self.assertEqual(result["source_entries_limit"], 100)
+        self.assertTrue(result["source_entries_truncated"])
+        self.assertEqual(result["snapshot_observations_returned"], 16 + 99)
+        self.assertEqual(result["snapshot_limit_per_source_entry"], 16)
+        self.assertTrue(result["snapshot_observations_truncated"])
+        self.assertEqual(result["quota_windows_returned"], 12 + 15 + 99)
+        self.assertEqual(result["window_limit_per_observation"], 12)
+        self.assertTrue(result["quota_windows_truncated"])
+        self.assertTrue(result["truncated"])
+        self.assertEqual(len(result["entries"]), 16 + 99)
+        self.assertTrue(all(item["source"] == "claude" for item in result["entries"]))
+        self.assertEqual(result["entries"][0]["windows_returned"], 12)
+        self.assertEqual(result["entries"][0]["windows_observed_count"], 14)
+        self.assertTrue(result["entries"][0]["windows_truncated"])
+        rendered = json.dumps(result)
+        self.assertNotIn("private-profile", rendered)
+        self.assertNotIn("another-private-profile", rendered)
 
     def test_usage_does_not_contact_accounts_and_query_args_cannot_expand_scope(self):
         self.execute("get_usage", {"from": TODAY, "to": TODAY, "group_by": []})

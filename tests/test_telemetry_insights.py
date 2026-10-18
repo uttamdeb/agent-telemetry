@@ -186,6 +186,21 @@ class TelemetryInsightsTests(unittest.TestCase):
             self.assertIn(identifier, unsupported)
             self.assertEqual(unsupported[identifier]["affected_sessions"], 1)
 
+    def test_compaction_only_date_does_not_reuse_whole_session_usage(self):
+        payload = copy.deepcopy(self.payload)
+        session = payload["sessions"][0]
+        session["end"] = "2026-10-06T09:30:00Z"
+        session["compactions"] = [{"date": "2026-10-06", "trigger": "manual"}]
+        payload["sessions"] = [session]
+        payload["sessions_total"] = 1
+
+        result = get_insights(payload, {"from": "2026-10-06", "to": "2026-10-06"}, today=self.today)
+
+        # The session has 25,001 cache-write tokens on 10-05 and a compaction
+        # on 10-06, but no usage vector for the selected date. Compactions do
+        # not make its whole-session counters evidence for 10-06.
+        self.assertNotIn("cache-waste", {finding["id"] for finding in result["findings"]})
+
     def test_model_filtered_summary_without_daily_model_splits_is_unavailable(self):
         payload = copy.deepcopy(self.payload)
         payload["sessions"] = payload["sessions"][:1]

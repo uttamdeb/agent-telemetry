@@ -56,13 +56,32 @@ Security → Open Anyway**; Windows SmartScreen may require **More info → Run 
 
 ## Quick start
 
+Install with Python 3.9+:
+
+```bash
+python -m pip install agenttelemetry-app
+agenttelemetry
+```
+
+Or, with [uv](https://docs.astral.sh/uv/getting-started/installation/) installed:
+
+```bash
+uvx agenttelemetry-app
+```
+
+Then open **http://127.0.0.1:7878**. The Python package starts the local browser dashboard;
+use the [app downloads](#download-the-app) for the menu bar or system tray companion.
+See [Python package details](docs/python-package.md) for its per-user data location.
+
+To run from a source checkout with Python 3.8+:
+
 ```bash
 git clone https://github.com/uttamdeb/agent-telemetry.git
 cd agent-telemetry
 python3 dashboard.py
 ```
 
-Then open **http://127.0.0.1:7878**. That's it — no `pip install`, no setup.
+Then open **http://127.0.0.1:7878**. The source checkout needs no package installation.
 
 > First run parses your local logs (can take ~30–60s if you have large Codex logs), writes
 > a cache, and is instant thereafter. The page auto-refreshes every ~15s, so a session
@@ -72,6 +91,28 @@ Options: `python3 dashboard.py --port 9000` · `--rebuild` (ignore cache, full r
 `--interval 20` (background refresh seconds) · `--data-dir /path/to/state` (store the
 cache and optional device-sharing files outside the checkout). Without `--data-dir`, current
 checkout behavior is unchanged. Or `./run.sh [flags]`.
+
+## Recognizing subagent sessions
+
+Sessions shows a full **Subagent** label, a branching icon, and a searchable session
+identifier for transcripts that the source identifies as delegated work. Use
+**All sessions / Main agents / Subagents** to focus the list; the choice survives
+reloads and shared links without changing the other dashboard totals. Session titles
+also open details from the keyboard.
+
+Recorded delegation counts and Claude sidechain usage are explained in the drawer.
+Main agents shows sessions not marked as subagents; some tools and older logs
+do not record this marker. Parent links are not inferred. See
+[behavior and limitations](docs/subagent-sessions.md).
+
+## Recorded reasoning effort
+
+Sessions shows **Recorded effort** below the model for Claude and Codex. Open a
+session for the recorded levels and their date/model scope. Changing the date,
+model or provider filter changes this label alongside the session figures.
+Missing metadata says **Not recorded**; mixed settings and partial coverage are
+explicit. These are recorded controls, not a measurement of reasoning quality or
+thinking tokens. See [sources and limitations](docs/recorded-effort.md).
 
 ## Subscription limits and account details
 
@@ -295,6 +336,12 @@ Previous title metadata is backed up privately in
 This supports local Claude Code transcripts, Codex through its installed CLI’s
 [official name API](https://learn.chatgpt.com/docs/app-server), and OpenCode’s SQLite
 session stores. Other formats, remote sessions and deleted logs cannot be edited.
+Recognized local Claude subagent transcripts instead offer **Name in AgentTelemetry**.
+This saves a private display name on this device without editing Claude's transcript,
+native subagent name, or parent session. The preview states this scope explicitly.
+These names live in `AgentTelemetryNative/session-display-names.json`, outside the
+usage ledger, summaries, and device sharing. Enter the source title again to remove
+a display-name override. See [subagent name behavior](docs/subagent-sessions.md).
 Tool/provider icons are bundled locally, including the OpenAI mark for Codex; no remote
 logo requests occur. Their sources and licenses are in `static/tool-icons/README.md`.
 

@@ -26,6 +26,8 @@ _*.png
 macos/**/.build/
 macos/**/build/
 dist/
+build/
+*.egg-info/
 native-control.json
 native-status.json
 native-install.json

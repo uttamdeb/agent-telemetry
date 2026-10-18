@@ -95,4 +95,3 @@ def legacy_initialize_result(requested_version):
     # JSON-RPC MCP version negotiation responds with the latest server version
     # it supports. The client can then disconnect if it cannot speak that era.
     return LEGACY_VERSIONS[0]
-

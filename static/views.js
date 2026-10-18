@@ -202,7 +202,7 @@ function renderPills(){
 }
 function resetFilters(){
   S.tools = new Set(ORDER); S.provs.clear(); S.projs.clear(); S.models.clear(); S.ides.clear(); S.devs.clear();
-  S.search = ""; S.exactOnly = false;
+  S.search = ""; S.sessionType = "all"; S.exactOnly = false;
   document.querySelectorAll(".search-in").forEach(x=>x.value="");
 }
 
@@ -1113,20 +1113,129 @@ function viewProjects(d){
 }
 
 /* ---------------- SESSIONS ---------------- */
+const REASONING_EFFORT_LABELS = {none:"None",minimal:"Minimal",low:"Low",medium:"Medium",high:"High",xhigh:"Extra high",max:"Max",ultra:"Ultra"};
+function reasoningEffortSummary(s){
+  const detail=s.reasoning_effort_scoped||reasoningEffortInRange(s,range());
+  const labels=detail.levels.map(level=>REASONING_EFFORT_LABELS[level]);
+  const label=labels.length>1?"Mixed":labels[0]?labels[0]+(detail.unrecorded?" · partially recorded":""):"Not recorded";
+  const description=`Recorded effort: ${label}. `+(labels.length>1?`Recorded values: ${labels.join(", ")}. `:"")
+    +(detail.unrecorded&&labels.length>1?"Some observations did not record a usable effort. ":"")
+    +"Selected date range and model/provider filters. Missing effort is not inferred.";
+  return {...detail,label,description};
+}
+function reasoningEffortLabel(s){
+  if(!["claude","codex"].includes(s.source)) return "";
+  const summary=reasoningEffortSummary(s);
+  return `<span class="session-effort" role="note" aria-label="${esc(summary.description)}" title="${esc(summary.description)}">Recorded effort: ${esc(summary.label)}</span>`;
+}
+function reasoningEffortDetails(s){
+  if(!["claude","codex"].includes(s.source)) return "";
+  const summary=reasoningEffortSummary(s);
+  const associations=summary.levels.length>1?`<ul class="reasoning-effort-associations" aria-label="Recorded effort by date and model">${summary.entries.map(entry=>`<li><time>${esc(entry.date)}</time><span><b>${esc(entry.model)}</b> · ${esc(entry.levels.map(level=>REASONING_EFFORT_LABELS[level]).join(" / ")||"Not recorded")}${entry.unrecorded&&entry.levels.length?" · partially recorded":""}</span></li>`).join("")}</ul>`:"";
+  const notes=["Selected date range and model/provider filters. Recorded effort settings are separate from reasoning token counts; missing values are not inferred."];
+  if(summary.unrecorded&&summary.levels.length) notes.push("Some observations did not record a usable effort.");
+  if(s.source==="claude"&&summary.unrecorded&&summary.levels.length) notes.push("Inline child usage is not assigned the parent's effort.");
+  if(s.source==="codex"&&summary.levels.includes("low")) notes.push("Codex may call Low “Light”.");
+  if(s.source==="codex"&&summary.levels.includes("ultra")) notes.push("Ultra is a Codex delegation setting.");
+  if(summary.levels.length) notes.push("Claude and Codex effort levels use their own scales.");
+  return `<div class="kv"><span class="k">Recorded effort</span><span class="v">${esc(summary.label)}</span></div><div class="reasoning-effort-detail">${associations}<p class="hint">${esc(notes.join(" "))}</p></div>`;
+}
 function sessionWhen(s){
   if(!["in","out","cr","cc","user","asst","req","tools","active"].some(k=>s[k])
       && Array.isArray(s.compactions) && s.compactions.length)
     return s.compactions[s.compactions.length-1].timestamp||"";
   return s.end||s.start||"";
 }
-function sessionRows(d){
-  const q=S.search.toLowerCase();
-  return d.sessions.map(s=>({...s,
+function sessionRow(s){
+  return {...s,
     tok:(s.in||0)+(s.out||0)+(s.cr||0)+(s.cc||0),
     when:sessionWhen(s),
     cache:((s.in||0)+(s.cr||0)+(s.cc||0))?(s.cr||0)/((s.in||0)+(s.cr||0)+(s.cc||0)):0,
     name:s.title||s.project||s.id,
-  })).filter(s=>!q || (s.name+" "+(s.original_title||"")+" "+(s.project||"")+" "+(s.model||"")+" "+(s.branch||"")).toLowerCase().includes(q));
+  };
+}
+function sessionRows(d){
+  const q=S.search.toLowerCase();
+  return d.sessions.map(sessionRow).filter(s=>!q || (s.name+" "+(s.original_title||"")+" "+(s.project||"")+" "+sessionModelList(sessionModelsInRange(s,range(),Infinity))+" "+(s.branch||"")+" "+(s.id||"")+" "+(s.rename_id||"")).toLowerCase().includes(q));
+}
+function sessionModelSummary(s){ return s.model_scoped||sessionModelsInRange(s,range()); }
+function sortSessionRows(rows,st=S.sessSort){
+  if(st.key!=="model") return sortRows(rows,st);
+  return rows.slice().sort((a,b)=>st.dir*sessionModelSummary(a).model.localeCompare(sessionModelSummary(b).model));
+}
+function sessionModelList(summary){
+  const names=summary.models.length?summary.models.join(" · "):summary.model;
+  const remaining=summary.nmodels-summary.models.length;
+  return names+(remaining>0?` · ${fmtNum(remaining)} more model${remaining===1?"":"s"}`:"");
+}
+function sessionModelHTML(s){
+  const summary=sessionModelSummary(s), limited=summary.scope==="whole-session";
+  const description=limited?"Whole-session model. This older entry has no model-by-day detail for the current range.":
+    summary.nmodels?"Models with recorded usage in the selected date range and model/provider filters.":"No model usage was recorded in the selected date range and model/provider filters.";
+  return `<span title="${esc(description)}">${esc(summary.model)}</span>`
+    +(summary.nmodels>1?` <span class="dim" title="${esc(sessionModelList(summary))}">+${summary.nmodels-1}</span>`:"")
+    +(limited?'<small class="session-model-scope">Whole session</small>':"");
+}
+function sessionTypeCounts(rows){
+  const subagents=rows.filter(s=>s.subagent).length;
+  return {all:rows.length,subagents,other:rows.length-subagents};
+}
+function sessionRowsForType(rows,type=S.sessionType){
+  if(type==="subagents") return rows.filter(s=>s.subagent);
+  if(type==="other") return rows.filter(s=>!s.subagent);
+  return rows;
+}
+function syncSessionTypeControls(counts){
+  const options=[
+    ["all","All sessions","sessTypeCountAll"],
+    ["other","Main agents","sessTypeCountOther"],
+    ["subagents","Subagents","sessTypeCountSubagents"],
+  ];
+  for(const [type,label,countId] of options){
+    const button=document.querySelector(`[data-session-type="${type}"]`), count=document.getElementById(countId);
+    if(count) count.textContent=fmtNum(counts[type]);
+    if(button){
+      button.classList.toggle("on",S.sessionType===type);
+      button.setAttribute("aria-pressed",S.sessionType===type?"true":"false");
+      button.setAttribute("aria-label",`${label}, ${fmtNum(counts[type])}`);
+    }
+  }
+}
+function sessionDelegationBadge(s){
+  if(Number.isSafeInteger(s.subagent_children) && s.subagent_children>0){
+    const n=s.subagent_children;
+    return ` <span class="delegation-badge" title="At least ${fmtNum(n)} recorded child transcript${n===1?"":"s"} associated by Claude's session directory. Whole session; date and model filters do not change this count.">${fmtNum(n)} subagent${n===1?"":"s"} recorded</span>`;
+  }
+  if((s.subagents||0)>0){
+    const n=s.subagents;
+    return ` <span class="delegation-badge" title="Subagents recorded across the whole session.">${fmtNum(n)} subagent${n===1?"":"s"} recorded</span>`;
+  }
+  if(!s.subagent && s.source==="claude" && (s.side||0)>0)
+    return ` <span class="delegation-badge" title="Claude Code sidechain tokens recorded across the whole session; already included in this session's total.">Subagent activity</span>`;
+  return "";
+}
+function sessionTypeDetails(s){
+  if(s.subagent){
+    const parent=s.subagent_parent;
+    const linked=parent && typeof parent.id==="string" && typeof parent.title==="string"
+      && typeof parent.source==="string" && typeof parent.device==="string";
+    const identity=linked?JSON.stringify([parent.device,parent.source,parent.id]):"";
+    const available=linked && RAW.sessions.filter(x=>sessionIdentity(x)===identity).length===1;
+    const detail=linked
+      ? `<p>Parent session: ${available?`<button type="button" class="session-parent-link" data-session-parent="${esc(identity)}" aria-label="Open parent session ${esc(parent.title)}">${esc(parent.title)} <span aria-hidden="true">↗</span></button>`:esc(parent.title)}</p>`
+      : '<p>The source log recorded a subagent marker. Its parent could not be resolved from retained session metadata.</p>';
+    return `<div class="session-type-detail"><svg class="ic" aria-hidden="true"><use href="#i-subagent"/></svg><div><b>Subagent session</b>${detail}</div></div>`;
+  }
+  return `<div class="session-type-detail"><svg class="ic" aria-hidden="true"><use href="#i-subagent"/></svg><div><b>Main agent session</b><p>Not marked as a subagent. Some tools and older logs do not record this.</p></div></div>`;
+}
+function sessionDelegationDetails(s){
+  const notes=[];
+  if(Number.isSafeInteger(s.subagent_children) && s.subagent_children>0)
+    notes.push(`At least ${fmtNum(s.subagent_children)} recorded child transcript${s.subagent_children===1?"":"s"} across the whole session. This count does not follow date or model filters. Each child keeps its own usage; the count adds no tokens or cost.`);
+  if((s.subagents||0)>0) notes.push(`${fmtNum(s.subagents)} subagent${s.subagents===1?"":"s"} recorded across this whole session; the count is not tied to the selected date or model filters.`);
+  if(!s.subagent && s.source==="claude" && (s.side||0)>0)
+    notes.push(`Claude Code recorded ${fmtTok(s.side)} sidechain tokens across this whole session. They are already included in the session total and are not additional usage.`);
+  return notes.length?`<div class="session-delegation-note"><svg class="ic" aria-hidden="true"><use href="#i-subagent"/></svg><div><b>Delegation evidence</b><p>${notes.map(esc).join(" ")}</p></div></div>`:"";
 }
 function sessionIdentity(s){ return JSON.stringify([s.device||RAW.device.id,s.source,s.rename_id||s.id]); }
 function sdkUsageNote(s){
@@ -1160,14 +1269,20 @@ function sdkField(s,key,value){
   return s.copilot_sdk && !(s.copilot_sdk.recorded_fields||[]).includes(key)?"Unavailable":value;
 }
 function renameButton(s,text=false){
-  return `<button type="button" class="${text?'btn':'session-rename'}" data-rename="${esc(sessionIdentity(s))}" ${s.rename_available===false?'disabled':''} title="${esc(s.rename_reason||'Rename session')}" aria-label="Rename session ${esc(s.title||s.project||s.id)}">${text?'Rename':
+  const display=s.rename_scope==='display',label=display?'Name in AgentTelemetry':'Rename';
+  return `<button type="button" class="${text?'btn':'session-rename'}" data-rename="${esc(sessionIdentity(s))}" ${s.rename_available===false?'disabled':''} title="${esc(s.rename_reason||(display?'Name in AgentTelemetry only':'Rename session'))}" aria-label="${display?label:'Rename session'} ${esc(s.title||s.project||s.id)}">${text?label:
     '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m10.5 2.5 3 3-7.5 7.5-4 1 1-4zM9 4l3 3"/></svg>'}</button>`;
 }
 let sessionRenameTarget=null, sessionRenameSaving=false;
 function openSessionRename(identity){
   if(sessionRenameSaving) return;
-  const s=RAW.sessions.find(x=>sessionIdentity(x)===identity); if(!s) return;
+  const s=RAW.sessions.find(x=>sessionIdentity(x)===identity); if(!s||s.rename_available===false) return;
   sessionRenameTarget={identity,device:s.device||RAW.device.id,source:s.source,id:s.rename_id||s.id};
+  const display=s.rename_scope==='display';
+  document.getElementById('sessionNameHeading').textContent=display?'Name in AgentTelemetry':'Rename session';
+  document.getElementById('sessionNameHelp').textContent=display
+    ?'This display name is saved only in AgentTelemetry on this device. Claude and the parent session stay unchanged. You will review the change before saving.'
+    :'Renaming changes the original tool’s saved session name. You’ll review a warning before it is saved.';
   const input=document.getElementById('sessionNameInput');
   input.value=s.title||s.project||s.id;
   document.getElementById('sessionNameError').textContent='';
@@ -1187,8 +1302,13 @@ async function saveSessionName(name){
     const preview=await response.json();
     if(!response.ok) throw Error(preview.error||'Could not prepare the rename.');
     dialog.close();
-    if(!await askConfirm({title:'Rename in '+(SRC[target.source]||{label:target.source}).label+'?',ok:'Rename in tool',
-      body:`<p>This changes the name in the <b>original coding tool</b>, not only AgentTelemetry.</p>
+    const display=preview.scope==='display';
+    if(!await askConfirm({title:display?'Name in AgentTelemetry?':'Rename in '+(SRC[target.source]||{label:target.source}).label+'?',ok:display?'Save display name':'Rename in tool',
+      body:display?`<p>This changes only the local display name in <b>AgentTelemetry</b>.</p>
+        <p><b>${esc(preview.current_name)}</b> → <b>${esc(preview.name)}</b></p>
+        <div class="modal-note">Claude’s transcript, native subagent name, and parent session stay unchanged. The private name is not included in the usage ledger or device sharing.</div>
+        <p>Target: <code>${esc(preview.target)}</code></p>`:
+        `<p>This changes the name in the <b>original coding tool</b>, not only AgentTelemetry.</p>
         <p><b>${esc(preview.current_name)}</b> → <b>${esc(preview.name)}</b></p>
         <div class="modal-note">Close this session in its original tool before continuing. The tool may need a reload. Only title metadata is changed; token, cost and event records are preserved.</div>
         <p>A backup of the previous title metadata is saved first.</p><p>Target: <code>${esc(preview.target)}</code></p>`})){
@@ -1201,6 +1321,11 @@ async function saveSessionName(name){
     if(!saved.ok) throw Error(result.error||'Could not save the session name.');
     for(const s of RAW.sessions) if(sessionIdentity(s)===target.identity){
       s.title=result.title;
+      if(result.scope==='display'){
+        s.display_alias=!!result.display_alias;
+        if(result.display_alias) s.original_title=result.original_title;
+        else delete s.original_title;
+      }
     }
     sessionRenameTarget=null; dialog.close(); renderAll();
     const drawer=document.getElementById('drawerBody');
@@ -1219,48 +1344,95 @@ async function saveSessionName(name){
 }
 let SESS_CACHE=[];
 function viewSessions(d){
-  const rows=sessionRows(d);
+  const active=document.activeElement;
+  const focusedButton=active&&active.matches&&active.matches("#sessTable .session-open")?active:null;
+  const focusedRow=focusedButton?SESS_CACHE[Number(focusedButton.dataset.sessionOpen)]:null;
+  const focusedIdentity=focusedRow?sessionIdentity(focusedRow):null;
+  const allRows=sessionRows(d);
+  const counts=sessionTypeCounts(allRows);
+  syncSessionTypeControls(counts);
+  const rows=sessionRowsForType(allRows);
   const cols=[["when","When"],["source","Tool"],["name","Session"],["project","Project"],
     ["model","Model"],["tok","Tokens"],["cost","Est. $"],["user","Prompts"],["asst","Replies"],
     ["tools","Tools"],
     ["active","Time","estimated active time — consecutive turns no more than 5 minutes apart, so a resumed session's idle days don't count"],
     ["cache","Cache %"]];
-  const sorted=sortRows(rows,S.sessSort).slice(0,400);
+  const sorted=sortSessionRows(rows).slice(0,400);
+  const emptyMessage=rows.length?"":`<tr><td colspan="${cols.length}"><div class="session-empty" role="status">
+      <p>${S.sessionType==="all"?(S.search?"No sessions match this search.":"No sessions match the current dashboard filters and date range."):
+        `No ${S.sessionType==="subagents"?"subagent":"main agent"} sessions match the current dashboard filters, date range and search.`}</p>
+      ${S.sessionType!=="all"?'<button type="button" class="session-empty-action" data-session-type-reset>Show all sessions</button>':
+        S.search?'<button type="button" class="session-empty-action" data-session-search-reset>Clear search</button>':""}
+    </div></td></tr>`;
   document.getElementById("sessTable").innerHTML=thead(cols,S.sessSort,"sess")+"<tbody>"+
-    sorted.map((s,i)=>`<tr class="clickable" data-sess="${i}">
+    (sorted.length?sorted.map((s,i)=>{
+      const fullId=s.rename_id||s.id||"";
+      const ariaName=`Open session details for ${s.subagent?"Subagent: ":""}${s.name}${s.subagent&&fullId?`, session ID ${fullId}`:""}`;
+      const sessionMeta=(s.subagent?`<span class="sub-badge"><svg class="ic" aria-hidden="true"><use href="#i-subagent"/></svg><span>Subagent</span></span>`:"")
+        +(s.subagent&&s.id?`<span class="session-subagent-id" title="Full session ID: ${esc(fullId)}" aria-hidden="true">#${esc(s.id)}</span>`:"")
+        +sessionDelegationBadge(s)
+        +(s.compaction_count?`<span class="compaction-badge" title="Completed compactions in the selected date range; model filters do not apply.">${fmtNum(s.compaction_count)} compaction${s.compaction_count===1?"":"s"}</span>`:"")
+        +sdkUsageBadge(s);
+      return `<tr class="clickable${s.subagent?" session-subagent":""}" data-sess="${i}">
       <td class="dim">${s.when?s.when.slice(0,16).replace("T"," "):"—"}</td>
       <td>${srcBadge(s.source)}</td>
-      <td class="name" title="${esc(s.title||"")}">${
-        s.clipped?`<span class="dim" style="margin-right:5px" title="Figures reflect the selected range and model filters.">◔</span>`:""}${
-        s.subagent?`<span class="sub-badge" title="A subagent transcript — work its parent delegated.">sub</span>`:""}${esc(s.name)}${
-        s.compaction_count?` <span class="compaction-badge" title="Completed compactions in the selected date range; model filters do not apply.">${fmtNum(s.compaction_count)} compaction${s.compaction_count===1?"":"s"}</span>`:""}${sdkUsageBadge(s)}${renameButton(s)}</td>
+      <td class="name" title="${esc(s.title||"")}">
+        <div class="session-name-line">${s.clipped?`<span class="dim session-clipped-mark" title="Figures reflect the selected range and model filters.">◔</span>`:""}<button type="button" class="session-open" data-session-open="${i}" aria-label="${esc(ariaName)}" title="${esc(ariaName)}"><span class="session-title-text">${esc(s.name)}</span></button>${renameButton(s)}</div>
+        ${sessionMeta?`<div class="session-name-meta">${sessionMeta}</div>`:""}</td>
       <td class="dim">${esc(s.project||"—")}</td>
-      <td>${esc(s.model)}${s.nmodels>1?` <span class="dim" title="${esc((s.models||[]).join(" · "))}">+${s.nmodels-1}</span>`:""}</td>
+      <td>${sessionModelHTML(s)}${reasoningEffortLabel(s)}</td>
       <td class="r">${s.copilot_sdk?.usage_status==="unavailable"?'<span class="dim" title="Token usage was not saved">—</span>':fmtTok(s.tok)}</td><td class="r"><b>${s.copilot_sdk?.usage_status==="unavailable"?'<span class="dim" title="Cost cannot be estimated without token usage">—</span>':fmtUSD(s.cost)}</b></td>
       <td class="r">${fmtNum(s.user)}</td><td class="r">${fmtNum(s.copilot_sdk?s.asst:(s.asst||s.req))}</td>
       <td class="r">${fmtNum(s.tools)}</td>
       <td class="r">${s.active?fmtDur(s.active):'<span class="dim">—</span>'}</td>
-      <td class="r">${s.cache?fmtPct(s.cache):'<span class="dim">—</span>'}</td></tr>`).join("")+"</tbody>";
+      <td class="r">${s.cache?fmtPct(s.cache):'<span class="dim">—</span>'}</td></tr>`;
+    }).join(""):emptyMessage)+"</tbody>";
   const capped = RAW.sessions_total && RAW.sessions_total > RAW.sessions.length;
   const clipped = rows.filter(x=>x.clipped).length;
   document.getElementById("sessHint").textContent =
-    `${fmtNum(rows.length)} sessions active in range`
+    `${fmtNum(rows.length)} ${S.sessionType==="subagents"?"subagent ":S.sessionType==="other"?"main agent ":""}session${rows.length===1?"":"s"} active in range`
+    + (S.sessionType==="all"?` · ${fmtNum(counts.subagents)} marked Subagent`:` · ${fmtNum(allRows.length)} matching session${allRows.length===1?"":"s"} across all types`)
     + (clipped?` · ${clipped} with scoped figures (◔ = range and model filters)`:"")
     + (rows.length>400?" · showing the top 400 by the current sort":"")
     + (capped?` · of the ${fmtNum(RAW.sessions_total)} most recent loaded`:"")
-    + " · click a row for detail";
+    + " · click a row or title for details";
   SESS_CACHE = sorted;
+  if(focusedIdentity){
+    const index=SESS_CACHE.findIndex(s=>sessionIdentity(s)===focusedIdentity);
+    if(index>=0){
+      const button=document.querySelector(`#sessTable [data-session-open="${index}"]`);
+      if(button){try{button.focus({preventScroll:true});}catch(e){button.focus();}}
+    }
+  }
 }
 function openSession(i){
   const s=SESS_CACHE[i]; if(!s) return;
+  openSessionDetails(s);
+}
+function openSessionParent(identity){
+  const matches=RAW.sessions.filter(s=>sessionIdentity(s)===identity);
+  if(matches.length!==1) return;
+  const s=sessionRow(clipSession(matches[0],range()));
+  openSessionDetails(s,true);
+}
+function openSessionDetails(s,related=false){
+  const relatedLimited=related&&!sessionDays(s);
   const row=(k,v)=>v==null||v===""?"":`<div class="kv"><span class="k">${k}</span><span class="v">${v}</span></div>`;
   openDrawer(`
-    <div class="eyebrow">Session</div>
+    <div class="eyebrow">${s.subagent?"Subagent session":"Main agent session"}</div>
     <h2>${esc(s.title||s.project||s.id)}</h2>
-    <div style="margin-bottom:16px;display:flex;gap:8px;align-items:center">${srcBadge(s.source)} <span class="dim" style="font-size:12px">${esc(s.id)}</span>${renameButton(s,true)}</div>
+    <div style="margin-bottom:16px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;min-width:0">${srcBadge(s.source)} <span class="dim" style="font-size:12px;min-width:0;overflow-wrap:anywhere">${esc(s.id)}</span>${renameButton(s,true)}</div>
+    ${related?(relatedLimited?'<p class="hint">Parent session · whole-session figures. This older entry has no daily detail, so its usage cannot be scoped to your date or model filters.</p>':'<p class="hint">Parent session. Figures follow the selected date and model filters; your table filters are unchanged.</p>'):''}
+    ${related&&!activeInRange(s,range())?'<div class="warnbar">This parent has no recorded activity matching the selected date and model filters.</div>':''}
+    ${sessionTypeDetails(s)}
+    ${row("Name scope",s.rename_scope==='display'?'AgentTelemetry only — Claude and its parent session are unchanged.':null)}
+    ${row("Source title",s.display_alias?esc(s.original_title):null)}
+    ${sessionDelegationDetails(s)}
     ${row("Device",multiDevice()?esc(deviceName(s.device||RAW.device.id)):null)}
     ${row("Project",esc(s.project||"—"))}
-    ${row("Model",esc((s.models||[s.model]).join(" · ")))}
+    ${row(sessionModelSummary(s).scope==="whole-session"?"Models (whole session)":"Models in selected range",esc(sessionModelList(sessionModelSummary(s))))}
+    ${sessionModelSummary(s).scope==="whole-session"?'<p class="hint">Model detail for this range is unavailable in this older entry. The model names cover the whole session.</p>':""}
+    ${reasoningEffortDetails(s)}
     ${row("Git branch",s.branch?esc(s.branch):null)}
     ${row("Entrypoint",s.entry?esc(s.entry):null)}
     ${row("Daily detail",s.detail_limited?"Limited in this older ledger entry":null)}
@@ -1289,7 +1461,6 @@ function openSession(i){
     ${row("Lines added",s.lines_add?fmtNum(s.lines_add):null)}
     ${row("Lines removed",s.lines_del?fmtNum(s.lines_del):null)}
     ${row("Thinking time",s.think_ms?Math.round(s.think_ms/1000)+"s":null)}
-    ${row("Subagents",s.subagents?fmtNum(s.subagents):null)}
     ${row("Subagent tokens",s.side?fmtNum(s.side):null)}
     ${row("Log size",s.bytes?fmtBytes(s.bytes):null)}
     ${compactionDetails(s)}
@@ -2086,23 +2257,22 @@ function findContextTax(d){
   };
 }
 
-/* Delegating exploration to a subagent keeps the parent's context small. */
+/* Recorded delegation can keep the parent's context small; missing markers do not prove none occurred. */
 function findSubagents(d){
   const parents = d.sessions.filter(s => !s.subagent);
-  // "delegated" shows up two different ways depending on the tool: Claude Code's
-  // subagent tokens land back on the parent's own token stream (s.side); Codex's
-  // subagents are wholly separate sessions, so the parent only carries a spawn
-  // COUNT (s.subagents, from SubAgentActivity "started" markers in its own log).
-  const heavy = parents.filter(s => s.tools >= 150 && !s.side && !s.subagents);
+  // Inline sidechain usage, source spawn counts and associated child transcripts
+  // are distinct evidence. Any positive evidence rules out "no recorded delegation".
+  const hasChildren=s=>Number.isSafeInteger(s.subagent_children) && s.subagent_children>0;
+  const heavy = parents.filter(s => s.tools >= 150 && !s.side && !s.subagents && !hasChildren(s));
   if(heavy.length < 2) return null;
   const spend = heavy.reduce((a,s)=>a+s.cost,0);
-  const used = parents.filter(s => s.side > 0 || s.subagents > 0).length;
+  const used = parents.filter(s => s.side > 0 || s.subagents > 0 || hasChildren(s)).length;
   return {
     id:"subagents", impact: spend*0.15, sev: spend>100?"high":"low", tools:[...new Set(heavy.map(x=>x.source))],
-    title:"Tool-heavy sessions that never delegated to a subagent",
-    body:`${heavy.length} session${heavy.length>1?"s":""} made 150+ tool calls without spawning a `
-      +`subagent, costing <b>${fmtUSD(spend)}</b>. ${used ? `You do use them elsewhere (${used} `
-      +`session${used>1?"s":""} did).` : ""} Every file a search reads lands in the main context and `
+    title:"Tool-heavy sessions with no recorded delegation",
+    body:`${heavy.length} session${heavy.length>1?"s":""} made 150+ tool calls with no recorded subagent `
+      +`delegation, costing <b>${fmtUSD(spend)}</b>. ${used ? `Delegation was recorded in ${used} other `
+      +`session${used>1?"s":""}.` : ""} Every file a search reads lands in the main context and `
       +`is re-read on every later turn; a subagent reads it in its own context and returns only the answer.`,
     todo:"For broad searching or codebase exploration, hand it to a subagent and keep the summary.",
     rows: heavy.sort((a,b)=>b.cost-a.cost).slice(0,5).map(s =>
@@ -2513,7 +2683,7 @@ function runFinders(d){
 function viewOptimize(d){
   const found = runFinders(d);
   const totalSpend = d.recs.reduce((a,r)=>a+(r.cost||0),0);
-  // Findings overlap — the same long session feeds "large context", "never delegated"
+  // Findings overlap — the same long session feeds "large context", "no recorded delegation"
   // and "thinking share" — so their savings are NOT additive. Lead with the largest.
   const best = found.filter(f=>f.impact>0.5)[0];
   document.getElementById("optHero").innerHTML = `
@@ -2656,7 +2826,7 @@ function renderAll(){
   let nFound = 0;
   try{ nFound = runFinders(d).length; }catch(e){}
   document.getElementById("optCount").textContent = nFound || "";
-  const empty = !d.recs.length && !d.sessions.length;
+  const empty = !d.recs.length && !d.sessions.length && S.view!=="sessions";
   const priorUsage = hasPrev() && ["overview","cost"].includes(S.view) && filteredRecords(prevRange()).length;
   if(empty && !priorUsage && S.view!=="storage" && !(S.view==="cost"&&activeQuotaSources().length)){
     host.innerHTML = `<div class="grid"><div class="card col-12"><div class="empty">
@@ -2716,11 +2886,11 @@ async function load(){
     const hi=dates.length?dates.reduce((a,b)=>a>b?a:b):"—";
     const fresh=new Date(RAW.meta.last_refresh*1000).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"});
     document.getElementById("statusText").textContent = (S.live ? "Live" : "Paused") + " · updated " + fresh;
-    document.getElementById("coverage").textContent = `${fmtNum(RAW.meta.files)} logs · ${lo} → ${hi}`
-      + (RAW.openclaw_undecoded ? ` · ${fmtNum(RAW.openclaw_undecoded)} OpenClaw events unread — install zstd` : "");
-    if(RAW.cache_error) document.getElementById("coverage").textContent += " · " + RAW.cache_error;
-    if(RAW.meta.parse_errors) document.getElementById("coverage").textContent += ` · ${fmtNum(RAW.meta.parse_errors)} log errors — see Settings`;
-    if(RAW.meta.backup_error) document.getElementById("coverage").textContent += " · backup failed — see Settings";
+    document.getElementById("coverage").innerHTML = `<span>${fmtNum(RAW.meta.files)} logs</span><span class="coverage-dates">${esc(lo)} → ${esc(hi)}</span>`
+      + (RAW.openclaw_undecoded ? `<span class="coverage-detail">${fmtNum(RAW.openclaw_undecoded)} OpenClaw events unread — install zstd</span>` : "")
+      + (RAW.cache_error ? `<span class="coverage-detail">${esc(RAW.cache_error)}</span>` : "")
+      + (RAW.meta.parse_errors ? `<span class="coverage-detail">${fmtNum(RAW.meta.parse_errors)} log errors — see Settings</span>` : "")
+      + (RAW.meta.backup_error ? `<span class="coverage-detail">backup failed — see Settings</span>` : "");
     renderVersion();
     // a device that was disconnected can't stay selected, or it would filter out everything
     for(const id of [...S.devs]) if(!devices().some(v=>v.id===id)) S.devs.delete(id);
@@ -3006,6 +3176,32 @@ document.getElementById("liveBtn").addEventListener("click",e=>{
 document.addEventListener("click",e=>{
   const accountButton=e.target.closest('[data-account-refresh]');
   if(accountButton){refreshAccount(accountButton.dataset.accountRefresh);return;}
+  const sessionType=e.target.closest("[data-session-type]");
+  if(sessionType){
+    const type=sessionType.dataset.sessionType;
+    if(["all","subagents","other"].includes(type)){
+      S.sessionType=type;
+      renderAll();
+    }
+    return;
+  }
+  const sessionTypeReset=e.target.closest("[data-session-type-reset]");
+  if(sessionTypeReset){
+    S.sessionType="all";
+    renderAll();
+    document.querySelector('[data-session-type="all"]')?.focus();
+    return;
+  }
+  const sessionSearchReset=e.target.closest("[data-session-search-reset]");
+  if(sessionSearchReset){
+    S.search=""; syncSearchBoxes(); renderAll();
+    document.getElementById("sessSearch")?.focus();
+    return;
+  }
+  const sessionOpen=e.target.closest("[data-session-open]");
+  if(sessionOpen){e.preventDefault();openSession(+sessionOpen.dataset.sessionOpen);return;}
+  const sessionParent=e.target.closest("[data-session-parent]");
+  if(sessionParent){e.preventDefault();openSessionParent(sessionParent.dataset.sessionParent);return;}
   const tv=e.target.closest(".tv[data-tv]");
   if(tv){ const id=tv.dataset.tv; if(S.tableView.has(id)) S.tableView.delete(id); else S.tableView.add(id);
     applyTableView(id); return; }
@@ -3021,7 +3217,7 @@ document.addEventListener("click",e=>{
     const st={sess:S.sessSort,model:S.modelSort,tool:S.toolSort,proj:S.projSort,file:S.fileSort,eff:S.effSort}[t];
     if(st){ st.dir = st.key===k ? -st.dir : -1; st.key=k; renderAll(); } return; }
   const pr=e.target.closest("[data-proj]");
-  if(pr && !pr.closest(".dd-panel")){ S.projs.clear(); S.projs.add(pr.dataset.proj); setView("sessions"); return; }
+  if(pr && !pr.closest(".dd-panel")){ S.projs.clear(); S.projs.add(pr.dataset.proj); S.sessionType="all"; setView("sessions"); return; }
   const rename=e.target.closest('[data-rename]');
   if(rename){ openSessionRename(rename.dataset.rename); return; }
   const sr=e.target.closest("tr[data-sess]");

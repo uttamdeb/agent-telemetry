@@ -15,6 +15,12 @@ jobs:
         with:
           python-version: '3.13'
       - run: python -m unittest discover -s tests -v
+      - name: Build and validate Python distributions
+        run: |
+          python -m pip install build twine
+          python -m build
+          python -m twine check dist/*
+          python tests/check_python_distribution.py dist
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -30,6 +36,8 @@ jobs:
       - run: node tests/test_timeline_frontend.js
       - run: node tests/test_maintenance_frontend.js
       - run: node tests/test_local_servers_frontend.js
+      - run: node tests/test_subagent_sessions_frontend.js
+      - run: node tests/test_reasoning_effort_frontend.js
       - if: runner.os == 'Windows'
         run: python windows/tray.py --self-test
       - if: runner.os == 'Windows'

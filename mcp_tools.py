@@ -232,4 +232,3 @@ def validate_arguments(name: str, arguments) -> dict:
         if "source" in args and args["source"] not in ("codex", "claude"):
             _bad("source must be codex or claude.")
     return args
-

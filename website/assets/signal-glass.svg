@@ -1,0 +1,127 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800" fill="none">
+  <defs>
+    <radialGradient id="aura" cx="50%" cy="48%" r="50%">
+      <stop offset="0" stop-color="#b9ffe8" stop-opacity=".15"/>
+      <stop offset=".48" stop-color="#74dbc5" stop-opacity=".055"/>
+      <stop offset="1" stop-color="#07100f" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="glass" x1="160" y1="170" x2="620" y2="630" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#e6fff7" stop-opacity=".7"/>
+      <stop offset=".12" stop-color="#9ef5da" stop-opacity=".34"/>
+      <stop offset=".3" stop-color="#b6e9df" stop-opacity=".1"/>
+      <stop offset=".52" stop-color="#152b2a" stop-opacity=".18"/>
+      <stop offset=".73" stop-color="#b4dcd5" stop-opacity=".2"/>
+      <stop offset=".88" stop-color="#ffe5b8" stop-opacity=".58"/>
+      <stop offset="1" stop-color="#90f2dc" stop-opacity=".3"/>
+    </linearGradient>
+    <linearGradient id="edge" x1="190" y1="180" x2="624" y2="631" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#f2fff9" stop-opacity=".95"/>
+      <stop offset=".18" stop-color="#a1f4de" stop-opacity=".65"/>
+      <stop offset=".36" stop-color="#77cdbc" stop-opacity=".14"/>
+      <stop offset=".55" stop-color="#102321" stop-opacity=".08"/>
+      <stop offset=".72" stop-color="#c8fff0" stop-opacity=".46"/>
+      <stop offset=".88" stop-color="#ffe3b2" stop-opacity=".84"/>
+      <stop offset="1" stop-color="#a6ffea" stop-opacity=".48"/>
+    </linearGradient>
+    <linearGradient id="inner" x1="233" y1="222" x2="572" y2="567" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#d7fff2" stop-opacity=".7"/>
+      <stop offset=".24" stop-color="#9de7d4" stop-opacity=".12"/>
+      <stop offset=".52" stop-color="#071514" stop-opacity=".05"/>
+      <stop offset=".78" stop-color="#f1d8aa" stop-opacity=".44"/>
+      <stop offset="1" stop-color="#a8fbe8" stop-opacity=".72"/>
+    </linearGradient>
+    <radialGradient id="pearl" cx="34%" cy="26%" r="76%">
+      <stop stop-color="#f0fff8"/>
+      <stop offset=".17" stop-color="#c2ffeb"/>
+      <stop offset=".42" stop-color="#75d9bf"/>
+      <stop offset=".72" stop-color="#318a7b"/>
+      <stop offset=".91" stop-color="#173d39"/>
+      <stop offset="1" stop-color="#0b211f"/>
+    </radialGradient>
+    <radialGradient id="pearlShade" cx="74%" cy="82%" r="64%">
+      <stop stop-color="#05100f" stop-opacity=".66"/>
+      <stop offset=".58" stop-color="#0a1d1a" stop-opacity=".12"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="trace" x1="300" y1="420" x2="500" y2="420" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#baffeb" stop-opacity="0"/>
+      <stop offset=".2" stop-color="#baffeb" stop-opacity=".3"/>
+      <stop offset=".5" stop-color="#e9fff6" stop-opacity=".93"/>
+      <stop offset=".8" stop-color="#a3f6da" stop-opacity=".38"/>
+      <stop offset="1" stop-color="#a3f6da" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="softGlow" x="0" y="0" width="800" height="800" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
+      <feGaussianBlur stdDeviation="24"/>
+    </filter>
+    <filter id="pearlGlow" x="0" y="0" width="800" height="800" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
+      <feGaussianBlur stdDeviation="14"/>
+    </filter>
+    <filter id="shadowBlur" x="0" y="0" width="800" height="800" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
+      <feGaussianBlur stdDeviation="18"/>
+    </filter>
+    <clipPath id="sphereClip"><circle cx="400" cy="400" r="77"/></clipPath>
+  </defs>
+
+  <!-- A quiet halo gives the transparent artwork a soft landing on ink. -->
+  <ellipse cx="400" cy="400" rx="365" ry="365" fill="url(#aura)"/>
+
+  <!-- Sparse instrument geometry, set behind the glass. -->
+  <g stroke="#b8f6e4" stroke-opacity=".2" stroke-width="1.25">
+    <ellipse cx="400" cy="400" rx="305" ry="236" transform="rotate(24 400 400)" stroke-dasharray="1 9"/>
+    <path d="M400 78v23m0 598v23M78 400h23m598 0h23" stroke-opacity=".24"/>
+    <path d="M189 187l13 13m396 396 13 13M611 187l-13 13M202 600l-13 13" stroke-opacity=".16"/>
+  </g>
+  <g fill="#c6ffed">
+    <circle cx="663" cy="302" r="2.2" fill-opacity=".8"/>
+    <circle cx="187" cy="516" r="1.8" fill-opacity=".62"/>
+    <circle cx="526" cy="143" r="1.6" fill-opacity=".45"/>
+    <circle cx="292" cy="675" r="1.7" fill-opacity=".5"/>
+  </g>
+
+  <!-- The cast shadow and low-frequency bloom make the ring feel suspended. -->
+  <ellipse cx="412" cy="430" rx="225" ry="286" transform="rotate(-31 412 430)" stroke="#8cf2d3" stroke-opacity=".16" stroke-width="100" filter="url(#softGlow)"/>
+  <ellipse cx="410" cy="443" rx="214" ry="274" transform="rotate(-31 410 443)" stroke="#020908" stroke-opacity=".72" stroke-width="106" filter="url(#shadowBlur)"/>
+
+  <!-- Thick optical body: a beveled outer edge, translucent body, and inner rim. -->
+  <g transform="rotate(-31 400 400)">
+    <ellipse cx="400" cy="400" rx="211" ry="276" stroke="#091715" stroke-opacity=".8" stroke-width="112"/>
+    <ellipse cx="400" cy="400" rx="211" ry="276" stroke="url(#glass)" stroke-width="98"/>
+    <ellipse cx="400" cy="400" rx="211" ry="276" stroke="url(#edge)" stroke-width="70"/>
+    <ellipse cx="400" cy="400" rx="211" ry="276" stroke="#e9fff7" stroke-opacity=".22" stroke-width="2"/>
+    <ellipse cx="400" cy="400" rx="211" ry="276" stroke="url(#inner)" stroke-width="40"/>
+    <ellipse cx="400" cy="400" rx="211" ry="276" stroke="#f5fff9" stroke-opacity=".7" stroke-width="2.1" stroke-dasharray="104 1180 56 390" stroke-dashoffset="-46"/>
+    <ellipse cx="400" cy="400" rx="211" ry="276" stroke="#bbffe9" stroke-opacity=".58" stroke-width="1.5" stroke-dasharray="260 1280" stroke-dashoffset="-544"/>
+    <ellipse cx="400" cy="400" rx="161" ry="226" stroke="#d8fff3" stroke-opacity=".17" stroke-width="1.3"/>
+    <ellipse cx="400" cy="400" rx="260" ry="324" stroke="#a7f4df" stroke-opacity=".13" stroke-width="1.2"/>
+  </g>
+
+  <!-- Glass caustic on the lower edge, broken into fine spectral glints. -->
+  <g transform="rotate(-31 400 400)" stroke-linecap="round">
+    <path d="M210 478c31 103 101 176 190 198" stroke="#c3ffe9" stroke-opacity=".48" stroke-width="4"/>
+    <path d="M229 510c38 79 95 128 160 151" stroke="#ffe7bd" stroke-opacity=".56" stroke-width="1.5"/>
+    <path d="M563 213c26 38 42 83 49 130" stroke="#d5fff3" stroke-opacity=".76" stroke-width="2.2"/>
+    <path d="M182 324c8-47 26-88 52-121" stroke="#b7ffeb" stroke-opacity=".72" stroke-width="2"/>
+  </g>
+
+  <!-- Small suspended pearl, with a measured pulse crossing its face. -->
+  <circle cx="400" cy="400" r="100" fill="#75f0ce" fill-opacity=".34" filter="url(#pearlGlow)"/>
+  <circle cx="400" cy="400" r="77" fill="url(#pearl)"/>
+  <circle cx="400" cy="400" r="77" fill="url(#pearlShade)"/>
+  <g clip-path="url(#sphereClip)">
+    <path d="M318 402h34l8-9 9 18 12-31 13 47 11-30 8 12h88" stroke="url(#trace)" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" opacity=".9"/>
+    <path d="M328 418h25m94 0h24" stroke="#effff9" stroke-opacity=".19" stroke-width=".8"/>
+    <ellipse cx="370" cy="354" rx="20" ry="7" transform="rotate(-34 370 354)" fill="#fff" fill-opacity=".56" filter="url(#pearlGlow)"/>
+  </g>
+  <circle cx="400" cy="400" r="77" stroke="#eafff6" stroke-opacity=".56" stroke-width="1.4"/>
+  <circle cx="400" cy="400" r="84" stroke="#b9fbe8" stroke-opacity=".16" stroke-width="1"/>
+
+  <!-- A few calibration marks sit just outside the luminous object. -->
+  <g stroke="#d7fff1" stroke-width="1.2" stroke-linecap="round" opacity=".54">
+    <path d="M635 394h13m-6.5-6.5v13M153 438h12m-6-6v12M344 113v12m-6-6h12"/>
+  </g>
+  <g fill="#f2d9aa" fill-opacity=".68">
+    <circle cx="649" cy="394" r="1.6"/>
+    <circle cx="164" cy="438" r="1.4"/>
+    <circle cx="344" cy="111" r="1.4"/>
+  </g>
+</svg>

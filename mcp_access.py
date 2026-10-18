@@ -16,7 +16,10 @@ import time
 from urllib.parse import urlsplit
 from contextlib import contextmanager
 
-import native
+if __package__:
+    from . import native
+else:
+    import native
 
 
 _FILENAME = "mcp-access.json"
@@ -333,4 +336,3 @@ def authorize(backend_url: str, data_dir, authorization_header) -> dict:
             "include_peers": entry["include_peers"],
             "alias_key": hashlib.sha256((entry["token"] + ":alias").encode("utf-8")).hexdigest(),
         }
-

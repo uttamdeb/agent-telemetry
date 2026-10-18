@@ -250,6 +250,9 @@ class TelemetryQueryTests(unittest.TestCase):
                                   policy={"alias_key": "stable"})
         self.assertEqual(scoped["total_rows"], 1)
         self.assertEqual(scoped["sessions"][0]["tokens"], 135)
+        self.assertEqual(scoped["sessions"][0]["model"], "gpt-6-sol")
+        self.assertEqual(scoped["sessions"][0]["models"], ["gpt-6-sol"])
+        self.assertEqual(scoped["sessions"][0]["model_scope"], "selected")
         self.assertEqual(scoped["sessions"][0]["estimated_cost_usd"], 0.25)
         self.assertEqual(scoped["totals"]["tokens"], 135)
         self.assertEqual(scoped["sessions"][0]["user_prompts"], 1)
@@ -265,7 +268,208 @@ class TelemetryQueryTests(unittest.TestCase):
             "from": d1, "to": d1, "models": ["gpt-6-sol"],
         }, today=TODAY, policy={"alias_key": "stable"})
         self.assertEqual(model_scoped["sessions"][0]["tokens"], 135)
+        self.assertEqual(model_scoped["sessions"][0]["model"], "gpt-6-sol")
         self.assertEqual(model_scoped["sessions"][0]["user_prompts"], 1)
+
+    def test_session_model_summary_uses_range_filters_and_stable_usage_weights(self):
+        d1, d2, outside = "2026-10-17", "2026-10-16", "2026-10-15"
+        def v(*, inp=0, req=0, asst=0, cost=0):
+            return vector(inp=inp, out=0, cr=0, cc=0, req=req, asst=asst,
+                          cost=cost, user=0, tools=0, active=0, cc5=0, cc1=0, reason=0)
+
+        session = {
+            "source": "codex", "device": LOCAL, "rename_id": "scoped-model-summary-id",
+            "project": "alpha", "ide": "VS Code", "model": "outside-model",
+            "start": d2 + "T01:00:00", "end": d1 + "T02:00:00",
+            "days": {
+                d1: vector(inp=500, out=0, cr=0, cc=0, req=20, asst=20, user=1),
+                d2: vector(inp=500, out=0, cr=0, cc=0, req=20, asst=20, user=0),
+            },
+            "model_days": {
+                "alpha": {d1: v(inp=100, req=2, asst=2), d2: v(inp=50, req=1, asst=1)},
+                "beta": {d1: v(inp=100, req=2, asst=1), d2: v(inp=50, req=2, asst=1)},
+                "gamma": {d1: v(inp=100, req=2, asst=2), d2: v(inp=50, req=2, asst=1)},
+                "middle": {d1: v(inp=70)},
+                "middle-2": {d1: v(inp=60)},
+                "tie-z": {d1: v(inp=25, req=1, asst=1), d2: v(inp=25)},
+                "tie-a": {d1: v(inp=25, req=1, asst=1), d2: v(inp=25)},
+                "outside-model": {outside: v(inp=9000, req=900, asst=900)},
+                "(user)": {d1: vector(inp=0, out=0, cr=0, cc=0, req=0, asst=0,
+                                       user=1, tools=0, active=0, cost=0)},
+            },
+        }
+        data = payload([], [session])
+        data["model_vendor"].update({"alpha": "OpenAI", "beta": "Anthropic", "gamma": "OpenAI",
+                                     "tie-z": "OpenAI", "tie-a": "OpenAI", "outside-model": "OpenAI"})
+
+        result = tq.list_sessions(data, {"from": d2, "to": d1}, today=TODAY)
+        item = result["sessions"][0]
+        # Hand-calculated range weights: gamma (150 tokens, 4 requests, 3 responses),
+        # beta (150, 4, 2), alpha (150, 3, 3), then the alphabetic tie.
+        self.assertEqual(item["model"], "gamma")
+        self.assertEqual(item["models"], ["gamma", "beta", "alpha", "middle", "middle-2", "tie-a"])
+        self.assertEqual(item["nmodels"], 7)
+        self.assertEqual(item["model_scope"], "selected")
+        self.assertTrue(item["models_truncated"])
+        self.assertEqual(item["tokens"], 1000)
+
+        filtered = tq.list_sessions(data, {"from": d2, "to": d1, "models": ["beta"]}, today=TODAY)
+        self.assertEqual(filtered["sessions"][0]["model"], "beta")
+        self.assertEqual(filtered["sessions"][0]["models"], ["beta"])
+        self.assertEqual(filtered["sessions"][0]["nmodels"], 1)
+        self.assertEqual(filtered["sessions"][0]["tokens"], 150)
+
+        provider_filtered = tq.list_sessions(data, {
+            "from": d2, "to": d1, "providers": ["Anthropic"],
+        }, today=TODAY)
+        self.assertEqual(provider_filtered["sessions"][0]["model"], "beta")
+        self.assertEqual(provider_filtered["sessions"][0]["models"], ["beta"])
+        self.assertEqual(provider_filtered["sessions"][0]["tokens"], 150)
+
+    def test_session_model_summary_marks_empty_exact_maps_and_missing_splits_correctly(self):
+        day = "2026-10-17"
+        user_only = vector(inp=0, out=0, cr=0, cc=0, req=0, asst=0, user=1,
+                           tools=0, active=0, cost=0, cc5=0, cc1=0, reason=0)
+        exact_session = {
+            "source": "copilot", "device": LOCAL, "rename_id": "copilot-exact-model-id",
+            "project": "alpha", "ide": "VS Code", "model": "estimated-parent-model",
+            "start": day + "T01:00:00", "end": day + "T02:00:00",
+            "days": {day: vector(inp=90, out=0, cr=0, cc=0)},
+            "exact_days": {day: vector(inp=12, out=3, cr=0, cc=0, user=1)},
+            "model_days": {"estimated-parent-model": {day: vector(inp=90, out=0, cr=0, cc=0)}},
+            # A valid exact map that contains only user activity is not a missing map.
+            "exact_model_days": {"exact-model": {day: vector(inp=12, out=3, cr=0, cc=0,
+                                                                 user=0, req=1, asst=1)},
+                                 "(user)": {day: user_only}},
+        }
+        exact_data = payload([], [exact_session])
+        exact = tq.list_sessions(exact_data, {"period": "all", "exact_only": True}, today=TODAY)
+        item = exact["sessions"][0]
+        self.assertEqual(item["model"], "exact-model")
+        self.assertEqual(item["models"], ["exact-model"])
+        self.assertEqual(item["nmodels"], 1)
+        self.assertEqual(item["model_scope"], "selected")
+        self.assertEqual(item["tokens"], 15)
+
+        missing_split = {**exact_session, "rename_id": "copilot-exact-missing-split-id"}
+        missing_split.pop("exact_model_days")
+        missing_data = payload([], [missing_split])
+        missing = tq.list_sessions(missing_data, {"period": "all", "exact_only": True}, today=TODAY)
+        self.assertEqual(missing["sessions"][0]["model"], None)
+        self.assertIsNone(missing["sessions"][0]["models"])
+        self.assertIsNone(missing["sessions"][0]["nmodels"])
+        self.assertEqual(missing["sessions"][0]["model_scope"], "unavailable")
+        self.assertEqual(missing["sessions"][0]["tokens"], 15)
+        self.assertNotIn("estimated-parent-model", repr(missing["sessions"][0]))
+
+        user_session = {**exact_session, "rename_id": "copilot-exact-user-only-id",
+                        "exact_model_days": {"(user)": {day: user_only}},
+                        "exact_days": {day: user_only}}
+        user_result = tq.list_sessions(payload([], [user_session]), {
+            "period": "all", "exact_only": True,
+        }, today=TODAY)
+        user_item = user_result["sessions"][0]
+        self.assertEqual(user_item["model"], "No model usage")
+        self.assertEqual(user_item["models"], [])
+        self.assertEqual(user_item["nmodels"], 0)
+        self.assertEqual(user_item["model_scope"], "selected")
+        self.assertEqual(user_item["user_prompts"], 1)
+
+        empty_map_session = {**user_session, "rename_id": "copilot-exact-empty-model-map-id",
+                             "exact_model_days": {},
+                             "exact_days": {day: user_only}}
+        empty_result = tq.list_sessions(payload([], [empty_map_session]), {
+            "period": "all", "exact_only": True,
+        }, today=TODAY)
+        self.assertEqual(empty_result["sessions"][0]["model"], "No model usage")
+        self.assertEqual(empty_result["sessions"][0]["model_scope"], "selected")
+
+    def test_session_model_summary_requires_positive_usage_and_sanitizes_model_labels(self):
+        day = "2026-10-17"
+        def v(*, inp=0, req=0, asst=0, cost=0):
+            return vector(inp=inp, out=0, cr=0, cc=0, req=req, asst=asst,
+                          cost=cost, user=0, tools=0, active=0, cc5=0, cc1=0, reason=0)
+
+        private_model = r"C:\private\model.json"
+        session = {
+            "source": "codex", "device": LOCAL, "rename_id": "model-criteria-id",
+            "project": "alpha", "ide": "VS Code", "model": "old-dominant",
+            "start": day + "T01:00:00", "end": day + "T02:00:00",
+            "days": {day: v(inp=11, req=3, asst=3)},
+            "model_days": {
+                "token": {day: v(inp=1)},
+                "request": {day: v(req=1)},
+                "response": {day: v(asst=1)},
+                "cost": {day: v(cost=0.01)},
+                "zero": {day: v()},
+                private_model: {day: v(inp=2)},
+                "(user)": {day: vector(inp=0, out=0, cr=0, cc=0, req=0, asst=0,
+                                       user=1, tools=0, active=0, cost=0)},
+            },
+        }
+        item = tq.list_sessions(payload([], [session]), {"period": "all"}, today=TODAY)["sessions"][0]
+        self.assertEqual(item["models"], ["(unknown)", "token", "request", "response", "cost"])
+        self.assertEqual(item["model"], "(unknown)")
+        self.assertEqual(item["nmodels"], 5)
+        self.assertNotIn(private_model, repr(item))
+        self.assertNotIn("zero", item["models"])
+
+    def test_missing_model_map_labels_legacy_scope_and_filtered_model_as_unavailable(self):
+        day = "2026-10-17"
+        legacy = {
+            "source": "codex", "device": LOCAL, "rename_id": "legacy-dominant-model-id",
+            "project": "alpha", "ide": "VS Code", "model": "gpt-6-sol",
+            "start": day + "T01:00:00", "end": day + "T02:00:00",
+            "days": {day: vector(inp=42, out=0, cr=0, cc=0)},
+        }
+        data = payload([], [legacy])
+        unfiltered = tq.list_sessions(data, {"period": "all"}, today=TODAY)
+        self.assertEqual(unfiltered["sessions"][0]["model"], "gpt-6-sol")
+        self.assertEqual(unfiltered["sessions"][0]["models"], ["gpt-6-sol"])
+        self.assertIsNone(unfiltered["sessions"][0]["nmodels"])
+        self.assertEqual(unfiltered["sessions"][0]["model_scope"], "whole-session")
+
+        known_legacy = {
+            **legacy, "rename_id": "legacy-known-model-list-id", "model": "A",
+            "models": ["A", "B"], "nmodels": 2,
+        }
+        known = tq.list_sessions(payload([], [known_legacy]), {"period": "all"}, today=TODAY)
+        known_item = known["sessions"][0]
+        self.assertEqual(known_item["model"], "A")
+        self.assertEqual(known_item["models"], ["A", "B"])
+        self.assertEqual(known_item["nmodels"], 2)
+        self.assertEqual(known_item["model_scope"], "whole-session")
+        self.assertFalse(known_item["models_truncated"])
+
+        many_models = ["A", "B", "C", "D", "E", "F", "G", "H"]
+        truncated_legacy = {
+            **legacy, "rename_id": "legacy-truncated-model-list-id", "model": "A",
+            "models": many_models, "nmodels": len(many_models),
+        }
+        truncated = tq.list_sessions(payload([], [truncated_legacy]), {"period": "all"}, today=TODAY)
+        truncated_item = truncated["sessions"][0]
+        self.assertEqual(truncated_item["models"], many_models[:6])
+        self.assertEqual(truncated_item["nmodels"], 8)
+        self.assertTrue(truncated_item["models_truncated"])
+
+        filtered = tq.list_sessions(data, {"period": "all", "models": ["gpt-6-sol"]}, today=TODAY)
+        self.assertEqual(filtered["sessions"][0]["model"], None)
+        self.assertIsNone(filtered["sessions"][0]["models"])
+        self.assertIsNone(filtered["sessions"][0]["nmodels"])
+        self.assertEqual(filtered["sessions"][0]["model_scope"], "unavailable")
+        self.assertIsNone(filtered["sessions"][0]["tokens"])
+
+        provider_filtered = tq.list_sessions(data, {"period": "all", "providers": ["OpenAI"]}, today=TODAY)
+        self.assertEqual(provider_filtered["sessions"][0]["model"], None)
+        self.assertEqual(provider_filtered["sessions"][0]["model_scope"], "unavailable")
+        self.assertIsNone(provider_filtered["sessions"][0]["tokens"])
+
+        private_model = r"C:\private\model.json"
+        path_legacy = {**legacy, "rename_id": "legacy-path-model-id", "model": private_model}
+        path_item = tq.list_sessions(payload([], [path_legacy]), {"period": "all"}, today=TODAY)["sessions"][0]
+        self.assertIsNone(path_item["model"])
+        self.assertEqual(path_item["model_scope"], "unavailable")
+        self.assertNotIn(private_model, repr(path_item))
 
     def test_session_source_device_and_full_id_define_alias_and_limited_detail_stays_unavailable(self):
         base = {"source": "codex", "device": LOCAL, "rename_id": "same-native-id"}

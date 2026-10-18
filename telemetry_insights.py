@@ -38,16 +38,23 @@ _ESTIMATE_CAVEAT = "Costs are API list-price estimates, not subscription charges
 _MAX_EVIDENCE_ROWS = 20
 
 
+def _query_module():
+    if __package__:
+        from . import telemetry_query
+    else:
+        import telemetry_query
+    return telemetry_query
+
+
 def _query_api():
     # Lazy import keeps this calculation module importable on its own in focused
     # tests; the application supplies the shared selection/privacy implementation.
-    from telemetry_query import label, result_meta, select_records
-    return select_records, label, result_meta
+    query = _query_module()
+    return query.select_records, query.label, query.result_meta
 
 
 def _matches_filter(kind, raw, requested, *, policy=None, payload=None):
-    from telemetry_query import matches_filter
-    return matches_filter(kind, raw, requested, policy=policy, payload=payload)
+    return _query_module().matches_filter(kind, raw, requested, policy=policy, payload=payload)
 
 
 def _number(value, default=0.0):
@@ -647,31 +654,28 @@ def _session_range(session, payload, context, policy, exact):
     if isinstance(selected_days, dict):
         observed_days = [day for day in selected_days if start <= day <= end]
         if not observed_days:
-            has_unattributed_compaction = not (filters.get("models") or filters.get("providers")) and any(
-                isinstance(item, dict) and start <= str(item.get("date") or "") <= end
-                for item in session.get("compactions", ()) or ())
-            if not has_unattributed_compaction:
-                return None
-        if observed_days:
-            totals = {}
-            for day in observed_days:
-                vector = selected_days.get(day)
-                if isinstance(vector, dict):
-                    for field, value in vector.items():
-                        if field in _VECTOR_FIELDS:
-                            totals[field] = totals.get(field, 0.0) + _number(value)
-                else:
-                    _sum_vector(totals, vector)
-            # Once a date/model slice exists, never fall back to the whole-session
-            # summary for fields omitted by a short or incomplete archived vector.
-            out = {key: value for key, value in session.items() if key not in _DAY_FIELDS}
-            out.update(totals)
-            if clipped_model_days is not None:
-                out["model_days"] = clipped_model_days
-                if exact and source == "copilot":
-                    out["exact_model_days"] = clipped_model_days
-            return out
-        return dict(session)
+            # Insights has no compaction-only finding. A compaction can make a
+            # session relevant to the selected date, but it cannot attribute
+            # the session's whole-summary usage to that date.
+            return None
+        totals = {}
+        for day in observed_days:
+            vector = selected_days.get(day)
+            if isinstance(vector, dict):
+                for field, value in vector.items():
+                    if field in _VECTOR_FIELDS:
+                        totals[field] = totals.get(field, 0.0) + _number(value)
+            else:
+                _sum_vector(totals, vector)
+        # Once a date/model slice exists, never fall back to the whole-session
+        # summary for fields omitted by a short or incomplete archived vector.
+        out = {key: value for key, value in session.items() if key not in _DAY_FIELDS}
+        out.update(totals)
+        if clipped_model_days is not None:
+            out["model_days"] = clipped_model_days
+            if exact and source == "copilot":
+                out["exact_model_days"] = clipped_model_days
+        return out
 
     session_start = str(session.get("start") or "")[:10]
     session_end = str(session.get("end") or session.get("start") or "")[:10]
@@ -853,8 +857,7 @@ def _date_vector(session, start, end, exact=False):
 
 def _session_alias(session, policy):
     try:
-        from telemetry_query import session_alias
-        return session_alias(session, policy=policy)
+        return _query_module().session_alias(session, policy=policy)
     except (ImportError, AttributeError, TypeError):
         return None
 
@@ -1749,8 +1752,3 @@ def get_insights(payload, arguments, *, policy=None, today=None):
         "findings_truncated": len(all_findings) > limit,
         "findings_overlap": True,
     }
-
-
-
-
-

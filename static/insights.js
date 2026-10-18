@@ -103,8 +103,8 @@ function drillUsageChange(dimension,key,period){
   if(dimension==="project") S.projs=new Set([key]);
   else if(dimension==="model") S.models=new Set([key]);
   else S.tools=new Set([key]);
-  // Search scopes the session list only; clear it so it cannot conceal evidence.
-  S.search=""; syncSearchBoxes(); setView("sessions");
+  // Session-list controls must not conceal the comparison's evidence.
+  S.search=""; S.sessionType="all"; syncSearchBoxes(); setView("sessions");
 }
 
 document.addEventListener("click",e=>{

@@ -17,13 +17,17 @@ import threading
 import urllib.error
 import urllib.request
 
-# Portable/embedded Python distributions can omit the working directory from
-# sys.path. Resolve the bridge's own modules relative to this script.
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-import mcp_access
-import mcp_protocol as protocol
-import mcp_tools
+if __package__:
+    from . import mcp_access
+    from . import mcp_protocol as protocol
+    from . import mcp_tools
+else:
+    # Portable/embedded Python distributions can omit the working directory
+    # from sys.path. Resolve top-level bridge modules beside this script.
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import mcp_access
+    import mcp_protocol as protocol
+    import mcp_tools
 
 
 MAX_MESSAGE_BYTES = 1024 * 1024
@@ -672,4 +676,3 @@ def main(argv=None):
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

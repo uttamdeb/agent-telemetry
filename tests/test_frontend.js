@@ -515,7 +515,7 @@ console.log('Frontend regression checks passed: pricing, precision, scope, model
   const loading=vm.createContext({console,Date,Set,S:{live:true,devs:new Set()},RAW:null,
     document:{getElementById:id=>loadNodes[id],documentElement:{dataset:{}}},
     fetch:async()=>{pending++;if(pending===1)return await new Promise(resolve=>{resolveOld=resolve});return {ok:true,json:async()=>payload(200)}},
-    devices:()=>[],renderVersion(){},loadAccounts(){},fmtNum:value=>value,renderAll(){rendered++}});
+    devices:()=>[],renderVersion(){},loadAccounts(){},fmtNum:value=>value,esc:run('esc'),renderAll(){rendered++}});
   vm.runInContext(views.slice(views.indexOf('let loadSequence='),views.indexOf('async function loadStorage()')),loading);
   const oldLoad=vm.runInContext('load()',loading);
   await vm.runInContext('load()',loading);
@@ -523,6 +523,23 @@ console.log('Frontend regression checks passed: pricing, precision, scope, model
   await oldLoad;
   assert.equal(vm.runInContext('RAW.records[0].in',loading),200);
   assert.equal(rendered,1,'Superseded payload rendered after a newer one');
+  loading.fetch=async()=>({ok:true,json:async()=>({...payload(300),
+    records:[{date:'2025-07-07'},{date:'2026-10-18'}],
+    cache_error:'Cannot read <ledger> & backup',openclaw_undecoded:2,
+    meta:{last_refresh:1,files:731,parse_errors:3,backup_error:true}})});
+  assert.equal(await vm.runInContext('load()',loading),true);
+  assert.match(loadNodes.coverage.innerHTML,/<span>731 logs<\/span><span class="coverage-dates">2025-07-07 → 2026-10-18<\/span>/,
+    'Coverage dates must stay in one span so CSS can move the whole range to a new line');
+  assert.match(loadNodes.coverage.innerHTML,/class="coverage-detail">Cannot read &lt;ledger&gt; &amp; backup<\/span>/);
+  assert.doesNotMatch(loadNodes.coverage.innerHTML,/<ledger>/,'Coverage errors must remain text when rendered as HTML');
+  assert.match(loadNodes.coverage.innerHTML,/>2 OpenClaw events unread — install zstd<\/span>/);
+  assert.match(loadNodes.coverage.innerHTML,/>3 log errors — see Settings<\/span>/);
+  assert.match(loadNodes.coverage.innerHTML,/>backup failed — see Settings<\/span>/);
+  loading.fetch=async()=>({ok:true,json:async()=>({...payload(200),records:[{date:'<img src=x onerror=alert(1)>',in:200}]})});
+  assert.equal(await vm.runInContext('load()',loading),true);
+  assert.doesNotMatch(loadNodes.coverage.innerHTML,/<img/,'Coverage dates from a payload must also remain escaped text');
+  assert.match(loadNodes.coverage.innerHTML,/&lt;img src=x onerror=alert\(1\)&gt;/);
+  assert.doesNotMatch(loadNodes.coverage.innerHTML,/coverage-detail/,'Resolved coverage errors must disappear on refresh');
   loading.console={error(){}};
   loading.fetch=async()=>({ok:false});
   assert.equal(await vm.runInContext('load()',loading),false);
@@ -544,3 +561,134 @@ console.log('Frontend regression checks passed: pricing, precision, scope, model
   assert.notStrictEqual(nodes.nativeAppToggle,toggle,'Changed status was not rendered');
   console.log('Native Settings retains the toggle across unchanged status polls.');
 })().catch(error=>{console.error(error);process.exitCode=1;});
+
+(async()=>{
+  // Exercise the same two-step form for a private Claude-child display name.
+  // No request contains a transcript path, and native rename copy stays distinct.
+  const nodes=new Map(),requests=[],confirmations=[];
+  const node=id=>{
+    if(id==='drawerBody') return null;
+    if(!nodes.has(id)) nodes.set(id,{textContent:'',value:'',disabled:false,open:false,
+      focus(){},select(){},showModal(){this.open=true},close(){this.open=false},querySelectorAll:()=>[]});
+    return nodes.get(id);
+  };
+  const sid='parent-fixture/subagents/workflows/wf_fixture/agent-child-fixture';
+  const state={device:{id:'fixture'},sessions:[{source:'claude',device:'fixture',id:'agent-ch',rename_id:sid,
+    title:'Source child title',rename_scope:'display',rename_available:true}]};
+  let confirm=false,display=true;
+  const renaming=vm.createContext({RAW:state,esc:run('esc'),SRC:{claude:{label:'Claude Code'}},
+    document:{getElementById:node,querySelectorAll:()=>[]},renderAll(){},
+    askConfirm:async value=>{confirmations.push(value);return confirm},
+    fetch:async(url,options)=>{
+      const body=JSON.parse(options.body);requests.push({url,body});
+      return {ok:true,json:async()=>body.action==='preview'
+        ?{ticket:'fixture-ticket',name:body.name,current_name:'Source child title',scope:display?'display':undefined,target:sid}
+        :{title:'Alias <safe>',name:'Alias <safe>',scope:display?'display':undefined,display_alias:true,original_title:'Source child title'}};
+    }});
+  vm.runInContext(views.slice(views.indexOf('function sessionIdentity('),views.indexOf('function sdkUsageNote(')),renaming);
+  vm.runInContext(views.slice(views.indexOf('function renameButton('),views.indexOf('let SESS_CACHE=')),renaming);
+  vm.runInContext('openSessionRename(sessionIdentity(RAW.sessions[0]))',renaming);
+  assert.equal(node('sessionNameHeading').textContent,'Name in AgentTelemetry');
+  assert.match(node('sessionNameHelp').textContent,/only in AgentTelemetry/);
+  assert.match(node('sessionNameHelp').textContent,/parent session stay unchanged/);
+  const button=vm.runInContext('renameButton(RAW.sessions[0],true)',renaming);
+  assert.match(button,/>Name in AgentTelemetry</);
+  assert.doesNotMatch(button,/disabled/,'Recognized Claude children offer the local display-name action');
+  await vm.runInContext('saveSessionName("Alias <safe>")',renaming);
+  assert.equal(requests.length,1,'Cancelling the preview must not save an alias');
+  assert.equal(state.sessions[0].title,'Source child title');
+  assert.equal(node('sessionNameDialog').open,true);
+  assert.equal(confirmations[0].title,'Name in AgentTelemetry?');
+  assert.equal(confirmations[0].ok,'Save display name');
+  assert.match(confirmations[0].body,/Claude’s transcript, native subagent name, and parent session stay unchanged/);
+  assert.match(confirmations[0].body,/Alias &lt;safe&gt;/);
+  assert.doesNotMatch(confirmations[0].body,/Close this session|backup of the previous/);
+  confirm=true;
+  await vm.runInContext('saveSessionName("Alias <safe>")',renaming);
+  assert.equal(requests.length,3);
+  assert.deepEqual(requests[2],{url:'/api/session-name',body:{device:'fixture',source:'claude',id:sid,
+    action:'rename',ticket:'fixture-ticket',confirmed:true}});
+  assert.equal(state.sessions[0].title,'Alias <safe>');
+  assert.equal(state.sessions[0].original_title,'Source child title');
+  assert.equal(state.sessions[0].display_alias,true);
+  assert.equal(node('sessionNameDialog').open,false);
+  display=false;delete state.sessions[0].rename_scope;
+  vm.runInContext('openSessionRename(sessionIdentity(RAW.sessions[0]))',renaming);
+  assert.equal(node('sessionNameHeading').textContent,'Rename session');
+  assert.match(node('sessionNameHelp').textContent,/original tool/);
+  await vm.runInContext('saveSessionName("Native fixture")',renaming);
+  const native=confirmations[confirmations.length-1];
+  assert.equal(native.title,'Rename in Claude Code?');
+  assert.equal(native.ok,'Rename in tool');
+  assert.match(native.body,/original coding tool/);
+  assert.match(native.body,/Close this session/);
+  console.log('Claude-child display-name form keeps private scope, escaping, cancellation and full-ID confirmation distinct from native renames.');
+})().catch(error=>{console.error(error);process.exitCode=1;});
+{
+  // Model labels are display metadata; synthetic vectors still drive accounting.
+  const scoped=vm.createContext({console,Date,Set,URLSearchParams,document,
+    location:{search:'',hash:''},getComputedStyle:()=>({getPropertyValue:()=> '#000'})});
+  for(const file of ['static/core.js','static/charts.js','static/insights.js'])
+    vm.runInContext(fs.readFileSync(path.join(root,file),'utf8'),scoped);
+  vm.runInContext(views.slice(0,views.indexOf('document.getElementById("tabs").addEventListener')),scoped);
+  const check=code=>vm.runInContext(code,scoped),json=code=>JSON.parse(check(`JSON.stringify(${code})`));
+  check(`RAW={model_vendor:{Historical:'Anthropic',Fable:'Anthropic',Other:'OpenAI'}};
+    var session={source:'claude',model:'Historical',models:['Historical','Fable','Other'],nmodels:3,
+      model_days:{Historical:{'2026-10-17':[4,4000,400,0,0,4,1,0,0,0,4]},
+        Fable:{'2026-10-18':[1,100,10,0,0,1,1,0,0,0,1]},
+        Other:{'2026-10-19':[2,200,20,900,0,2,1,0,0,0,2]}},
+      days:{'2026-10-17':[4,4000,400,0,0,4,1,0,0,0,4],
+        '2026-10-18':[1,100,10,0,0,1,1,0,0,0,1],
+        '2026-10-19':[2,200,20,900,0,2,1,0,0,0,2]}};
+    var original=JSON.stringify(session),range18={from:'2026-10-18',to:'2026-10-18'},
+      rangeAll={from:'2026-10-17',to:'2026-10-19'};
+    var selected=clipSession(session,range18);`);
+  assert.deepEqual(json('selected.model_scoped'),{model:'Fable',models:['Fable'],nmodels:1,scope:'selected'});
+  assert.equal(check('selected.in'),100);assert.equal(check('selected.cost'),1);
+  assert.equal(check('selected.model'),'Historical','Historical metadata is retained unchanged');
+  assert.equal(check('JSON.stringify(session)===original'),true,'Scoping does not mutate stored session metadata');
+  assert.strictEqual(check('selected.model_days===session.model_days'),true,'The complete model-day maps remain available');
+  assert.equal(check('sessionModelsInRange(session,rangeAll).model'),'Historical');
+  check(`S.models=new Set(['Fable']);`);
+  assert.deepEqual(json('sessionModelsInRange(session,rangeAll).models'),['Fable']);
+  check(`S.models.clear();S.provs=new Set(['OpenAI']);`);
+  assert.deepEqual(json('sessionModelsInRange(session,rangeAll).models'),['Other']);
+  check(`S.provs.clear();`);
+  assert.deepEqual(json(`sessionModelsInRange(session,{from:'2026-10-18',to:'2026-10-19'}).models`),['Other','Fable'],'Token ranking includes cache tokens in the selected scope');
+  assert.match(check('sessionModelHTML(selected)'),/>Fable<\/span>/);
+  assert.doesNotMatch(check('sessionModelHTML(selected)'),/>Historical</);
+  check(`S.preset='custom';S.from=range18.from;S.to=range18.to;S.search='Fable';`);
+  assert.equal(check('sessionRows({sessions:[selected]}).length'),1,'Search follows the displayed scoped model');
+  check(`S.search='Historical';`);
+  assert.equal(check('sessionRows({sessions:[selected]}).length'),0,'An out-of-range historical model does not satisfy model-name search');
+  check(`var opposite={...selected,model:'A historical',model_scoped:{model:'Zulu',models:['Zulu'],nmodels:1,scope:'selected'}};`);
+  assert.deepEqual(json(`sortSessionRows([opposite,selected],{key:'model',dir:1}).map(s=>s.model_scoped.model)`),['Fable','Zulu'],'Model sorting follows the displayed scoped label');
+  assert.equal(check('opposite.model'),'A historical','Sorting preserves stored historical model names');
+  for(const maps of [{},{'(user)':{'2026-10-18':[0,0,0,0,0,0,1]}},{Fable:{'2026-10-18':Array(15).fill(0)}}]){
+    scoped.emptyMaps=maps;
+    assert.equal(check('sessionModelsInRange({...session,model_days:emptyMaps},range18).model'),'No model usage');
+  }
+  assert.equal(check(`clipSession({...session,model_days:{},days:{},compactions:[{date:'2026-10-18'}]},range18).model_scoped.model`),'No model usage','Compaction-only activity does not inherit a historical model');
+  assert.equal(check(`sessionModelsInRange({...session,model_days:{Fable:{'2026-10-18':[0,0,0,0,0,1]}}},range18).model`),'Fable','An observed reply can identify a model even when token usage is zero');
+  check(`var old={source:'claude',model:'Historical',models:['Historical'],nmodels:1};`);
+  assert.equal(check('sessionModelsInRange(old,range18).scope'),'whole-session');
+  assert.match(check('sessionModelHTML(old)'),/Whole session/);
+  assert.match(check('sessionModelHTML(old)'),/no model-by-day detail/);
+  check(`S.exactOnly=true;var copilot={...session,source:'copilot',exact_model_days:{Exact:{'2026-10-18':[.1,1,2,0,0,1]}},exact_days:{'2026-10-18':[.1,1,2,0,0,1]}};`);
+  assert.equal(check('clipSession(copilot,range18).model_scoped.model'),'Exact');
+  assert.equal(check('clipSession(copilot,range18).in'),1);
+  assert.equal(check('sessionModelsInRange({...copilot,exact_model_days:undefined},range18).scope'),'whole-session','Missing precision maps do not borrow estimated model identities');
+  check(`S.exactOnly=false;var many={...session,model_days:Object.fromEntries(Array.from({length:8},(_,i)=>['Model '+i,{'2026-10-18':[1,100-i,1]}]))};var bounded=clipSession(many,range18);`);
+  assert.equal(check('bounded.model_scoped.models.length'),6);
+  assert.equal(check('bounded.model_scoped.nmodels'),8);
+  assert.match(check('sessionModelHTML(bounded)'),/\+7/,'The +N total must count every scoped model');
+  assert.match(check('sessionModelList(bounded.model_scoped)'),/2 more models/,'A bounded list explicitly discloses omitted names');
+  assert.equal(check('Object.keys(bounded.model_days).length'),8);
+  check(`S.search='Model 7';`);
+  assert.equal(check('sessionRows({sessions:[bounded]}).length'),1,'Search includes scoped models beyond the six names displayed');
+  check(`S.models=new Set(['Model 0']);`);
+  assert.equal(check('sessionRows({sessions:[bounded]}).length'),0,'Search must not include a model excluded by the selected model filter');
+  check(`S.models.clear();S.search='';`);
+  assert.doesNotMatch(check(`sessionModelHTML({...old,model:'<img src=x>',models:['<img src=x>']})`),/<img src=x>/,'Labels and tooltips remain escaped');
+  console.log('Sessions model labels follow date/model/provider/precision scope; zero activity, historical limitations and bounded lists stay honest.');
+}

@@ -18,21 +18,34 @@ import os, re, sys, json, time, glob, threading, argparse, shutil, mimetypes, pl
 import gzip, hmac, io, ipaddress, secrets, socket, uuid, signal, urllib.parse, urllib.request, urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-import parser as P
-import native as N
-import session_names as SN
-import accounts as A
-import ledger_backups as LB
-import diagnostics as DG
-import session_timeline as ST
-from local_servers import LocalServerInventory
-import mcp_access as MA
-import mcp_backend as MCP
+if __package__:
+    from . import parser as P
+    from . import native as N
+    from . import session_names as SN
+    from . import accounts as A
+    from . import ledger_backups as LB
+    from . import diagnostics as DG
+    from . import session_timeline as ST
+    from .local_servers import LocalServerInventory
+    from . import mcp_access as MA
+    from . import mcp_backend as MCP
+else:
+    # Source checkouts and native app payloads retain their top-level scripts.
+    import parser as P
+    import native as N
+    import session_names as SN
+    import accounts as A
+    import ledger_backups as LB
+    import diagnostics as DG
+    import session_timeline as ST
+    from local_servers import LocalServerInventory
+    import mcp_access as MA
+    import mcp_backend as MCP
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = HERE
 CACHE_PATH = os.path.join(DATA_DIR, ".usage_cache.json")
-CACHE_VERSION = 58
+CACHE_VERSION = 60
 
 
 def _configure_data_dir(path):
@@ -48,7 +61,7 @@ def _configure_data_dir(path):
 def _peer_cache_ok(version):
     # v1.7.0 mirrors lack optional attribution/precision fields, but the reader
     # still supports their rows just as it supports archived local entries.
-    return type(version) is int and version in (52, 53, 54, 55, 56, 57, CACHE_VERSION)
+    return type(version) is int and version in (52, 53, 54, 55, 56, 57, 58, 59, CACHE_VERSION)
 
 # ---------------------------------------------------------------------------
 # In-memory store of per-file aggregates, refreshed on a background interval.
@@ -282,8 +295,8 @@ def load_cache():
     if data.get("version") == CACHE_VERSION:
         _state["files"] = files
         return
-    if data.get("version") in (53, 54, 55, 56, 57):
-        # Only optional compaction/pricing/account/SDK metadata changed. Keep every entry
+    if data.get("version") in (53, 54, 55, 56, 57, 58, 59):
+        # Only optional compaction/pricing/account/SDK/effort metadata changed. Keep every entry
         # until its replacement parses successfully; update_file backfills Claude
         # and Codex logs lacking metadata, and Claude Haiku 5.5 pricing detail.
         _state["files"] = files
@@ -536,20 +549,27 @@ def build_session_timeline(device, source, session_id, date_from=None, date_to=N
     if device != _local_id():
         return {"available": False, "events": [], "truncated": False, "detail": "Source events are available on the original device."}
     with _refresh_lock:
-        selected = None
+        selected = []
         for aggregate in _state["files"].values():
             if aggregate.get("source") != source or aggregate.get("archived"):
                 continue
             if any(SN.identity(aggregate, s) == session_id for s in aggregate.get("sessions", [])):
-                selected = (aggregate.get("path", ""), aggregate.get("size"), aggregate.get("mtime"))
-                break
-        if selected is None:
+                selected.append(aggregate.get("path", ""))
+        if not selected:
             return {"available": False, "events": [], "truncated": False, "detail": "The source log is unavailable; retained daily detail is unchanged."}
-        path = selected[0]
         known = {(s, os.path.realpath(p)) for s, p, _ in P.discover()}
-        if (source, os.path.realpath(path)) not in known:
+        verified = {os.path.realpath(path): path for path in selected
+                    if (source, os.path.realpath(path)) in known}
+        if not verified:
             return {"available": False, "events": [], "truncated": False, "detail": "The original source log could not be verified."}
-    return ST.timeline(source, path, session_id, date_from=date_from, date_to=date_to)
+        if len(verified) != 1:
+            return {"available": False, "events": [], "truncated": False, "detail": "More than one original source log matches this session identity; source events are unavailable."}
+        path = next(iter(verified.values()))
+    # The API resolved the full child identity above. Claude's child records
+    # retain the enclosing session UUID in their sessionId field.
+    child = SN.claude_child_identity(path) if source == "claude" else ""
+    transcript_id = child.split("/", 1)[0] if child == session_id else session_id
+    return ST.timeline(source, path, transcript_id, date_from=date_from, date_to=date_to)
 
 
 # ---------------------------------------------------------------------------
@@ -685,7 +705,7 @@ def build_payload():
 
 
 def set_session_name(body):
-    """Prepare a concrete warning, then perform one confirmed original-tool rename."""
+    """Confirm a native rename or a strictly local Claude-child display name."""
     device, source, session_id = (body.get(k) for k in ("device", "source", "id"))
     if any(not isinstance(v, str) or not v or len(v) > 512 for v in (device, source, session_id)):
         raise ValueError("Expected device, source and session id.")
@@ -693,23 +713,31 @@ def set_session_name(body):
         raise ValueError("Rename this session on its source device.")
     with _refresh_lock:
         discovered = {(s, os.path.realpath(p)) for s, p, _ in P.discover()}
-        aggregate = None
+        matches = []
         for candidate in _state["files"].values():
             if candidate["source"] != source: continue
             if (source, os.path.realpath(candidate.get("path", ""))) not in discovered: continue
             session = next((s for s in candidate.get("sessions", []) if SN.identity(candidate, s) == session_id), None)
             if session is not None and os.path.isfile(candidate.get("path", "")):
-                aggregate = candidate; break
-        if aggregate is None:
+                matches.append((candidate, session))
+        if not matches:
             raise ValueError("The original session log is unavailable. Its telemetry is preserved.")
-        if session.get("subagent") and source == "claude":
-            raise ValueError("Rename the parent Claude session in the original tool.")
+        if len(matches) != 1:
+            raise ValueError("More than one source matches this session identity. A name cannot be changed safely.")
+        aggregate, session = matches[0]
         path = aggregate["path"]
         original = session.get("title") or session.get("project") or session_id
+        display_only = source == "claude" and bool(session.get("subagent"))
         if body.get("action") == "preview":
+            if display_only:
+                return SN.prepare_display(device, source, path, session_id, body.get("name"), original)
             return SN.prepare(device, source, path, session_id, body.get("name"), original)
         if body.get("action") != "rename":
-            raise ValueError("Review the original-tool rename warning before saving.")
+            raise ValueError("Review the name-change preview before saving.")
+        if display_only:
+            result = SN.commit_display(body.get("ticket"), device, source, path, session_id, body.get("confirmed"))
+            notify_refresh()
+            return result
         result = SN.commit(body.get("ticket"), device, source, path, session_id, body.get("confirmed"))
         # Parse the metadata through the existing source parser. No cache rebuild,
         # archived-history deletion or modifications to billed usage are involved.
@@ -829,7 +857,84 @@ def _model_history(model):
     return P.PRICE_HISTORY.get(P._canonicalize(base), ())
 
 
+def _claude_parent_key(path, child=False):
+    """Recognize Claude's own parent/child transcript layout without disk reads.
+
+    The parent UUID and project-root prefix must both agree. Workflow children
+    use the same session directory as the older direct agent-*.jsonl files.
+    Unknown layouts remain unassociated; titles and activity dates are not IDs.
+    """
+    if not isinstance(path, str):
+        return None
+    path = path.replace("\\", "/")
+    if "\0" in path or any(part in (".", "..") for part in path.split("/")):
+        return None
+    uuid = r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}"
+    if child:
+        match = re.fullmatch(
+            rf"(.+)/({uuid})/(subagents/(?:workflows/wf_[A-Za-z0-9_-]+/)?"
+            r"agent-[A-Za-z0-9_-]{1,128}\.jsonl)", path)
+    else:
+        match = re.fullmatch(rf"(.+)/({uuid})\.jsonl", path)
+    if not match:
+        return None
+    root, parent = match.group(1), match.group(2).lower()
+    # Copied Windows paths may differ in drive/directory case as well as slash.
+    windows = bool(re.match(r"^[A-Za-z]:/", root) or root.startswith("//"))
+    if windows:
+        root = root.casefold()
+    key = (root, parent)
+    if child:
+        identity = match.group(3)
+        return key, identity.casefold() if windows else identity
+    return key
+
+
+def _claude_child_transcript_counts(files, local):
+    """Positive-only, whole-session evidence derived from retained aggregates.
+
+    Each full relative transcript identity counts once within its parent/device,
+    including archives and shared copies. Workflow names are part of that ID:
+    short agent basenames may be reused. This never changes usage accounting.
+    """
+    children = {}
+    for agg in files:
+        if agg.get("source") != "claude" or not agg.get("subagent"):
+            continue
+        recognized = _claude_parent_key(agg.get("path"), child=True)
+        if recognized is None:
+            continue
+        parent, identity = recognized
+        key = (agg.get("_device") or local, parent)
+        children.setdefault(key, set()).add(identity)
+    return {key: len(identities) for key, identities in children.items()}
+
+
+def _claude_parent_descriptors(files, local):
+    """Resolve only one retained parent in the child's exact source namespace."""
+    candidates = {}
+    for agg in files:
+        if agg.get("source") != "claude" or agg.get("subagent"):
+            continue
+        parent = _claude_parent_key(agg.get("path"))
+        sessions = agg.get("sessions") or []
+        if parent is None or len(sessions) != 1 or sessions[0].get("subagent"):
+            continue
+        device = agg.get("_device") or local
+        session = sessions[0]
+        title = session.get("title") or session.get("project") or parent[1]
+        if not isinstance(title, str):
+            title = parent[1]
+        candidates.setdefault((device, parent), []).append({
+            "id": parent[1], "title": title, "source": "claude", "device": device})
+    return {key: values[0] for key, values in candidates.items() if len(values) == 1}
+
+
 def _build_payload_locked():
+    try:
+        display_names, display_name_error = SN.display_names(), ""
+    except ValueError as error:
+        display_names, display_name_error = {}, str(error)
     records = {}      # (date, source, model, project, ide, device) -> aggregates
     tools = {}        # (date, source, name, device) -> count
     projects = {}     # (project, source) -> {tokens, msgs, sessions, cost}
@@ -855,6 +960,8 @@ def _build_payload_locked():
     items += _peer_items()
     files = _one_per_conversation(items)
     local = _local_id()
+    claude_children = _claude_child_transcript_counts(files, local)
+    claude_parents = _claude_parent_descriptors(files, local)
 
     for agg in files:
         source = agg["source"]
@@ -1017,6 +1124,18 @@ def _build_payload_locked():
             s2["archived"] = bool(agg.get("archived"))
             s2["subagent"] = bool(session.get("subagent"))
             s2["device"] = device
+            if source == "claude" and not s2["subagent"]:
+                parent = _claude_parent_key(agg.get("path"))
+                child_count = claude_children.get((device, parent))
+                if child_count:
+                    # Absence means no known association, never proof of zero.
+                    # Keep this separate from source spawn counts/inline usage.
+                    s2["subagent_children"] = child_count
+            elif source == "claude" and agg.get("subagent"):
+                recognized = _claude_parent_key(agg.get("path"), child=True)
+                parent = claude_parents.get((device, recognized[0])) if recognized else None
+                if parent:
+                    s2["subagent_parent"] = dict(parent)
             if not remote and source in ("codex", "claude"):
                 s2["account_metadata"] = A.session_metadata(agg)
             available, reason = SN.availability(source, agg.get("path", ""), remote)
@@ -1024,13 +1143,42 @@ def _build_payload_locked():
             if not s2["rename_id"]:
                 available, reason = False, "The full native session identity is unavailable."
             if source == "claude" and session.get("subagent"):
-                available, reason = False, "Rename the parent Claude session in the original tool."
+                available, reason = SN.display_availability(source, agg.get("path", ""), True, remote)
+                if not remote:
+                    s2["rename_scope"] = "display"
+                    if display_name_error:
+                        available, reason = False, display_name_error
+                    alias = SN.display_name(display_names, device, source, agg.get("path", ""), s2["rename_id"])
+                    if alias:
+                        s2["original_title"] = session.get("title") or session.get("project") or s2["rename_id"]
+                        s2["title"] = alias
+                        s2["display_alias"] = True
             s2["rename_available"], s2["rename_reason"] = available, reason
             s2["cost"] = (sum(d["cost"] for d in days.values()) if days else
                           _priced_usage(source, session["model"],
                                         (session.get("end") or session.get("start") or "")[:10],
                                         session, has_logged_cost)["cost"])
             sessions.append(s2)
+
+    # Parent resolution uses full source IDs and the exporting device, never a
+    # title, project label, shared root-session ID or eight-character table ID.
+    parent_candidates = {}
+    for session in sessions:
+        identity = session.get("rename_id")
+        if session.get("source") == "codex" and isinstance(identity, str) and re.fullmatch(
+                r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", identity):
+            key = (session["device"], identity.lower())
+            parent_candidates.setdefault(key, []).append(session)
+    for session in sessions:
+        parent_id = session.get("parent_id")
+        if session.get("source") != "codex" or not session.get("subagent") or not isinstance(parent_id, str):
+            continue
+        candidates = parent_candidates.get((session["device"], parent_id), [])
+        if len(candidates) == 1 and candidates[0] is not session:
+            parent = candidates[0]
+            session["subagent_parent"] = {
+                "id": parent["rename_id"], "title": parent.get("title") or parent.get("project") or parent_id,
+                "source": "codex", "device": parent["device"]}
 
     rec_list = []
     for (date, source, model, project, ide, device), v in records.items():
@@ -2503,10 +2651,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def _mcp_query(self):
         if not self._loopback_client():
+            self._discard_small_post_body()
             self._send(403, json.dumps(MCP.error_payload(MCP.MCPBackendError(
                 403, "forbidden", "MCP queries are available only on this machine."))))
             return
         if not self._csrf_ok():
+            self._discard_small_post_body()
             error = MCP.MCPBackendError(403, "forbidden", "The MCP query requires a same-origin JSON request.")
             self._send(error.status, json.dumps(MCP.error_payload(error)))
             return
@@ -2537,6 +2687,37 @@ class Handler(BaseHTTPRequestHandler):
         except MCP.MCPBackendError as error:
             self._send(error.status, json.dumps(MCP.error_payload(error), ensure_ascii=False))
 
+    def _discard_small_post_body(self):
+        """Avoid a TCP reset when rejecting a small, separately sent body.
+
+        Never parse rejected JSON or wait indefinitely for an untrusted sender.
+        Unknown, oversized and transfer-encoded requests still close directly.
+        """
+        if self.headers.get("Transfer-Encoding"):
+            return
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except (TypeError, ValueError):
+            return
+        if not 0 < length <= 16384:
+            return
+        previous_timeout = self.connection.gettimeout()
+        deadline = time.monotonic() + 0.2
+        try:
+            while length:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return
+                self.connection.settimeout(remaining)
+                chunk = self.rfile.read1(length)
+                if not chunk:
+                    return
+                length -= len(chunk)
+        except (OSError, ValueError):
+            return
+        finally:
+            self.connection.settimeout(previous_timeout)
+
     def do_POST(self):
         route = self.path.split("?")[0]
         if route == "/api/mcp/query":
@@ -2551,12 +2732,14 @@ class Handler(BaseHTTPRequestHandler):
         }
         if route in ("/api/settings", "/api/cache", "/api/update", "/api/devices", "/api/refresh", "/api/native", "/api/shutdown", "/api/sync", "/api/session-name", "/api/accounts", "/api/backups", "/api/mcp") or route in local_server_routes:
             if route in local_server_routes and not self._loopback_client():
+                self._discard_small_post_body()
                 self._send(403, json.dumps({"error": "local servers can be managed only on this machine"}))
                 return
             if route == "/api/mcp" and not self._loopback_client():
                 self._send(403, json.dumps({"error": "MCP settings are available only on this machine"}))
                 return
             if not self._csrf_ok():
+                self._discard_small_post_body()
                 self._send(403, json.dumps({"error": "cross-site request refused"}))
                 return
             try:
@@ -2648,6 +2831,16 @@ class Server(ThreadingHTTPServer):
     # silently failed to load ("heroHTML is not defined") once in a few dozen loads.
     request_queue_size = 128
     daemon_threads = True
+    allow_reuse_port = False
+    # Windows SO_REUSEADDR can let a second listener take the same port. The
+    # ledger needs a single owner, so reserve the address exclusively there.
+    allow_reuse_address = os.name != "nt"
+
+    def server_bind(self):
+        if os.name == "nt":
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
     def handle_error(self, request, client_address):
         # A browser tab closed/refreshed mid-response is normal traffic, not a
         # server fault — don't spam stderr with a traceback for it.
@@ -2678,57 +2871,68 @@ def main():
     ap.add_argument("--rebuild", action="store_true", help="ignore cache, full reparse")
     args = ap.parse_args()
 
+    # Reserve the service port before loading, rebuilding or saving the shared
+    # ledger. A second package/native launch must fail without becoming a second
+    # writer; a separate "is this port free?" probe leaves a race before bind.
     try:
-        _configure_data_dir(args.data_dir)
+        srv = Server((args.host, args.port), Handler)
     except OSError as e:
-        ap.error(f"cannot use data directory: {e}")
+        ap.error(f"cannot listen on {args.host}:{args.port}: {e}")
 
     stopping = threading.Event()
-
-    def _request_shutdown(signum, frame):
-        stopping.set()
-
-    signal.signal(signal.SIGTERM, _request_shutdown)
-    signal.signal(signal.SIGINT, _request_shutdown)
-
-    if args.rebuild and os.path.exists(CACHE_PATH):
-        os.remove(CACHE_PATH)
-    load_cache()
-    sys.stderr.write("[init] parsing local logs (first run reads everything, "
-                     "incl. one large Codex log)...\n")
-    refresh(verbose=True)
-    sys.stderr.write(f"[init] {_meta['files']} files in {_meta['last_duration']:.1f}s\n")
-    if stopping.is_set():
-        with _refresh_lock, _lock:
-            save_cache()
-        return
-
-    threading.Thread(target=background_refresher, args=(args.interval, stopping), daemon=True).start()
-
-    # other devices: only if the user turned them on in Settings
-    _load_mirrors()
-    if _peer_cfg()["share"].get("on"):
-        _share_start()
-    threading.Thread(target=peer_puller, args=(stopping,), daemon=True).start()
-
-    BIND.update(host=args.host, port=args.port)
-    srv = Server((args.host, args.port), Handler)
     srv.stopping = stopping
-    url = f"http://{args.host}:{args.port}"
-    sys.stderr.write(f"\n  ✦ AgentTelemetry live at  {url}  ·  {DEVICE['name']}\n")
-    sys.stderr.write(f"    refreshing every {args.interval}s · Ctrl-C to stop\n\n")
+    loaded = False
     try:
+        try:
+            _configure_data_dir(args.data_dir)
+        except OSError as e:
+            ap.error(f"cannot use data directory: {e}")
+
+        def _request_shutdown(signum, frame):
+            stopping.set()
+
+        signal.signal(signal.SIGTERM, _request_shutdown)
+        signal.signal(signal.SIGINT, _request_shutdown)
+
+        if args.rebuild and os.path.exists(CACHE_PATH):
+            os.remove(CACHE_PATH)
+        load_cache()
+        loaded = True
+        sys.stderr.write("[init] parsing local logs (first run reads everything, "
+                         "incl. one large Codex log)...\n")
+        refresh(verbose=True)
+        sys.stderr.write(f"[init] {_meta['files']} files in {_meta['last_duration']:.1f}s\n")
+        if stopping.is_set():
+            return
+
+        threading.Thread(target=background_refresher, args=(args.interval, stopping), daemon=True).start()
+
+        # other devices: only if the user turned them on in Settings
+        _load_mirrors()
+        if _peer_cfg()["share"].get("on"):
+            _share_start()
+        threading.Thread(target=peer_puller, args=(stopping,), daemon=True).start()
+
+        BIND.update(host=args.host, port=srv.server_port)
+        url = f"http://{args.host}:{srv.server_port}"
+        sys.stderr.write(f"\n  ✦ AgentTelemetry live at  {url}  ·  {DEVICE['name']}\n")
+        sys.stderr.write(f"    refreshing every {args.interval}s · Ctrl-C to stop\n\n")
         srv.timeout = 0.5
         while not stopping.is_set():
             srv.handle_request()
     finally:
         stopping.set()
-        _share_stop()
-        srv.server_close()
-        with _refresh_lock, _lock:
-            if not save_cache():
-                sys.stderr.write("[shutdown] cache flush failed; see the cache error above\n")
-        sys.stderr.write("\nbye\n")
+        try:
+            if loaded:
+                _share_stop()
+                with _refresh_lock, _lock:
+                    if not save_cache():
+                        sys.stderr.write("[shutdown] cache flush failed; see the cache error above\n")
+                sys.stderr.write("\nbye\n")
+        finally:
+            # Keep ownership through the final flush: another launcher may use
+            # this same ledger as soon as the service port becomes available.
+            srv.server_close()
 
 
 if __name__ == "__main__":

@@ -909,21 +909,112 @@ def resolve_session(payload: dict[str, Any], opaque_id: Any, policy: dict[str, A
     return matches[0] if len(matches) == 1 else None
 
 
+def _session_model_summary(model_map: Any, session_model: str, session: dict[str, Any], payload: dict[str, Any],
+                           model_filters: list[str], providers: list[str], start: str, end: str,
+                           *, allow_whole_session: bool) -> dict[str, Any]:
+    """Describe only models with positive usage in the selected session range."""
+    if not isinstance(model_map, dict):
+        if not allow_whole_session:
+            return {
+                "model": None, "models": None, "nmodels": None,
+                "model_scope": "unavailable", "models_truncated": False,
+            }
+        # Legacy sessions can retain only their whole-session dominant model. Keep
+        # that limitation explicit instead of presenting it as range-scoped detail.
+        source_models = session.get("models") if isinstance(session, dict) else None
+        whole_models: list[str] = []
+        if isinstance(source_models, (list, tuple)):
+            for raw_model in source_models:
+                if not isinstance(raw_model, str) or raw_model == "(user)":
+                    continue
+                shown_model = _raw_text(raw_model)
+                if shown_model != "(unknown)" and shown_model not in whole_models:
+                    whole_models.append(shown_model)
+
+        dominant = _raw_text(session_model)
+        if session_model == "(user)" or dominant == "(unknown)":
+            dominant = None
+        if dominant and dominant not in whole_models:
+            whole_models.insert(0, dominant)
+
+        raw_count = session.get("nmodels") if isinstance(session, dict) else None
+        known_count = raw_count if isinstance(raw_count, int) and not isinstance(raw_count, bool) and raw_count > 0 else None
+        if not whole_models and known_count is None and session_model == "(user)":
+            return {
+                "model": "No model usage", "models": [], "nmodels": 0,
+                "model_scope": "whole-session", "models_truncated": False,
+            }
+        if not whole_models and known_count is None:
+            return {
+                "model": None, "models": None, "nmodels": None,
+                "model_scope": "unavailable", "models_truncated": False,
+            }
+        shown_models = whole_models[:6]
+        shown = dominant or (shown_models[0] if shown_models else None)
+        return {
+            "model": shown, "models": shown_models, "nmodels": known_count,
+            "model_scope": "whole-session",
+            "models_truncated": len(whole_models) > len(shown_models)
+            or (known_count is not None and known_count > len(shown_models)),
+        }
+
+    ranked: list[tuple[int | float, int | float, int | float, str, str]] = []
+    for model_name, dates in model_map.items():
+        if not isinstance(model_name, str) or model_name == "(user)":
+            continue
+        if model_filters and model_name not in model_filters:
+            continue
+        if providers and _model_provider(payload, model_name) not in providers:
+            continue
+        if not isinstance(dates, dict):
+            continue
+        totals: dict[str, int | float] = {field: 0 for field in ("in", "out", "cr", "cc", "req", "asst", "cost")}
+        for day, vector in dates.items():
+            if not isinstance(day, str) or day < start or day > end:
+                continue
+            if not isinstance(vector, (list, tuple)):
+                continue
+            for field in totals:
+                index = _VECTOR_INDEX[field]
+                if index < len(vector):
+                    value = _finite_number(vector[index])
+                    if value is not None:
+                        totals[field] += value
+        tokens = totals["in"] + totals["out"] + totals["cr"] + totals["cc"]
+        requests = totals["req"]
+        responses = totals["asst"]
+        if tokens > 0 or requests > 0 or responses > 0 or totals["cost"] > 0:
+            ranked.append((tokens, requests, responses, model_name.casefold(), model_name))
+
+    # Model names are the final ascending tie-break so the result is stable across
+    # dictionary insertion order and agrees with the browser's scoped summary.
+    ranked.sort(key=lambda row: (-row[0], -row[1], -row[2], row[3], row[4]))
+    names = [_raw_text(row[4]) for row in ranked]
+    count = len(ranked)
+    return {
+        "model": names[0] if names else "No model usage",
+        "models": names[:6],
+        "nmodels": count,
+        "model_scope": "selected",
+        "models_truncated": count > 6,
+    }
+
+
 def _session_public_item(session: dict[str, Any], sums: dict[str, Any], payload: dict[str, Any],
-                         policy: dict[str, Any], unknown: bool, missing_vector: bool) -> dict[str, Any]:
+                         policy: dict[str, Any], unknown: bool, missing_vector: bool,
+                         model_summary: dict[str, Any]) -> dict[str, Any]:
     source = session.get("source") if isinstance(session.get("source"), str) else "(unknown)"
     safe_source = source if source in _KNOWN_TOOLS else _raw_text(source)
     project = session.get("project") if isinstance(session.get("project"), str) else "(unknown)"
     device = session.get("device") if isinstance(session.get("device"), str) else _device_id(payload) or "(unknown)"
     ide = session.get("ide") if isinstance(session.get("ide"), str) else "(unknown)"
-    raw_model = session.get("model") if isinstance(session.get("model"), str) else "(unknown)"
     item = {
         "tool": safe_source,
         "tool_label": _KNOWN_TOOLS.get(source, safe_source),
         "project": label("project", project, policy),
         "device": label("device", device, policy),
         "ide": _raw_text(ide),
-        "model": _raw_text(raw_model),
+        **model_summary,
         "archived": session.get("archived") is True,
         "subagent": session.get("subagent") is True,
         "usage_available": not unknown,
@@ -1089,7 +1180,11 @@ def list_sessions(payload: dict[str, Any], arguments: dict[str, Any], *, policy:
             model_limited = True
         if unknown:
             unavailable += 1
-        item = _session_public_item(session, sums, payload, safe_policy, unknown, missing_vector)
+        model_summary = _session_model_summary(
+            model_map, model, session, payload, filters["models"], filters["providers"], start, end,
+            allow_whole_session=(not context["exact_only"] and not has_model_filters),
+        )
+        item = _session_public_item(session, sums, payload, safe_policy, unknown, missing_vector, model_summary)
         if model_limited:
             item["model_detail_limited"] = True
         item["days_in_range"] = day_count if not unknown else None

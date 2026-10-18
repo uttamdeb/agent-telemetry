@@ -58,6 +58,216 @@ class SessionNameTests(unittest.TestCase):
     def commit(self, preview, **extra):
         return D.set_session_name({**self.body, "action": "rename", "ticket": preview["ticket"], "confirmed": True, **extra})
 
+    def child(self, agent="child-fixture", workflow=None, parent=None, root=None):
+        folder = (root or self.root) / (parent or self.sid) / "subagents"
+        if workflow: folder = folder / "workflows" / workflow
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / ("agent-" + agent + ".jsonl")
+        lines = [{"type": "user", "sessionId": parent or self.sid, "isSidechain": True,
+                  "timestamp": "2026-10-12T12:00:00Z", "message": {"content": "Child fixture task"}},
+                 {"type": "assistant", "sessionId": parent or self.sid, "isSidechain": True,
+                  "timestamp": "2026-10-12T12:00:01Z", "message": {"id": "child-message-" + agent,
+                  "model": "claude-sonnet-5-5", "content": [{"type": "text", "text": "Fixture reply"}],
+                  "usage": {"input_tokens": 25, "output_tokens": 5}}}]
+        path.write_text("".join(json.dumps(line) + "\n" for line in lines))
+        aggregate = P.update_file(None, "claude", str(path), None, {})
+        D._state["files"][str(path)] = aggregate
+        P.discover.return_value.append(("claude", str(path), None))
+        identity = SN.identity(aggregate, aggregate["sessions"][0])
+        return path, aggregate, {**self.body, "id": identity}
+
+    def child_preview(self, body, name="Private display fixture"):
+        return D.set_session_name({**body, "action": "preview", "name": name})
+
+    def child_commit(self, body, preview, **extra):
+        return D.set_session_name({**body, "action": "rename", "ticket": preview["ticket"], "confirmed": True, **extra})
+
+    def test_child_identity_includes_parent_workflow_and_copied_windows_separators(self):
+        for workflow in (None, "wf_fixture-1"):
+            path, aggregate, body = self.child(workflow=workflow)
+            tail = "subagents/" + ("workflows/" + workflow + "/" if workflow else "") + "agent-child-fixture"
+            self.assertEqual(body["id"], self.sid + "/" + tail)
+            for prefix in ("C:\\Users\\fixture\\projects\\", "\\\\host\\share\\"):
+                copied = prefix + (self.sid + "/" + tail + ".jsonl").replace("/", "\\")
+                self.assertEqual(SN.identity({"source": "claude", "subagent": True, "path": copied}, {}), body["id"])
+                self.assertEqual(SN.identity({"source": "claude", "path": prefix + self.sid + ".jsonl"}, {}), self.sid)
+                self.assertEqual(SN.identity({"source": "claude", "path": prefix + self.sid.upper() + ".jsonl"}, {}), self.sid)
+            self.assertTrue(SN.display_availability("claude", str(path), True)[0])
+            with self.assertRaises(ValueError):
+                SN.prepare("fixture-device", "claude", str(path), body["id"], "Native edit refused", "Fixture")
+        for invalid in ("subagents/agent-id.jsonl", self.sid + "/subagents/unknown/agent-id.jsonl",
+                        self.sid + "/subagents/workflows/unknown/agent-id.jsonl", self.sid + "/subagents/agent-id.json"):
+            self.assertEqual(SN.claude_child_identity(invalid), "")
+        relative = self.sid.upper() + "/subagents/workflows/wf_MiXeD/agent-MiXeD.jsonl"
+        self.assertEqual(SN.claude_child_identity("/fixture/" + relative),
+                         self.sid + "/subagents/workflows/wf_MiXeD/agent-MiXeD")
+        self.assertEqual(SN.claude_child_identity("C:/fixture/" + relative),
+                         self.sid + "/subagents/workflows/wf_mixed/agent-mixed")
+
+    def test_full_child_identity_resolves_numeric_timeline_without_changing_parent(self):
+        for workflow in (None, "wf_timeline"):
+            path, aggregate, body = self.child(workflow=workflow)
+            result = D.build_session_timeline("fixture-device", "claude", body["id"])
+            self.assertTrue(result["available"])
+            self.assertEqual([event["kind"] for event in result["events"]], ["user_turn", "request"])
+            self.assertEqual(result["events"][-1]["input"], 25)
+            self.assertNotIn("Child fixture task", json.dumps(result))
+        with patch.object(P, "discover", return_value=[]):
+            self.assertFalse(D.build_session_timeline("fixture-device", "claude", body["id"])["available"])
+
+    def test_child_timeline_refuses_ambiguous_discovered_copies_but_keeps_unique_source(self):
+        for workflow in (None, "wf_duplicate_timeline"):
+            with self.subTest(workflow=workflow):
+                path, aggregate, body = self.child(workflow=workflow)
+                copied, _, copied_body = self.child(workflow=workflow, root=self.root / "different-profile")
+                self.assertEqual(body["id"], copied_body["id"])
+                before = copy.deepcopy(D._state["files"])
+                with patch.object(D.ST, "timeline") as timeline:
+                    result = D.build_session_timeline("fixture-device", "claude", body["id"])
+                    self.assertFalse(result["available"])
+                    self.assertEqual(result["events"], [])
+                    self.assertIn("More than one", result["detail"])
+                    timeline.assert_not_called()
+                self.assertEqual(D._state["files"], before)
+                # An undiscovered retained duplicate must not hide the one
+                # verified source. Duplicate ledger keys for that same path
+                # must not make the file ambiguous either.
+                D._state["files"]["duplicate-ledger-key"] = copy.deepcopy(aggregate)
+                with patch.object(P, "discover", return_value=[("claude", str(path), None)]):
+                    result = D.build_session_timeline("fixture-device", "claude", body["id"])
+                    self.assertTrue(result["available"])
+                    self.assertEqual([event["kind"] for event in result["events"]], ["user_turn", "request"])
+                D._state["files"].pop("duplicate-ledger-key")
+
+    def test_child_display_name_never_writes_transcripts_ledger_summary_or_peer_exports(self):
+        path, aggregate, body = self.child(workflow="wf_fixture")
+        before = copy.deepcopy(D._state["files"])
+        raw_parent, raw_child = self.path.read_bytes(), path.read_bytes()
+        payload_before, summary = D.build_payload(), D.build_today_summary()
+        gen, dirty = D._gen["v"], D._dirty["v"]
+        preview = self.child_preview(body, "Private <alias> & fixture")
+        self.assertEqual(preview["scope"], "display")
+        self.assertFalse((N.support_dir() / SN._DISPLAY_FILE).exists())
+        with patch.object(SN, "commit") as native_commit, patch.object(P, "update_file") as parse, patch.object(D, "save_cache") as save:
+            result = self.child_commit(body, preview)
+            native_commit.assert_not_called(); parse.assert_not_called(); save.assert_not_called()
+        self.assertEqual(self.path.read_bytes(), raw_parent)
+        self.assertEqual(path.read_bytes(), raw_child)
+        self.assertEqual(D._state["files"], before)
+        self.assertEqual((D._gen["v"], D._dirty["v"]), (gen, dirty))
+        self.assertFalse(Path(D.CACHE_PATH).exists())
+        self.assertEqual(D.build_today_summary(), summary)
+        after = D.build_payload()
+        self.assertEqual(after["records"], payload_before["records"])
+        child = next(s for s in after["sessions"] if s["rename_id"] == body["id"])
+        self.assertEqual(child["title"], result["title"])
+        self.assertEqual(child["original_title"], aggregate["sessions"][0]["title"])
+        self.assertEqual(child["rename_scope"], "display")
+        self.assertTrue(child["rename_available"])
+        self.assertTrue(child["display_alias"])
+        for item in D._state["files"].values():
+            self.assertNotIn(result["title"], json.dumps(D._export_agg(item)))
+        file = N.support_dir() / SN._DISPLAY_FILE
+        contents = json.loads(file.read_text())
+        self.assertNotIn(str(path), file.read_text())
+        self.assertEqual(list(contents["names"].values()), [result["title"]])
+        if sys.platform != "win32": self.assertEqual(file.stat().st_mode & 0o777, 0o600)
+        original = aggregate["sessions"][0]["title"] or aggregate["sessions"][0]["project"] or body["id"]
+        self.child_commit(body, self.child_preview(body, original))
+        self.assertEqual(SN.display_names(), {})
+        self.assertEqual(path.read_bytes(), raw_child)
+
+    def test_child_previews_are_one_use_confirmed_and_detect_stale_aliases(self):
+        path, aggregate, body = self.child()
+        preview = self.child_preview(body)
+        with self.assertRaises(ValueError): self.child_commit(body, preview, confirmed=False)
+        self.child_commit(body, preview)
+        with self.assertRaises(ValueError): self.child_commit(body, preview)
+        first, second = self.child_preview(body, "First fixture"), self.child_preview(body, "Second fixture")
+        self.child_commit(body, first)
+        with self.assertRaisesRegex(ValueError, "changed"): self.child_commit(body, second)
+        expired = self.child_preview(body)
+        SN._plans[expired["ticket"]]["at"] -= 301
+        with self.assertRaisesRegex(ValueError, "expired"): self.child_commit(body, expired)
+        native_preview = self.preview()
+        with self.assertRaises(ValueError): self.child_commit(body, native_preview)
+        alias_preview = self.child_preview(body)
+        with self.assertRaises(ValueError): self.commit(alias_preview)
+
+    def test_child_aliases_refuse_corrupt_store_and_preserve_atomic_write_failure(self):
+        path, aggregate, body = self.child()
+        self.child_commit(body, self.child_preview(body))
+        file = N.support_dir() / SN._DISPLAY_FILE
+        original = file.read_bytes()
+        with patch("builtins.open", side_effect=PermissionError("fixture unavailable")):
+            with self.assertRaisesRegex(ValueError, "could not be read"): self.child_preview(body)
+        self.assertEqual(file.read_bytes(), original)
+        pending = self.child_preview(body, "Replacement fixture")
+        with patch.object(SN.os, "replace", side_effect=OSError("fixture full disk")):
+            with self.assertRaises(OSError): self.child_commit(body, pending)
+        self.assertEqual(file.read_bytes(), original)
+        self.assertFalse(list(file.parent.glob("*.tmp")))
+        for value in (b"unreadable fixture", b'{"version":2,"names":{}}', b'{"version":true,"names":{}}',
+                      b'{"version":1,"names":{},"unknown":"preserve this"}',
+                      b'{"version":1,"names":{"wrong-key":"name"}}'):
+            file.write_bytes(value)
+            with self.assertRaisesRegex(ValueError, "invalid"): self.child_preview(body)
+            self.assertEqual(file.read_bytes(), value)
+            child = next(s for s in D.build_payload()["sessions"] if s["rename_id"] == body["id"])
+            self.assertFalse(child["rename_available"])
+            self.assertEqual(child["title"], aggregate["sessions"][0]["title"])
+
+    def test_child_names_are_scoped_and_unknown_remote_missing_or_ambiguous_sources_are_refused(self):
+        path, aggregate, body = self.child(agent="same-child")
+        other, other_aggregate, other_body = self.child(agent="same-child", parent=str(uuid.uuid4()))
+        self.assertNotEqual(body["id"], other_body["id"])
+        first, second = self.child_preview(body, "First child alias"), self.child_preview(other_body, "Second child alias")
+        self.child_commit(body, first); self.child_commit(other_body, second)
+        self.assertEqual(set(SN.display_names().values()), {"First child alias", "Second child alias"})
+        remote = copy.deepcopy(aggregate); remote["_device"] = "peer-fixture"
+        with patch.object(D, "_peer_items", return_value=[("peer:fixture:child", remote)]):
+            child = next(s for s in D.build_payload()["sessions"] if s["device"] == "peer-fixture")
+            self.assertEqual(child["title"], aggregate["sessions"][0]["title"])
+            self.assertNotIn("display_alias", child)
+            self.assertNotIn("original_title", child)
+            self.assertFalse(child["rename_available"])
+        with self.assertRaises(ValueError): self.child_preview({**body, "device": "peer-fixture"})
+        with self.assertRaises(ValueError): self.child_preview({**body, "id": "agent-sa"})
+        with patch.object(P, "discover", return_value=[]):
+            with self.assertRaises(ValueError): self.child_preview(body)
+        pending = self.child_preview(body)
+        path.unlink()
+        with self.assertRaises(ValueError): self.child_commit(body, pending)
+        duplicate, _, duplicate_body = self.child(agent="same-child", parent=other_body["id"].split("/")[0], root=self.root / "different-profile")
+        self.assertEqual(duplicate_body["id"], other_body["id"])
+        with self.assertRaisesRegex(ValueError, "More than one"): self.child_preview(other_body)
+
+    def test_child_http_display_name_uses_same_origin_json_and_confirmation_gates(self):
+        path, aggregate, child = self.child(workflow="wf_http-fixture")
+        source_bytes = path.read_bytes()
+        server = D.Server(("127.0.0.1", 0), D.Handler); self.addCleanup(server.server_close)
+        thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start(); self.addCleanup(server.shutdown)
+        origin = "http://127.0.0.1:" + str(server.server_port)
+        def post(body, headers):
+            connection = http.client.HTTPConnection("127.0.0.1", server.server_port)
+            connection.request("POST", "/api/session-name", json.dumps(body), headers)
+            response = connection.getresponse(); status = response.status; data = json.loads(response.read()); connection.close()
+            return status, data
+        body = {**child, "action": "preview", "name": "HTTP private alias"}
+        with patch.dict(D.BIND, {"host": "127.0.0.1", "port": server.server_port}):
+            self.assertEqual(post(body, {"Content-Type": "text/plain"})[0], 403)
+            self.assertEqual(post(body, {"Content-Type": "application/json", "Origin": "https://example.invalid"})[0], 403)
+            self.assertFalse((N.support_dir() / SN._DISPLAY_FILE).exists())
+            headers = {"Content-Type": "application/json", "Origin": origin}
+            status, preview = post(body, headers)
+            self.assertEqual(status, 200); self.assertEqual(preview["scope"], "display")
+            commit = {**child, "action": "rename", "ticket": preview["ticket"]}
+            self.assertEqual(post(commit, headers)[0], 400)
+            self.assertFalse((N.support_dir() / SN._DISPLAY_FILE).exists())
+            self.assertEqual(post({**commit, "confirmed": True}, headers)[0], 200)
+            self.assertEqual(post({**commit, "confirmed": True}, headers)[0], 400)
+        self.assertEqual(path.read_bytes(), source_bytes)
+
     def test_preview_cancel_and_missing_confirmation_do_not_write_source_or_ledger(self):
         before, raw = copy.deepcopy(self.agg), self.path.read_bytes()
         preview = self.preview()

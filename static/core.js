@@ -118,6 +118,7 @@ const S = {
   ides:new Set(),        // which IDE / surface the work ran in
   devs:new Set(),        // which device (only offered once another one is connected)
   search:"",
+  sessionType:"all",    // session-list-only classification; never changes shared slices
   exactOnly:false,
   metric:"tokens", rateMetric:"all",   // tokens lead; cost is an estimate
   tableView:new Set(),   // chart ids currently shown as their table twin
@@ -200,7 +201,7 @@ function deviceName(id){ const d=devices().find(x=>x.id===id); return d ? d.name
    history entry rather than adding one, the way switching tab does. */
 const Q_DEFAULT = {preset:S.preset, metric:S.metric, rateMetric:S.rateMetric};
 const Q_SETS = [["provs","providers"],["models","models"],["projs","projects"],["ides","ides"],["devs","devices"]];
-const Q_OWNED = ["range","from","to","metric","rate","tools","exact","q", ...Q_SETS.map(x=>x[1])];
+const Q_OWNED = ["range","from","to","metric","rate","tools","exact","q","session_type", ...Q_SETS.map(x=>x[1])];
 const isDay = s => /^\d{4}-\d{2}-\d{2}$/.test(s||"") && dkey(new Date(s+"T00:00:00"))===s;
 
 /* A link is somebody else's text. Dates, tool ids, the range and the measure are checked
@@ -223,6 +224,8 @@ function filtersFromURL(){
   }
   S.exactOnly = ["1","true"].includes(q.get("exact"));
   S.search = (q.get("q")||"").trim().slice(0,200);
+  S.sessionType = ["all","subagents","other"].includes(q.get("session_type"))
+    ? q.get("session_type") : "all";
 }
 /* Called after every render, so a filter set by a key, a chip, a link or a click on the
    calendar is covered without each of them knowing about the URL. */
@@ -238,6 +241,7 @@ function filtersToURL(){
   for(const [key, param] of Q_SETS) [...S[key]].sort().forEach(v=>q.append(param, v));
   if(S.exactOnly) q.set("exact","1");
   if(S.search) q.set("q", S.search);
+  if(S.sessionType!=="all") q.set("session_type",S.sessionType);
   const qs = q.toString(), next = location.pathname + (qs ? "?"+qs : "") + location.hash;
   if(next !== location.pathname + location.search + location.hash){
     try{ history.replaceState(history.state, "", next); }catch(e){}
@@ -297,10 +301,75 @@ function compactionsInRange(s, r){
   if(!Array.isArray(s.compactions)) return null; // older archive/peer: unknown
   return s.compactions.filter(e=>e.date>=r.from && e.date<=r.to);
 }
+/* Effort is recorded metadata, never a model identity or another usage metric.
+   Keep its original date/model map so a clipped session can be scoped again. */
+const REASONING_EFFORT_LEVELS = ["none","minimal","low","medium","high","xhigh","max","ultra"];
+function reasoningEffortInRange(s, r){
+  const result={levels:[],unrecorded:false,entries:[]};
+  const metadata=s.reasoning_effort;
+  if(!["claude","codex"].includes(s.source) || !metadata || metadata.version!==1
+      || !metadata.days || typeof metadata.days!=="object" || Array.isArray(metadata.days)) return result;
+  const allowed=s.source==="claude"?["low","medium","high","xhigh","max"]:REASONING_EFFORT_LEVELS;
+  const observed=new Set();
+  for(const [key,value] of Object.entries(metadata.days)){
+    const parts=key.split("\t");
+    if(parts.length!==2) continue;
+    const [date,model]=parts;
+    if(!isDay(date) || date<r.from || date>r.to || !model || model==="(user)" || !passModel(model)
+        || !value || typeof value!=="object" || Array.isArray(value)) continue;
+    const levels=[];
+    let unrecorded=!Number.isSafeInteger(value.unrecorded) || value.unrecorded<0 || value.unrecorded>0;
+    if(value.levels && typeof value.levels==="object" && !Array.isArray(value.levels)){
+      for(const [level,count] of Object.entries(value.levels)){
+        if(!Number.isSafeInteger(count) || count<0){unrecorded=true;continue;}
+        if(!count) continue;
+        if(!allowed.includes(level)){unrecorded=true;continue;}
+        levels.push(level);observed.add(level);
+      }
+    }else unrecorded=true;
+    if(!levels.length && !unrecorded) continue;
+    levels.sort((a,b)=>REASONING_EFFORT_LEVELS.indexOf(a)-REASONING_EFFORT_LEVELS.indexOf(b));
+    result.entries.push({date,model,levels,unrecorded});
+    result.unrecorded ||= unrecorded;
+  }
+  result.levels=REASONING_EFFORT_LEVELS.filter(level=>observed.has(level));
+  result.entries.sort((a,b)=>a.date.localeCompare(b.date)||a.model.localeCompare(b.model));
+  return result;
+}
+/* Display-only model identity follows the same date/model/provider precision as
+   the session figures. Keep historical fields and complete maps untouched. */
+function sessionModelsInRange(s, r, nameLimit=6){
+  const maps=S.exactOnly && s.source==="copilot"?s.exact_model_days:s.model_days;
+  if(!maps || typeof maps!=="object" || Array.isArray(maps)){
+    const model=typeof s.model==="string" && s.model?s.model:"Not recorded";
+    const models=Array.isArray(s.models)?s.models.filter(m=>typeof m==="string" && m && m!=="(user)"):[model];
+    const count=Number.isSafeInteger(s.nmodels) && s.nmodels>0?s.nmodels:models.length;
+    return {model,models:models.slice(0,nameLimit),nmodels:Math.max(count,models.length),scope:"whole-session"};
+  }
+  const observed=[];
+  for(const [model,days] of Object.entries(maps)){
+    if(!model || model==="(user)" || !passModel(model) || !days || typeof days!=="object" || Array.isArray(days)) continue;
+    let tokens=0,calls=0,replies=0,present=false;
+    for(const [date,row] of Object.entries(days)){
+      if(!isDay(date) || date<r.from || date>r.to || !Array.isArray(row)) continue;
+      const value=i=>Number.isFinite(row[i]) && row[i]>0?row[i]:0;
+      const total=value(1)+value(2)+value(3)+value(4);
+      const requests=value(10), responses=value(5);
+      // A user-only or compaction-only day does not name a model that ran.
+      if(total || requests || responses || value(0)) present=true;
+      tokens+=total;calls+=requests;replies+=responses;
+    }
+    if(present) observed.push({model,tokens,calls,replies});
+  }
+  observed.sort((a,b)=>b.tokens-a.tokens || b.calls-a.calls || b.replies-a.replies || a.model.localeCompare(b.model));
+  return {model:observed[0]?.model||"No model usage",models:observed.slice(0,nameLimit).map(x=>x.model),
+    nmodels:observed.length,scope:"selected"};
+}
 /* Keep the first ten legacy slots; newer maps add calls and write tiers. */
 function clipSession(s, r){
   const compactions=compactionsInRange(s,r);
-  const events={compactions,compaction_count:compactions===null?null:compactions.length};
+  const events={compactions,compaction_count:compactions===null?null:compactions.length,
+    reasoning_effort_scoped:reasoningEffortInRange(s,r),model_scoped:sessionModelsInRange(s,r)};
   const D = sessionDays(s);
   if(!D) return Object.assign({}, s, {span:1, clipped:false, detail_limited:true}, events);
   const total=Array(15).fill(0); let inN=0,allN=0,callsKnown=true;

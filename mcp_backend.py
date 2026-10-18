@@ -10,10 +10,13 @@ import re
 import time
 import unicodedata
 
-import mcp_access
-import mcp_tools
-import telemetry_insights
-import telemetry_query
+if __package__:
+    from . import mcp_access, mcp_tools, telemetry_insights, telemetry_query
+else:
+    import mcp_access
+    import mcp_tools
+    import telemetry_insights
+    import telemetry_query
 
 
 MAX_REQUEST_BYTES = 64 * 1024
@@ -42,6 +45,10 @@ _LEDGER_STATUSES = {
     "Unreadable": "unreadable",
     "Save failed": "save_failed",
 }
+_MISSING_PRICE_MODEL_LIMIT = 100  # build_diagnostics() caps its returned list here
+_ACCOUNT_ENTRY_LIMIT = 100
+_ACCOUNT_SNAPSHOT_LIMIT = 16
+_QUOTA_WINDOW_LIMIT = 12
 
 
 class MCPBackendError(Exception):
@@ -176,9 +183,15 @@ def _safe_diagnostics(report):
         seen_models = set()
         for raw_model in missing[:1000]:
             model = _safe_text(raw_model)
-            if model and model not in seen_models and len(missing_models) < 100:
+            if model and model not in seen_models and len(missing_models) < _MISSING_PRICE_MODEL_LIMIT:
                 seen_models.add(model)
                 missing_models.append(model)
+    missing_count = min(len(missing), 1_000_000) if isinstance(missing, list) else 0
+    missing_source_capped = isinstance(missing, list) and len(missing) >= _MISSING_PRICE_MODEL_LIMIT
+    missing_models_truncated = (
+        isinstance(missing, list)
+        and (missing_source_capped or len(missing_models) < len(missing))
+    )
     return {
         "status": status,
         "generation": _safe_count(report.get("generation")),
@@ -191,9 +204,14 @@ def _safe_diagnostics(report):
         "issue_categories": categories,
         "ledger": ledger,
         "backup_issue": bool(report.get("backup_error")),
-        "missing_price_model_count": min(len(missing), 1_000_000) if isinstance(missing, list) else 0,
+        # The source itself caps its model list at 100. Keep the legacy count as
+        # an observed count and label its completeness instead of implying it is
+        # the full total when the source cap may have been reached.
+        "missing_price_model_count": missing_count,
+        "missing_price_models_observed_count": missing_count,
+        "missing_price_model_count_kind": "observed_lower_bound" if missing_source_capped else "observed",
         "missing_price_models": missing_models,
-        "missing_price_models_truncated": isinstance(missing, list) and len(missing) > len(missing_models),
+        "missing_price_models_truncated": missing_models_truncated,
     }
 
 
@@ -280,7 +298,7 @@ def _quota_snapshot(source, snapshot, identity_stale, stale_after, now_epoch):
     snapshot_stale = not observed_fresh or snapshot.get("stale") is not False
     windows = []
     raw_windows = snapshot.get("windows") if isinstance(snapshot.get("windows"), list) else []
-    for window in raw_windows[:12]:
+    for window in raw_windows[:_QUOTA_WINDOW_LIMIT]:
         if not isinstance(window, dict):
             continue
         minutes = window.get("window_minutes")
@@ -314,25 +332,44 @@ def _quota_snapshot(source, snapshot, identity_stale, stale_after, now_epoch):
         "identity_stale": identity_stale is True,
         "unbound": True,
         "windows": windows,
+        "windows_returned": len(windows),
+        "windows_observed_count": _safe_count(len(raw_windows)),
+        "windows_truncated": len(raw_windows) > _QUOTA_WINDOW_LIMIT,
     }
 
 
 def _safe_account_limits(payload, arguments):
     payload = payload if isinstance(payload, dict) else {}
-    entries = payload.get("entries") if isinstance(payload.get("entries"), list) else []
+    raw_entries = payload.get("entries") if isinstance(payload.get("entries"), list) else []
     selected = arguments.get("source")
     stale_after = payload.get("stale_after_seconds")
     if type(stale_after) is not int or not 1 <= stale_after <= 86400:
         stale_after = 300
     stale_after = min(stale_after, 300)
     now_epoch = time.time()
-    items = []
-    for entry in entries[:100]:
+    # Filter first, then apply the profile-entry cap. Looking at one extra
+    # matching entry is enough to disclose truncation without retaining an
+    # unbounded intermediate list.
+    entries = []
+    entries_truncated = False
+    for entry in raw_entries:
         if not isinstance(entry, dict):
             continue
         source = entry.get("source")
         if source not in ("codex", "claude") or (selected and selected != source):
             continue
+        if len(entries) >= _ACCOUNT_ENTRY_LIMIT:
+            entries_truncated = True
+            break
+        entries.append(entry)
+
+    items = []
+    snapshot_observations_returned = 0
+    snapshot_observations_truncated = False
+    quota_windows_returned = 0
+    quota_windows_truncated = False
+    for entry in entries:
+        source = entry["source"]
         snapshots = entry.get("snapshots") if isinstance(entry.get("snapshots"), list) else []
         if not snapshots:
             items.append({
@@ -345,12 +382,28 @@ def _safe_account_limits(payload, arguments):
                 "windows": [],
             })
             continue
-        for snapshot in snapshots[:16]:
+        if len(snapshots) > _ACCOUNT_SNAPSHOT_LIMIT:
+            snapshot_observations_truncated = True
+        for snapshot in snapshots[:_ACCOUNT_SNAPSHOT_LIMIT]:
             item = _quota_snapshot(source, snapshot, entry.get("identity_stale"), stale_after, now_epoch)
             if item is not None:
                 items.append(item)
+                snapshot_observations_returned += 1
+                quota_windows_returned += item["windows_returned"]
+                quota_windows_truncated = quota_windows_truncated or item["windows_truncated"]
+    truncated = entries_truncated or snapshot_observations_truncated or quota_windows_truncated
     return {
         "entries": items,
+        "source_entries_returned": len(entries),
+        "source_entries_limit": _ACCOUNT_ENTRY_LIMIT,
+        "source_entries_truncated": entries_truncated,
+        "snapshot_observations_returned": snapshot_observations_returned,
+        "snapshot_limit_per_source_entry": _ACCOUNT_SNAPSHOT_LIMIT,
+        "snapshot_observations_truncated": snapshot_observations_truncated,
+        "quota_windows_returned": quota_windows_returned,
+        "window_limit_per_observation": _QUOTA_WINDOW_LIMIT,
+        "quota_windows_truncated": quota_windows_truncated,
+        "truncated": truncated,
         "stale_after_seconds": stale_after,
         "refresh_performed": False,
         "scope_note": (
