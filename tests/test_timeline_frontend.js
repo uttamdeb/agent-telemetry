@@ -27,6 +27,7 @@ assert(html.includes('2026-10-02'));
 assert(html.includes('Completed compaction'));
 assert(html.includes('trigger not recorded'));
 assert(html.includes('data-timeline-id="full-id-123"'));
+assert(html.includes('aria-label="Timeline events"'));
 const legacyHtml = context.sessionTimelineHTML({days:{'2026-10-02':[0,10,5,2,1,1,1,0,0,1]}});
 assert(legacyHtml.includes('Not recorded'));
 const sdkHtml = context.sessionTimelineHTML({source:'copilot',copilot_sdk:{usage_status:'unavailable'},days:{'2026-10-02':[0,0,0,0,0,1,1,0,0,1,0]}});
@@ -57,6 +58,21 @@ const filteredHTML = context.timelineEventsHTML({available:true,events:[
 assert(!filteredHTML.includes('Usage not recorded'));
 assert(filteredHTML.includes('in 4'));
 
+const richEvents = [{timestamp:'2026-10-03T11:12:00Z',kind:'compaction',trigger:'threshold',before:1000,after:100},
+  {timestamp:'2026-10-03T11:12:00Z',kind:'compaction',agent:1,trigger:'manual'},
+  {timestamp:'2026-10-03T11:13:00Z',kind:'subagent',agent:1,label:'Subagent started'},
+  {timestamp:'2026-10-03T11:14:00Z',kind:'reasoning',label:'Recorded effort · max'},
+  {timestamp:'2026-10-03T11:15:00Z',kind:'tool',label:'Read'},
+  {timestamp:'2026-10-03T11:16:00Z',kind:'user_turn',subagent:true,agent:1}];
+const richHTML = context.timelineEventsHTML({available:true,events:richEvents},session,'activity');
+assert.strictEqual((richHTML.match(/Completed compaction/g)||[]).length,2,'ledger/source twins deduplicate but child compactions remain');
+assert(richHTML.includes('Context threshold'));
+assert(richHTML.includes('1000 → 100'));
+assert(richHTML.includes('Subagent 1'));
+assert(richHTML.includes('Recorded effort · max'));
+assert(richHTML.includes('Agent turn'));
+assert(!richHTML.includes('Tool · Read'));
+
 async function latestRequestWins(){
   let resolveFirst;
   const firstResponse = new Promise(resolve => { resolveFirst = resolve; });
@@ -70,8 +86,8 @@ async function latestRequestWins(){
       {timestamp:'2026-10-04T10:00:00Z',kind:'tool',label:'new-session'}]})};
   };
   const node = {innerHTML:'',isConnected:true};
-  const a = context.loadSessionTimeline(session,node);
-  const b = context.loadSessionTimeline(session,node);
+  const a = context.loadSessionTimeline(session,node,"all");
+  const b = context.loadSessionTimeline(session,node,"all");
   await b;
   resolveFirst({ok:true,json:async()=>({available:true,events:[
     {timestamp:'2026-10-04T10:00:00Z',kind:'tool',label:'old-session'}]})});
@@ -82,6 +98,19 @@ async function latestRequestWins(){
   await context.loadSessionTimeline({...session,archived:true},archivedNode);
   assert.strictEqual(calls,2);
   assert(archivedNode.innerHTML.includes('unavailable'));
+  const selector={value:'activity'};
+  const sdkNode={innerHTML:'',isConnected:true,closest:()=>({querySelector:()=>selector})};
+  context.fetch=async url=>{
+    assert(url.includes('source=copilot'));
+    assert(url.includes('view='+selector.value));
+    return {ok:true,json:async()=>({available:true,events:richEvents})};
+  };
+  await context.loadSessionTimeline({...session,source:'copilot'},sdkNode);
+  assert(sdkNode.innerHTML.includes('Subagent started'));
+  selector.value='tools';
+  await selector.onchange();
+  assert(sdkNode.innerHTML.includes('Tool · Read'));
+  assert(!sdkNode.innerHTML.includes('Completed compaction'));
 }
 
 latestRequestWins().then(() => process.stdout.write('session timeline frontend tests passed\n'));

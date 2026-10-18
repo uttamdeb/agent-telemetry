@@ -47,7 +47,7 @@ class SessionTimelineTests(unittest.TestCase):
         )
         result = self.call("claude")
         self.assertTrue(result["available"])
-        self.assertEqual([e["kind"] for e in result["events"]], ["user_turn", "tool", "request"])
+        self.assertEqual([e["kind"] for e in result["events"]], ["user_turn", "model", "tool", "request"])
         request = result["events"][-1]
         self.assertEqual((request["input"], request["output"], request["cache_write"]), (20, 5, 3))
         self.assertEqual(request["cache_read"], 0)  # the malformed bool did not replace the earlier zero
@@ -200,14 +200,82 @@ class SessionTimelineTests(unittest.TestCase):
              "type": "function_call", "name": "read_file", "arguments": "secret arguments"}},
         )
         result = self.call("codex")
-        self.assertEqual([e["kind"] for e in result["events"]], ["request", "user_turn", "tool"])
-        self.assertEqual((result["events"][0]["input"], result["events"][0]["cache_read"],
-                          result["events"][0]["cache_write"]), (70, 20, 10))
+        self.assertEqual([e["kind"] for e in result["events"]], ["model", "request", "user_turn", "tool"])
+        self.assertEqual((result["events"][1]["input"], result["events"][1]["cache_read"],
+                          result["events"][1]["cache_write"]), (70, 20, 10))
         self.assertNotIn("secret", json.dumps(result))
 
     def test_codex_missing_usage_fields_stay_unknown(self):
         usage = timeline._codex_usage({"input_tokens": 14, "output_tokens": 2})
         self.assertEqual(usage, {"input": 14, "output": 2})
+
+    def test_activity_view_filters_tools_before_cap_and_keeps_codex_agent_identity_private(self):
+        rows = [{"type": "session_meta", "timestamp": "2026-10-01T10:00:00Z", "payload": {"id": "full-session-id"}}]
+        for n in range(10):
+            rows.append({"type": "response_item", "timestamp": "2026-10-01T10:00:01Z",
+                         "payload": {"type": "function_call", "name": "Read", "arguments": "SECRET"}})
+        rows += [{"type": "event_msg", "timestamp": "2026-10-01T10:01:00Z", "payload": {
+            "type": "item_completed", "item": {"type": "SubAgentActivity", "kind": state,
+                "agent_thread_id": "PRIVATE-ID", "prompt": "SECRET"}}} for state in ("started", "completed")]
+        self.write(*rows)
+        result = self.call("codex", view="activity", max_events=2)
+        self.assertFalse(result["truncated"])
+        self.assertEqual([e["label"] for e in result["events"]], ["Subagent started", "Subagent completed"])
+        self.assertEqual([e["agent"] for e in result["events"]], [1, 1])
+        for secret in ("PRIVATE-ID", "SECRET", "arguments"):
+            self.assertNotIn(secret, json.dumps(result))
+
+    def test_claude_agent_requests_correlate_results_without_claiming_background_completion(self):
+        def assistant(n, background):
+            return {"type": "assistant", "uuid": "block-"+str(n), "sessionId": "full-session-id",
+                "timestamp": "2026-10-01T10:00:00Z", "effort": "max", "message": {
+                    "model": "claude-sonnet-5-5", "content": [{"type": "tool_use", "id": "tool-"+str(n),
+                    "name": "Agent", "input": {"run_in_background": background, "prompt": "SECRET"}}]}}
+        def result(n):
+            return {"type": "user", "uuid": "result-"+str(n), "sessionId": "full-session-id",
+                "timestamp": "2026-10-01T10:00:01Z", "message": {"content": [{"type": "tool_result",
+                    "tool_use_id": "tool-"+str(n), "content": "SECRET"}]}}
+        self.write(assistant(1, False), assistant(2, True), result(1), result(2))
+        events = self.call("claude", view="activity")["events"]
+        agents = [e for e in events if e["kind"] == "subagent"]
+        self.assertEqual([e["label"] for e in agents], ["Subagent requested", "Subagent requested", "Subagent completed", "Subagent tool returned"])
+        self.assertEqual([e["agent"] for e in agents], [1, 2, 1, 2])
+        self.assertEqual(sum(e["kind"] == "reasoning" for e in events), 1)
+        self.assertNotIn("SECRET", json.dumps(events))
+
+    def test_copilot_activity_receipts_tools_and_compactions_are_bounded_private_and_deduplicated(self):
+        def event(n, kind, data, aid=None):
+            return {"id": str(n), "type": kind, "timestamp": "2026-10-01T10:00:%02dZ" % n,
+                    "data": data, **({"agentId": aid} if aid else {})}
+        usage = {"apiCallId": "PRIVATE-CALL", "model": "@cf/zai-org/glm-5.3", "inputTokens": 100,
+                 "outputTokens": 5, "cacheReadTokens": 40, "accounting": {"sourceSessionId": "full-session-id"}}
+        self.write(event(0, "session.start", {"sessionId": "full-session-id", "selectedModel": usage["model"]}),
+            event(1, "user.message", {"messageId": "prompt", "content": "SECRET"}),
+            event(2, "subagent.started", {"model": usage["model"], "agentDescription": "SECRET"}, "PRIVATE-AGENT"),
+            event(3, "subagent.configured", {"model": usage["model"], "reasoningEffort": "max"}, "PRIVATE-AGENT"),
+            event(4, "assistant.message", {"toolRequests": [{"toolCallId": "PRIVATE-TOOL", "name": "Read", "arguments": "SECRET"}]}),
+            event(5, "tool.execution_start", {"toolCallId": "PRIVATE-TOOL", "toolName": "Read"}),
+            event(6, "assistant.usage", usage), event(7, "session.usage_record", {"usage": usage}),
+            event(8, "session.usage_record", {"usage": usage}),
+            event(9, "session.compaction_complete", {"success": True, "trigger": "threshold", "preCompactionTokens": 1000, "postCompactionTokens": 100, "summaryContent": "SECRET"}),
+            event(10, "subagent.completed", {"result": "SECRET"}, "PRIVATE-AGENT"),
+            event(11, "session.error", {"message": "SECRET"}))
+        result = self.call("copilot")
+        self.assertTrue(result["available"])
+        requests = [e for e in result["events"] if e["kind"] == "request"]
+        self.assertEqual(len(requests), 1)
+        self.assertEqual((requests[0]["input"], requests[0]["cache_read"]), (60, 40))
+        self.assertEqual(len(self.call("copilot", view="tools")["events"]), 1)
+        compactions = self.call("copilot", view="compactions")["events"]
+        self.assertEqual((compactions[0]["before"], compactions[0]["after"]), (1000, 100))
+        activity = self.call("copilot", view="activity")["events"]
+        self.assertTrue(any(e["label"] == "Subagent started" for e in activity if e["kind"] == "subagent"))
+        self.assertFalse(any(e["kind"] in ("request", "tool") for e in activity))
+        for secret in ("SECRET", "PRIVATE-", "arguments", "sourceSessionId"):
+            self.assertNotIn(secret, json.dumps(result))
+        self.assertFalse(self.call("copilot", session_id="wrong-full-id")["available"])
+        with self.assertRaises(ValueError):
+            self.call("copilot", view="../filename")
 
     def test_codex_token_count_fallback_deduplicates_repeated_signature(self):
         tc = {"type": "event_msg", "timestamp": "2026-10-01T10:00:02Z", "payload": {"type": "token_count",
@@ -265,7 +333,7 @@ class SessionTimelineTests(unittest.TestCase):
             {"type": "assistant", "sessionId": "full-session-id", "timestamp": "2026-10-01T10:00:02Z",
              "message": {"model": "claude", "usage": {"input_tokens": 0, "output_tokens": -1}}},
         )
-        events = self.call("claude")["events"]
+        events = self.call("claude", view="requests")["events"]
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0]["input"], 0)
         self.assertNotIn("output", events[0])

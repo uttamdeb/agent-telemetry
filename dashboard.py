@@ -544,9 +544,11 @@ def build_diagnostics():
         return report
 
 
-def build_session_timeline(device, source, session_id, date_from=None, date_to=None):
+def build_session_timeline(device, source, session_id, date_from=None, date_to=None, view="all"):
     """Resolve a full native id from this ledger, never a caller-supplied filename."""
-    if source not in ("claude", "codex", "claude-desktop") or not isinstance(session_id, str) or not 0 < len(session_id) <= 512:
+    if view not in ("all", "activity", "requests", "tools", "compactions"):
+        raise ValueError("Unknown timeline event view.")
+    if source not in ("claude", "codex", "claude-desktop", "copilot") or not isinstance(session_id, str) or not 0 < len(session_id) <= 512:
         raise ValueError("Select a supported session with its full native identity.")
     if device != _local_id():
         return {"available": False, "events": [], "truncated": False, "detail": "Source events are available on the original device."}
@@ -554,6 +556,8 @@ def build_session_timeline(device, source, session_id, date_from=None, date_to=N
         selected = []
         for aggregate in _state["files"].values():
             if aggregate.get("source") != source or aggregate.get("archived"):
+                continue
+            if source == "copilot" and not isinstance(aggregate.get("copilot_sdk"), dict):
                 continue
             if any(SN.identity(aggregate, s) == session_id for s in aggregate.get("sessions", [])):
                 selected.append(aggregate.get("path", ""))
@@ -571,7 +575,7 @@ def build_session_timeline(device, source, session_id, date_from=None, date_to=N
     # retain the enclosing session UUID in their sessionId field.
     child = SN.claude_child_identity(path) if source == "claude" else ""
     transcript_id = child.split("/", 1)[0] if child == session_id else session_id
-    return ST.timeline(source, path, transcript_id, date_from=date_from, date_to=date_to)
+    return ST.timeline(source, path, transcript_id, date_from=date_from, date_to=date_to, view=view)
 
 
 # ---------------------------------------------------------------------------
@@ -2610,7 +2614,8 @@ class Handler(BaseHTTPRequestHandler):
             query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
             try:
                 result = build_session_timeline(*(query.get(k, [""])[0] for k in ("device", "source", "id")),
-                                                date_from=query.get("from", [None])[0], date_to=query.get("to", [None])[0])
+                                                date_from=query.get("from", [None])[0], date_to=query.get("to", [None])[0],
+                                                view=query.get("view", ["all"])[0])
                 self._send(200, json.dumps(result))
             except ValueError as error:
                 self._send(400, json.dumps({"error": str(error)}))
