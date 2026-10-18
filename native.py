@@ -3,6 +3,7 @@ import json
 import ntpath
 import os
 from pathlib import Path
+import posixpath
 import subprocess
 import sys
 import threading
@@ -18,7 +19,7 @@ def _project_path(value):
         return None
     if not value or len(value) > 4096 or any(ord(c) < 32 or ord(c) == 127 for c in value):
         return None
-    if not (os.path.isabs(value) or ntpath.isabs(value)):
+    if not (posixpath.isabs(value) or ntpath.isabs(value)):
         return None
     return ntpath.normpath(value).replace("\\", "/").rstrip("/")
 

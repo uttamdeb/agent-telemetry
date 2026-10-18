@@ -55,6 +55,10 @@ class ProjectRelocationTests(unittest.TestCase):
 
     def test_relocation_uses_explicit_full_roots_and_component_boundaries(self):
         p = preferences()
+        with patch.object(N.os, "path", N.ntpath):
+            self.assertEqual(preferences(), p)
+            self.assertEqual(N.relocated_project_path("/fixtures/old-project/src", p),
+                             "/fixtures/new-project/src")
         for original, expected in (("/fixtures/old-project/src", "/fixtures/new-project/src"),
                                    ("/fixtures/old-project-neighbor", "/fixtures/old-project-neighbor"),
                                    ("/elsewhere/old-project", "/elsewhere/old-project"),
