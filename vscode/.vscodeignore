@@ -1,0 +1,15 @@
+.vscode/**
+.vscode-test/**
+test/**
+scripts/**
+screenshots/**
+**/__pycache__/**
+**/*.pyc
+**/.usage_cache.json
+**/.peers.json
+**/.peers/**
+**/.usage-backups/**
+**/server.log
+**/.local_servers.json
+**/.DS_Store
+*.vsix

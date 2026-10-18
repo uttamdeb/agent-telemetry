@@ -10,6 +10,7 @@ ALLOWED_MODULES = {
     "accounts",
     "cli",
     "dashboard",
+    "editor_snapshot",
     "ledger_backups",
     "diagnostics",
     "session_timeline",
