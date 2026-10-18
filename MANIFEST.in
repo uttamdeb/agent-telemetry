@@ -6,6 +6,7 @@ include __init__.py
 include __main__.py
 include cli.py
 include dashboard.py
+include editor_snapshot.py
 include ledger_backups.py
 include diagnostics.py
 include session_timeline.py
@@ -45,6 +46,7 @@ prune tests
 prune website
 prune macos
 prune windows
+prune vscode
 prune .github
 prune build
 prune dist

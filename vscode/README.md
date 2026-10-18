@@ -1,0 +1,91 @@
+<p><img src="media/app-icon.png" alt="AgentTelemetry" width="56" height="56"></p>
+
+# AgentTelemetry for desktop editors
+
+An **Agent desk** for the coding tools you use: recorded tokens, estimated API cost, sessions and delegation, beside your code. It reads the local logs your tools already write through AgentTelemetry's shared Python backend. No provider API key or additional Python packages are required.
+
+## Follow the work
+
+- **Start with your workspace.** The brief matches recorded absolute working directories to your open local folders. Two projects with the same folder name do not get merged by name. Switch to **All local projects** to include history without a recorded workspace path.
+- **See delegation with evidence.** A keyboard-operable outline links sessions only when the source records their parent identities. Filter **All sessions**, **Main agents** or **Subagents**, then inspect a session's model, recorded effort, context compactions and input/output/cache composition. Missing parents stay visibly unavailable or outside the selected scope.
+- **Measure newly recorded usage.** The **Recorded in this window** counter subtracts an in-memory baseline from the selected scope's recorded totals. It shows its start time and can be reset. It measures new log observations, including delayed records; it does not identify running agents or measure activity inside this editor.
+- **Keep the wider picture close.** The native activity sidebar and status bar show the selected scope's usage. Open the Agent desk for detail or the full local dashboard for the rest of AgentTelemetry.
+
+The Agent desk uses AgentTelemetry's app icon and light/dark design, with editor high-contrast support, visible keyboard focus and reduced-motion support. Its bundled interface makes no network requests; the extension host communicates with the local service.
+
+## Install a VSIX
+
+Use the provided `agenttelemetry-2.0.0.vsix` in a **desktop** VS Code, Cursor, Antigravity or compatible VS Code fork supporting the VS Code 1.85+ API and a local extension host.
+
+1. Open the editor's Extensions view.
+2. Choose **Install from VSIX…** from the Extensions menu or Command Palette.
+3. Select the VSIX and reload the editor if requested.
+4. Open the AgentTelemetry waveform icon in the activity bar, or run **AgentTelemetry: Open Agent desk**.
+
+The same universal VSIX contains the cross-platform extension and stdlib-only backend. It does not bundle a new Python interpreter. Browser-only editors such as `vscode.dev` cannot run this desktop extension.
+
+## First connection
+
+If an AgentTelemetry service is already listening on `127.0.0.1:7878`, the extension identifies it and attaches automatically. Attaching requires no new Python process and uses that service's existing ledger. It never stops a service it finds.
+
+If no service is running, choose **Start local monitoring** in the Agent desk or **AgentTelemetry: Start monitoring**. The first start explains that the shared local service **keeps running after the editor closes**, so other editor windows and native clients can use it. Starting is explicit; installing or opening the extension does not start Python automatically.
+
+Starting needs **Python 3.9 or newer** on this computer. Discovery first checks supported installed AgentTelemetry runtime locations on macOS and Windows, then trusted local `PATH` entries. You can choose an existing interpreter with **AgentTelemetry: Set up Python** or set `agentTelemetry.pythonPath` to its absolute executable path. The interpreter must be outside the workspace. The extension does not install Python or packages automatically.
+
+A service started by the extension uses port **7878** and AgentTelemetry's native default ledger directory:
+
+| System | Ledger directory |
+| --- | --- |
+| macOS | `~/Library/Application Support/AgentTelemetry` |
+| Windows | `%LOCALAPPDATA%\AgentTelemetry` |
+| Linux | `$XDG_STATE_HOME/AgentTelemetry`, or `~/.local/state/AgentTelemetry` |
+
+Existing checkout-local caches are not imported automatically. To continue using a dashboard with its own ledger location, start that dashboard first and let the extension attach to it. Starting monitoring never rebuilds or deletes a ledger.
+
+The first scan can take a minute for a large log history. If the local port belongs to another application, the extension reports it and does not replace that application or start a competing service. An older AgentTelemetry backend that lacks the editor endpoint gets an **Upgrade your local backend** message; use the dashboard's available update flow or update the installation that owns that service, then retry.
+
+## Scope, ranges and controls
+
+The Agent desk offers **This workspace** / **All local projects** and **Today** / **7 days** / **30 days**. These choices also drive the native sidebar and status bar. Session-type filters affect the outline, not the brief's aggregate totals.
+
+Select a session with the mouse or use **↑ / ↓** to move, **← / →** to collapse or expand, and **Enter** to inspect. A linked parent's title in the inspector navigates back to that session. If the session list is capped, the desk says how many are shown; the brief still includes all matching usage.
+
+The recorded-usage counter resets when the extension host reloads, the workspace/scope/range or reporting date changes, the backend identity changes, or recorded counters decrease. **Reset counter** starts a fresh baseline without changing logs or ledger data. Closing just the Agent desk panel does not reset the extension host's counter.
+
+| Command Palette action | Purpose |
+| --- | --- |
+| `AgentTelemetry: Open Agent desk` | Open the workspace brief and session inspector. |
+| `AgentTelemetry: Refresh` | Ask the local backend to refresh recorded usage. |
+| `AgentTelemetry: Start monitoring` | Explicitly attach to or start the shared local service. |
+| `AgentTelemetry: Open local dashboard` | Open the identified service in your browser. |
+| `AgentTelemetry: Reset usage baseline` | Reset the in-memory counter for this scope. |
+| `AgentTelemetry: Set up Python` | Choose an existing interpreter or open Python's download page. |
+| `AgentTelemetry: Open settings` | Open the extension's settings. |
+
+## Remote and restricted windows
+
+The extension runs in the **local UI extension host**, including in desktop Remote SSH, container and similar remote windows. It reads this computer's AgentTelemetry service. Remote workspace paths are not treated as local folders: **This workspace** is disabled and the desk explicitly shows **All local projects** on this machine. Remote logs and paired devices are excluded from the editor projection.
+
+Restricted Mode permits read-only attachment to an existing local service. Starting Python requires a trusted workspace. Settings are read from application defaults and user settings, never workspace-supplied settings.
+
+## Settings
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `agentTelemetry.port` | `7878` | Attach to an existing service on this loopback port. Starting a service requires the default port. |
+| `agentTelemetry.pythonPath` | Empty | Discover an interpreter, or use an absolute trusted Python executable path outside the workspace. |
+| `agentTelemetry.showStatusBar` | `true` | Show the selected scope's tokens and estimated cost in the status bar. |
+
+## Read the numbers accurately
+
+Costs are estimates at published API list prices, **not bills or subscription allowances**. Tokens depend on what each coding tool records; unavailable usage, effort, parent links and compaction metadata are not guessed from another session or current settings. Effort and compactions are shown for the selected reporting scope, and compactions add no extra token charge by themselves.
+
+Parent and child rows retain their own recorded usage. A tool can already include sidechain usage in a parent, so adding every child row to that parent can double-count. Main-agent labels distinguish the session list from recorded Subagents; they do not establish a parent link.
+
+Connection failures retain the last successful snapshot and mark it stale while retries continue. The counter also stays marked stale until a successful connection. This is recorded history, not a live agent process monitor.
+
+The extension performs no account lookup, provider model call, credential read or session rename. Analytics stay local: there is no extension telemetry upload or Marketplace/Open VSX publication step. Explicit browser actions can open the local dashboard or Python's download page. The full dashboard's separate opt-in features retain their own consent controls.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
