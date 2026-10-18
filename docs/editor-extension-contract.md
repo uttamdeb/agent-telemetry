@@ -54,6 +54,10 @@ Response (numbers are finite, nonnegative unless a documented delta):
 ```
 
 Totals come from records, not the session list, which is capped at 500 rows.
+Copilot SDK child rows optionally carry `usage_in_parent:true` and
+`usage_status:recorded|partial|unavailable`. Their dated receipts are breakdowns
+of inclusive parent usage and are excluded from summary token/cost accumulation.
+Unavailable usage renders as a dash. Parent and child compaction counts are separate.
 `sessions_total` and `truncated` disclose this cap. Session figures use per-session
 scoped daily usage, never whole-database totals copied into every child. Parent edges use
 full recorded source identities; missing edges stay unavailable. Some current

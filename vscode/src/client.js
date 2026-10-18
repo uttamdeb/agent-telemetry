@@ -83,6 +83,8 @@ function validateSnapshot(value) {
     const key = string(session.key);
     if (!key || keys.has(key)) invalid(); keys.add(key);
     const subagent = boolean(session.subagent);
+    const usageStatus = session.usage_status === undefined ? 'recorded' : session.usage_status;
+    if (!['recorded', 'partial', 'unavailable'].includes(usageStatus)) invalid();
     const parentStatus = session.parent_status === undefined ? subagent ? 'unavailable' : 'none' : session.parent_status;
     if (!['linked', 'outside_scope', 'unavailable', 'none'].includes(parentStatus)) invalid();
     return {key, id: optionalString(session.id, 2048), source: string(session.source, 80), device: optionalString(session.device, 256),
@@ -91,7 +93,8 @@ function validateSnapshot(value) {
       parent_title: session.parent_title == null ? null : string(session.parent_title), parent_status: parentStatus,
       model: optionalString(session.model, 512), efforts: session.efforts === undefined ? [] : list(session.efforts, 16).map(item => string(item, 32)),
       ...usage(session), compactions: session.compactions == null ? null : integer(session.compactions),
-      start: timestamp(session.start), end: timestamp(session.end), archived: boolean(session.archived), detail_limited: boolean(session.detail_limited)};
+      start: timestamp(session.start), end: timestamp(session.end), archived: boolean(session.archived), detail_limited: boolean(session.detail_limited),
+      usage_in_parent: boolean(session.usage_in_parent), usage_status: usageStatus};
   });
   const total = integer(value.sessions_total);
   if (total < sessions.length || total !== summary.sessions || typeof value.truncated !== 'boolean' || value.truncated !== (total > sessions.length)) invalid();

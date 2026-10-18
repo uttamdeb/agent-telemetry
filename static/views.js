@@ -1263,8 +1263,10 @@ function sdkUsageDetails(s){
   const sources={vscode_turn_usage:"VS Code saved turn totals",usage_receipts:"Saved SDK per-call receipts",usage_events:"Saved SDK usage events",shutdown:"SDK shutdown totals",message_output:"Saved output tokens only"};
   const totals=(sdk.limitations||[]).includes("undated_usage") && (sdk.shutdown_totals||[]).length
     ? `<p class="hint">Additional session-wide SDK totals (no daily attribution): ${sdk.shutdown_totals.map(m=>`${esc(m.model)}: ${fmtNum((m.in||0)+(m.out||0)+(m.cr||0)+(m.cc||0))} tokens`).join("; ")}. These are not added to the selected range.</p>`:"";
+  const children=Array.isArray(sdk.agents)?sdk.agents.filter(a=>a&&typeof a==="object"&&!Array.isArray(a)):[];
+  const delegation=children.length?`<h3>Recorded Copilot subagents</h3><p class="hint">Whole-session identities. Their recorded usage is already included in this parent; Agent desk shows the scoped child breakdown.</p>${children.map(a=>`<div class="kv"><span class="k">${esc(a.title||"Copilot subagent")}</span><span class="v">${esc(a.model||"Unknown")}</span></div>`).join("")}`:"";
   return `<div class="kv"><span class="k">Usage records</span><span class="v">${esc((sdk.usage_sources||[]).map(x=>sources[x]||"Saved SDK records").join(" · ")||"Not available")}</span></div>
-    ${note?`<div class="warnbar">${esc(note)}</div>`:""}${totals}`;
+    ${note?`<div class="warnbar">${esc(note)}</div>`:""}${totals}${delegation}`;
 }
 function sdkField(s,key,value){
   return s.copilot_sdk && !(s.copilot_sdk.recorded_fields||[]).includes(key)?"Unavailable":value;

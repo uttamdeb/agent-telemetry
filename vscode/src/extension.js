@@ -53,7 +53,8 @@ class ActivityTree {
     const graph = forest(snapshot.sessions);
     const make = session => {
       const children = (graph.children.get(session.key) || []).map(child => make(child));
-      return {id: `session:${session.key}`, session: session.key, label: session.title || 'Untitled session', description: `${session.subagent ? 'Subagent · ' : ''}${compact(session.tokens)} tokens`, icon: session.subagent ? 'git-branch' : 'account', tooltip: `${session.title || 'Untitled session'}\n${session.model || 'Model unavailable'}\n${compact(session.tokens)} tokens · ${money(session.cost)} estimated cost${session.parent_status === 'unavailable' ? '\nParent metadata unavailable' : ''}`, children};
+      const usage = session.usage_status === 'unavailable' ? 'Usage unavailable' : `${compact(session.tokens)} tokens`;
+      return {id: `session:${session.key}`, session: session.key, label: session.title || 'Untitled session', description: `${session.subagent ? 'Subagent · ' : ''}${usage}`, icon: session.subagent ? 'git-branch' : 'account', tooltip: `${session.title || 'Untitled session'}\n${session.model || 'Model unavailable'}\n${usage}${session.usage_status === 'unavailable' ? '' : ' · ' + money(session.cost) + ' estimated cost'}${session.usage_in_parent ? '\nUsage already included in Copilot parent totals' : ''}${session.parent_status === 'unavailable' ? '\nParent metadata unavailable' : ''}`, children};
     };
     rows.push(...graph.roots.slice(0, 10).map(session => make(session)));
     if (snapshot.truncated) rows.push({id: 'truncated', label: 'Recent sessions shown', description: `${snapshot.sessions_total} total`, icon: 'info'});

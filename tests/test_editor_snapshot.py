@@ -60,6 +60,42 @@ class EditorSnapshotTests(unittest.TestCase):
             self.assertNotIn("/private", str(failure.exception))
         self.assertEqual(E.parse_query("scope=all"), ("all", "today", []))
 
+    def test_copilot_inline_children_link_without_increasing_usage_totals(self):
+        agg = aggregate(source="copilot")
+        agents = [{"id": "child-" + str(i), "title": "Review " + str(i), "model": "GLM 5.3",
+                   "start": TODAY + "T10:00:00Z", "end": TODAY + "T10:10:00Z",
+                   "records": {TODAY + "\tGLM 5.3": {"in": 20, "out": 5}} if i < 2 else {},
+                   "usage_status": "recorded" if i < 2 else "unavailable",
+                   "compactions": [{"date": TODAY}] if i == 0 else []} for i in range(3)]
+        agg["sessions"][0]["copilot_sdk"] = {"agents": agents, "usage_status": "recorded"}
+        result = self.snapshot([agg])
+        self.assertEqual(result["summary"]["tokens"], 135)
+        self.assertEqual(result["summary"]["sessions"], 4)
+        self.assertEqual(result["summary"]["subagents"], 3)
+        self.assertEqual(result["summary"]["main_agents"], 1)
+        self.assertEqual(result["summary"]["compactions"], 1)
+        parent = next(s for s in result["sessions"] if not s["subagent"])
+        children = [s for s in result["sessions"] if s["subagent"]]
+        self.assertTrue(all(s["parent_key"] == parent["key"] and s["parent_status"] == "linked" for s in children))
+        self.assertTrue(all(s["usage_in_parent"] for s in children))
+        self.assertEqual(sum(s["tokens"] for s in children), 50)
+        self.assertEqual(next(s for s in children if s["title"] == "Review 2")["usage_status"], "unavailable")
+        self.assertNotIn("/fixtures", json.dumps(result))
+        self.assertEqual(self.snapshot([agg], query(roots=("/other/project",)))["sessions_total"], 0)
+        limited = self.snapshot([agg], cap=1)
+        self.assertEqual(limited["summary"]["tokens"], 135)
+        self.assertEqual(limited["sessions_total"], 4)
+        self.assertTrue(limited["truncated"])
+
+    def test_copilot_child_idle_days_are_not_inferred_as_activity(self):
+        agg = aggregate(source="copilot")
+        tomorrow = (datetime.date.today() + datetime.timedelta(days=1)).isoformat()
+        yesterday = (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
+        agg["sessions"][0]["copilot_sdk"] = {"agents": [{"id": "child", "title": "Review",
+            "start": yesterday + "T10:00:00Z", "end": tomorrow + "T10:00:00Z",
+            "activity_dates": [yesterday, tomorrow], "records": {}, "usage_status": "unavailable"}]}
+        self.assertEqual(self.snapshot([agg])["summary"]["subagents"], 0)
+
     def test_absolute_cwd_containment_never_matches_project_basename(self):
         files = [aggregate(), aggregate(CHILD, cwd="/elsewhere/project"),
                  aggregate(OTHER, cwd="/fixtures/project-neighbor")]

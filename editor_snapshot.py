@@ -281,12 +281,54 @@ def build_snapshot(items, local, query, revision, *, price_usage, deduplicate,
                     parent = ("claude", recognized[0] if session.get("subagent") else recognized)
             elif source == "codex":
                 parent = ("codex", native_id.lower()) if _UUID.fullmatch(native_id) else None
+            elif source == "copilot" and native_id:
+                parent = ("copilot", native_id)
+                row["usage_status"] = (session.get("copilot_sdk") or {}).get("usage_status", "recorded")
             all_sessions.append((row, parent, session.get("parent_id")))
             if active and cwd is None:
                 unassigned += 1
             if active and matched:
                 selected.append(row)
                 limited_records |= limited
+            if source == "copilot" and native_id and not row["subagent"]:
+                # SDK child receipts are already included in the parent's totals.
+                # Project them as linked detail rows only, outside usage buckets.
+                agents = (session.get("copilot_sdk") or {}).get("agents", [])
+                seen_agents = set()
+                for agent in agents if isinstance(agents, list) else []:
+                    if not isinstance(agent, dict):
+                        continue
+                    aid = _text(agent.get("id"), 512)
+                    if not aid or aid in seen_agents:
+                        continue
+                    seen_agents.add(aid)
+                    child_rows = _records(agent.get("records"), source, False, price_usage, first, last)
+                    child_usage = _empty()
+                    child_models = {}
+                    for _, mdl, values, _ in child_rows:
+                        _add(child_usage, values)
+                        child_models[mdl] = child_models.get(mdl, 0) + values["tokens"]
+                    child_key = hashlib.sha256(json.dumps([key, aid]).encode()).hexdigest()
+                    child_status = agent.get("usage_status")
+                    if child_status not in ("recorded", "partial", "unavailable"):
+                        child_status = "unavailable"
+                    child = {**row, **child_usage, "key": child_key,
+                        "id": native_id + "/agent/" + aid, "title": _text(agent.get("title")) or "Copilot subagent",
+                        "subagent": True, "parent_status": "unavailable",
+                        "model": _text(max(child_models, key=child_models.get) if child_models else agent.get("model"), 160),
+                        "efforts": [], "compactions": _compactions(agent, first, last),
+                        "start": _timestamp(agent.get("start")), "end": _timestamp(agent.get("end")),
+                        "usage_in_parent": True, "usage_status": child_status,
+                        "detail_limited": child_status != "recorded"}
+                    all_sessions.append((child, parent, native_id))
+                    activity_dates = agent.get("activity_dates")
+                    activity = (any(isinstance(date, str) and first <= date <= last for date in activity_dates)
+                                if isinstance(activity_dates, list) else _overlaps(agent, first, last))
+                    child_active = bool(child_rows) or bool(child["compactions"]) or activity
+                    if child_active and cwd is None:
+                        unassigned += 1
+                    if child_active and matched:
+                        selected.append(child)
     selected.sort(key=lambda s: (s.get("end") or "", s["key"]), reverse=True)
     total = len(selected)
     visible = selected[:MAX_SESSIONS]
@@ -324,6 +366,8 @@ def build_snapshot(items, local, query, revision, *, price_usage, deduplicate,
         limitations.append("Some archived sessions lack daily model detail; unavailable usage is not copied from their source database.")
     if any(not session["id"] for session in selected):
         limitations.append("Some source stores retain shortened identities only; their full native session IDs are unavailable.")
+    if any(session.get("usage_in_parent") for session in selected):
+        limitations.append("Copilot child usage is a breakdown already included in its parent; child rows are not added to totals.")
     labels = list(dict.fromkeys(_leaf(path) for _, path in roots))
     return {"schema": 1, "generated_at": now, "date": last, "from": first, "to": last,
             "revision": revision,

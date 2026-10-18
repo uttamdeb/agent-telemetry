@@ -2312,7 +2312,7 @@ def _update_copilot_sdk(previous, path):
     sid = _leaf(os.path.dirname(path))
     hosts = _copilot_sdk_hosts().get(sid, [])
     sig = [_sdk_stat(path)] + [[db, _sdk_stat(db), _sdk_stat(db + "-wal")] for db, _ in hosts]
-    if previous and previous.get("_sig") == sig and previous.get("copilot_sdk", {}).get("version") == 2:
+    if previous and previous.get("_sig") == sig and previous.get("copilot_sdk", {}).get("version") == 3:
         return previous
     lines, offset = _read_new_bytes(path, 0)
     fresh = _blank_agg("copilot", path)
@@ -2332,6 +2332,77 @@ def _update_copilot_sdk(previous, path):
     return fresh
 
 
+def _sdk_subagents(events, started):
+    """Recorded children are inclusive usage breakdowns, never extra aggregates."""
+    children, receipts, calls, compaction_starts = {}, {}, {}, {}
+
+    def text(value, limit=160):
+        return value[:limit] if isinstance(value, str) and value and all(c.isprintable() for c in value) else None
+
+    for e in events:
+        dt = _from_iso(e.get("timestamp", ""))
+        if dt is None or (started and dt < started):
+            continue
+        d, aid = e["data"], text(e.get("agentId"), 512)
+        if e.get("type") == "subagent.started" and aid and re.fullmatch(r"[A-Za-z0-9_-]{1,128}", aid):
+            children.setdefault(aid, {"id": aid, "title": text(d.get("agentDisplayName")) or
+                text(d.get("agentName")) or "Copilot subagent", "model": _sdk_model(d.get("model")),
+                "start": dt.isoformat(), "end": dt.isoformat(), "status": "started",
+                "records": {}, "compactions": [], "activity_dates": [], "usage_status": "unavailable"})
+    for e in events:
+        aid, d, kind = e.get("agentId"), e["data"], e.get("type")
+        child = children.get(aid) if isinstance(aid, str) else None
+        dt = _from_iso(e.get("timestamp", ""))
+        if child is None or dt is None or dt.isoformat() < child["start"]:
+            continue
+        child["end"] = max(child["end"], dt.isoformat())
+        date = _buckets(dt)[0]
+        if date not in child["activity_dates"]: child["activity_dates"].append(date)
+        if kind in ("subagent.completed", "subagent.failed"):
+            child["status"] = "completed" if kind.endswith("completed") else "failed"
+        if kind in ("subagent.configured", "session.model_change"):
+            raw = d.get("newModel") if kind == "session.model_change" else d.get("model")
+            if isinstance(raw, str): child["model"] = _sdk_model(raw)
+        if kind == "assistant.message" and isinstance(d.get("apiCallId"), str):
+            calls.setdefault(aid, set()).add(d["apiCallId"])
+        if kind in ("session.usage_record", "assistant.usage"):
+            usage = d.get("usage") if kind == "session.usage_record" else d
+            if not isinstance(usage, dict) or _sdk_tokens(usage) is None:
+                continue  # the accounting parser validates persisted receipts
+            if usage.get("interactionType") == "conversation-compaction":
+                continue
+            accounting = usage.get("accounting") or {}
+            key = usage.get("apiCallId") or accounting.get("usageId") or e["id"]
+            bucket = receipts.setdefault(aid, {})
+            old = bucket.get(key)
+            if old is None or kind == "session.usage_record":
+                bucket[key] = (old[0] if old else dt, usage)
+        if kind == "session.compaction_start":
+            compaction_starts[aid] = dt
+        elif kind == "session.compaction_complete":
+            began = compaction_starts.pop(aid, None)
+            if d.get("success") is True:
+                duration = (dt - began).total_seconds() * 1000 if began else None
+                child["compactions"].append({"id": e["id"], "timestamp": dt.isoformat(),
+                    "date": _buckets(dt)[0], "duration_ms": duration if duration is not None and duration >= 0 else None})
+            usage = d.get("compactionTokensUsed")
+            if isinstance(usage, dict) and _sdk_tokens(usage) is not None:
+                receipts.setdefault(aid, {})["compaction:" + e["id"]] = (dt, usage)
+    for aid, child in children.items():
+        observed = set()
+        conversation = False
+        for identity, (dt, usage) in receipts.get(aid, {}).items():
+            conversation |= not str(identity).startswith("compaction:")
+            mdl = _sdk_model(usage.get("model"))
+            row = child["records"].setdefault(_buckets(dt)[0] + "\t" + mdl, {})
+            for key, value in _sdk_tokens(usage).items():
+                row[key] = row.get(key, 0) + value
+            if usage.get("apiCallId"): observed.add(usage["apiCallId"])
+        if child["records"]:
+            child["usage_status"] = "recorded" if conversation and calls.get(aid, set()) <= observed else "partial"
+    return list(children.values())
+
+
 def parse_copilot_sdk(agg, lines, hosts=(), previous=None):
     from contextlib import closing
     sid = _leaf(os.path.dirname(agg["path"]))
@@ -2347,16 +2418,16 @@ def parse_copilot_sdk(agg, lines, hosts=(), previous=None):
             continue
         seen.add(eid)
         events.append(e)
-    info = {"version": 2, "usage_status": "unavailable", "usage_sources": [],
+    info = {"version": 3, "usage_status": "unavailable", "usage_sources": [],
             "errors": 0, "aborts": 0, "missing_turns": 0, "limitations": [], "recorded_fields": []}
     agg["copilot_sdk"] = info
     agg["compactions"] = {}
     agg["editor"], agg["entry"] = "Copilot SDK", "copilot-agent"
     segments, message_segments, turn_segments, segment, current_model = {}, {}, {}, None, "Unknown"
     origin_owners = {}
-    calls, tool_ids, reply_ids = set(), set(), set()
+    calls, tool_ids, reply_ids, spawned = set(), set(), set(), set()
     call_segments, active_segment = {}, None
-    usage_events, pending_usage, shutdowns, compaction_start, started = [], {}, [], None, None
+    usage_events, pending_usage, shutdowns, compaction_starts, started = [], {}, [], {}, None
     for e in events:
         t, d = e.get("type"), e["data"]
         dt = _from_iso(e.get("timestamp", ""))
@@ -2369,6 +2440,7 @@ def parse_copilot_sdk(agg, lines, hosts=(), previous=None):
             if d.get("sessionId") != sid:
                 raise ValueError("SDK session identity does not match its directory")
             context = d.get("context") or {}
+            agg["cwd"] = context.get("cwd") if isinstance(context.get("cwd"), str) else None
             agg["project"] = _leaf(context.get("cwd")) or "(no folder)"
             agg["cliver"] = d.get("copilotVersion")
             current_model = _sdk_model(d.get("selectedModel"))
@@ -2379,6 +2451,7 @@ def parse_copilot_sdk(agg, lines, hosts=(), previous=None):
         elif t == "session.title_changed" and not child:
             _set_title(agg, d.get("title"), "custom")
         elif t == "session.context_changed" and not child:
+            if isinstance(d.get("cwd"), str): agg["cwd"] = d["cwd"]
             agg["project"] = _leaf(d.get("cwd")) or agg["project"]
             agg["branch"] = d.get("branch") or agg.get("branch")
         elif t == "user.message" and not child:
@@ -2484,30 +2557,30 @@ def parse_copilot_sdk(agg, lines, hosts=(), previous=None):
         elif t == "assistant.turn_end" and not child:
             active_segment = None
         elif t == "subagent.started":
-            agg["_spawned"] = agg.get("_spawned", 0) + 1
+            spawned.add(e.get("agentId") or d.get("toolCallId") or e["id"])
         elif t == "session.error":
             info["errors"] += 1
         elif t == "abort":
             info["aborts"] += 1
         elif t == "session.shutdown" and not child:
             shutdowns.append((dt, d))
-        elif t == "session.compaction_start" and not child:
-            compaction_start = dt
-        elif t == "session.compaction_complete" and not child:
+        elif t == "session.compaction_start":
+            compaction_starts[e.get("agentId") or d.get("parentToolCallId")] = dt
+        elif t == "session.compaction_complete":
+            began = compaction_starts.pop(e.get("agentId") or d.get("parentToolCallId"), None)
             tokens = d.get("compactionTokensUsed")
             if isinstance(tokens, dict):
                 entry = {"model": _sdk_model(tokens.get("model")), "data": tokens, "dt": dt,
                          "source": "usage_events", "compaction": True}
                 (active_segment["usage"] if active_segment else usage_events).append(entry)
-            if d.get("success") is True:
+            if d.get("success") is True and not child:
                 before = _sdk_number(d.get("preCompactionTokens"))
                 after = _sdk_number(d.get("postCompactionTokens"))
-                duration = (dt - compaction_start).total_seconds() * 1000 if compaction_start else None
+                duration = (dt - began).total_seconds() * 1000 if began else None
                 agg["compactions"][e["id"]] = {"id": e["id"], "timestamp": dt.isoformat(),
                     "date": _buckets(dt)[0], "trigger": d.get("trigger") if d.get("trigger") in
                     ("manual", "auto", "threshold", "context_limit_retry", "memory_pressure", "model_switch") else "unknown",
                     "before": before, "after": after, "duration_ms": duration if duration is not None and duration >= 0 else None}
-            compaction_start = None
 
     for entry in pending_usage.values():
         owner = call_segments.get(entry["call"], entry["owner"])
@@ -2771,6 +2844,8 @@ def parse_copilot_sdk(agg, lines, hosts=(), previous=None):
     ranked = sorted(dict.fromkeys(key.split("\t", 1)[1] for key in agg["records"]),
         key=lambda m: -sum(r["in"] + r["out"] + r["cr"] + r["cc"] for k, r in agg["records"].items() if k.endswith("\t" + m)))
     agg["state"]["dom_model"] = ranked[0] if ranked else current_model
+    agg["_spawned"] = len(spawned)
+    info["agents"] = _sdk_subagents(events, started)
 
 
 # ===========================================================================

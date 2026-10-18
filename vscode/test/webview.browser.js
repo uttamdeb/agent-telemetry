@@ -20,6 +20,17 @@ async function checkBrowser(page, base) {
     ensure(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'horizontal overflow in ' + fixture + ' at ' + width);
   };
   await open();
+  await open('copilot');
+  ensure(await page.locator('[role="treeitem"]').count() === 4, 'Copilot parent and three children');
+  ensure(await page.locator('#total-tokens').textContent() === '2.48M', 'Copilot child tokens do not increase inclusive total');
+  await page.getByRole('button', {name: 'Subagents', exact: true}).click();
+  ensure(await page.locator('[role="treeitem"]').count() === 3, 'three Copilot subagents remain visible under filter');
+  await page.locator('[role="treeitem"][data-key="fixture-child-ui"]').click();
+  ensure((await page.locator('#session-detail').textContent()).includes('already included in its Copilot parent'), 'child inclusive usage disclosure');
+  await page.locator('[role="treeitem"][data-key="fixture-orphan"]').click();
+  ensure((await page.locator('#session-detail').textContent()).includes('not a known zero'), 'missing child usage is unavailable');
+  results.push('Copilot named children, inclusive totals and unavailable usage');
+  await open();
   ensure(await page.locator('[role="treeitem"]').count() === 6, 'six fixture sessions');
   const summary = await page.locator('#total-tokens').textContent();
   await page.getByRole('button', {name: 'Main agents', exact: true}).click();
