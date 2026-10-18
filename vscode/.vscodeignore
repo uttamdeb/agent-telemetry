@@ -2,6 +2,7 @@
 .vscode-test/**
 test/**
 scripts/**
+screenshots/**
 **/__pycache__/**
 **/*.pyc
 **/.usage_cache.json

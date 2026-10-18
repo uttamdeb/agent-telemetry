@@ -15,4 +15,4 @@ Initial desktop editor extension package.
 - Reuse AgentTelemetry's icon and app theme, with high-contrast, keyboard-focus and reduced-motion support.
 - Restrict the webview to bundled resources and a validated host message allowlist. No account lookup, provider calls or analytics uploads.
 
-This package targets desktop VS Code-compatible editors. Browser-only editors are unsupported. No Marketplace or Open VSX publication is part of this package.
+This package targets desktop VS Code-compatible editors. Browser-only editors are unsupported.

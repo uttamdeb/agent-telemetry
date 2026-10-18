@@ -32,6 +32,8 @@ def check_archive(path):
             assert archive.read("extension/" + archived) == (ROOT / "vscode" / source).read_bytes()
         readme = (ROOT / "vscode" / "README.md").read_text()
         readme = readme.replace('src="media/', 'src="https://github.com/uttamdeb/agent-telemetry/raw/HEAD/vscode/media/')
+        readme = readme.replace('src="screenshots/', 'src="https://github.com/uttamdeb/agent-telemetry/raw/HEAD/vscode/screenshots/')
+        readme = readme.replace('](screenshots/', '](https://github.com/uttamdeb/agent-telemetry/blob/HEAD/vscode/screenshots/')
         readme = readme.replace('(LICENSE)', '(https://github.com/uttamdeb/agent-telemetry/blob/HEAD/vscode/LICENSE)')
         assert archive.read("extension/readme.md").decode() == readme
         for folder in ("src", "media"):

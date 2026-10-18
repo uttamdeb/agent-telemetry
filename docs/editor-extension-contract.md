@@ -144,5 +144,8 @@ editor theme, accessibility and keyboard conventions. The webview supports a
 keyboard-operable delegation tree, session detail, scope/range controls and a
 compact insight into input/output/cache composition. Missing metadata is honest.
 
-No public Marketplace/Open VSX publication occurs as part of implementation.
-Produce and validate an installable universal VSIX, a separate branch and PR.
+Produce and validate an installable universal VSIX on a separate branch and PR.
+Marketplace publication is an explicit release action using the verified package;
+routine builds only upload CI artifacts. Publisher credentials never belong in
+source, packages or public logs. The Marketplace page may show mock-data screenshots;
+they are documentation assets and are excluded from the runtime archive.

@@ -2,7 +2,7 @@
   "name": "agenttelemetry",
   "displayName": "AgentTelemetry",
   "icon": "media/app-icon.png",
-  "description": "Local coding-agent usage, estimated API cost and delegation in VS Code compatible editors.",
+  "description": "Tokens, estimated API cost and subagent sessions for Claude Code, Codex, Copilot and more. Local by default.",
   "version": "2.0.0",
   "publisher": "uttamdeb",
   "license": "MIT",
@@ -10,16 +10,31 @@
     "vscode": "^1.85.0"
   },
   "categories": [
+    "Visualization",
     "Other"
   ],
   "keywords": [
+    "agenttelemetry",
+    "ai",
     "local",
     "tokens",
     "cost",
+    "usage",
+    "analytics",
     "codex",
     "claude",
+    "copilot",
     "cursor"
   ],
+  "homepage": "https://agenttelemetry-app.vercel.app/",
+  "bugs": {
+    "url": "https://github.com/uttamdeb/agent-telemetry/issues"
+  },
+  "galleryBanner": {
+    "color": "#0b0c0f",
+    "theme": "dark"
+  },
+  "pricing": "Free",
   "main": "./src/extension.js",
   "extensionKind": [
     "ui"

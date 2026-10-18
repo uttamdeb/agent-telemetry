@@ -4,6 +4,10 @@
 
 An **Agent desk** for the coding tools you use: recorded tokens, estimated API cost, sessions and delegation, beside your code. It reads the local logs your tools already write through AgentTelemetry's shared Python backend. No provider API key or additional Python packages are required.
 
+<p><img src="screenshots/agent-desk-dark.png" alt="AgentTelemetry Agent desk in dark mode, showing a workspace usage brief and linked main-agent and subagent sessions with demonstration data"></p>
+
+Shown with demonstration data. [See the light theme](screenshots/agent-desk-light.png).
+
 ## Follow the work
 
 - **Start with your workspace.** The brief matches recorded absolute working directories to your open local folders. Two projects with the same folder name do not get merged by name. Switch to **All local projects** to include history without a recorded workspace path.
@@ -13,7 +17,17 @@ An **Agent desk** for the coding tools you use: recorded tokens, estimated API c
 
 The Agent desk uses AgentTelemetry's app icon and light/dark design, with editor high-contrast support, visible keyboard focus and reduced-motion support. Its bundled interface makes no network requests; the extension host communicates with the local service.
 
-## Install a VSIX
+## Install
+
+In desktop Visual Studio Code, open **Extensions**, search for **AgentTelemetry**, and choose the extension with ID **`uttamdeb.agenttelemetry`**. Click **Install**, then open its waveform icon in the activity bar or run **AgentTelemetry: Open Agent desk** from the Command Palette.
+
+You can also install from the terminal:
+
+```bash
+code --install-extension uttamdeb.agenttelemetry
+```
+
+### Install a VSIX in another desktop editor
 
 Use the provided `agenttelemetry-2.0.0.vsix` in a **desktop** VS Code, Cursor, Antigravity or compatible VS Code fork supporting the VS Code 1.85+ API and a local extension host.
 
@@ -84,7 +98,7 @@ Parent and child rows retain their own recorded usage. A tool can already includ
 
 Connection failures retain the last successful snapshot and mark it stale while retries continue. The counter also stays marked stale until a successful connection. This is recorded history, not a live agent process monitor.
 
-The extension performs no account lookup, provider model call, credential read or session rename. Analytics stay local: there is no extension telemetry upload or Marketplace/Open VSX publication step. Explicit browser actions can open the local dashboard or Python's download page. The full dashboard's separate opt-in features retain their own consent controls.
+The extension performs no account lookup, provider model call, credential read or session rename. Analytics stay local: the extension does not upload telemetry. Explicit browser actions can open the local dashboard or Python's download page. The full dashboard's separate opt-in features retain their own consent controls.
 
 ## License
 
