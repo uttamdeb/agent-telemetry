@@ -74,6 +74,24 @@ $1.40/M input, $4.40/M output and $0.26/M cached input. Other hosts or actual
 account billing can differ. OpenCode's own logged per-message costs still take
 precedence in its existing parser.
 
+### Cached-token reporting is not proof of provider cache behavior
+
+Saved `cacheReadTokens: 0` is the client's reported value, not independently
+verified provider billing. VS Code's installed BYOK response bridge (verified
+2026-10-18) synthesizes `input_tokens_details.cached_tokens: 0` when converting
+its language-model bridge result to a Responses API result. The SDK also defaults
+missing `prompt_tokens_details.cached_tokens` to zero. A saved receipt can therefore
+contain an explicit zero, even `cacheDetailsReported: true`, without preserving the
+provider's original cache breakdown. Microsoft tracks missing cache reporting in
+[OpenAI-compatible BYOK providers](https://github.com/microsoft/vscode/issues/308370).
+
+AgentTelemetry preserves the recorded breakdown and does not invent a cache-hit
+rate or discount. Its session detail explains this limitation. Estimates based on
+full-rate reported input may overstate actual charges if the provider served cached
+tokens. Even complete call coverage does not establish complete cache reporting.
+Use the original provider response usage or provider billing to verify the charge.
+[Cloudflare documents cache counts in response usage and session affinity for cache reuse](https://developers.cloudflare.com/workers-ai/features/prompt-caching/).
+
 SDK snapshots contain only normalized numeric/model metadata. If an auxiliary
 database disappears, already recovered turn usage survives in the durable ledger.
 Version 58 retains all existing version 53–57 entries and older archived history.
