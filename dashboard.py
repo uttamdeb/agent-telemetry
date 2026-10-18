@@ -2456,6 +2456,37 @@ class Handler(BaseHTTPRequestHandler):
         except (ValueError, TypeError):
             return False
 
+    def _discard_small_post_body(self):
+        """Avoid a TCP reset when rejecting a small, separately sent body.
+
+        Never parse rejected JSON or wait indefinitely for an untrusted sender.
+        Unknown, oversized and transfer-encoded requests still close directly.
+        """
+        if self.headers.get("Transfer-Encoding"):
+            return
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except (TypeError, ValueError):
+            return
+        if not 0 < length <= 16384:
+            return
+        previous_timeout = self.connection.gettimeout()
+        deadline = time.monotonic() + 0.2
+        try:
+            while length:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return
+                self.connection.settimeout(remaining)
+                chunk = self.rfile.read1(length)
+                if not chunk:
+                    return
+                length -= len(chunk)
+        except (OSError, ValueError):
+            return
+        finally:
+            self.connection.settimeout(previous_timeout)
+
     def do_POST(self):
         route = self.path.split("?")[0]
         local_server_routes = {
@@ -2467,9 +2498,11 @@ class Handler(BaseHTTPRequestHandler):
         }
         if route in ("/api/settings", "/api/cache", "/api/update", "/api/devices", "/api/refresh", "/api/native", "/api/shutdown", "/api/sync", "/api/session-name", "/api/accounts", "/api/backups") or route in local_server_routes:
             if route in local_server_routes and not self._loopback_client():
+                self._discard_small_post_body()
                 self._send(403, json.dumps({"error": "local servers can be managed only on this machine"}))
                 return
             if not self._csrf_ok():
+                self._discard_small_post_body()
                 self._send(403, json.dumps({"error": "cross-site request refused"}))
                 return
             try:
