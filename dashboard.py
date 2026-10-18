@@ -30,7 +30,7 @@ from local_servers import LocalServerInventory
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = HERE
 CACHE_PATH = os.path.join(DATA_DIR, ".usage_cache.json")
-CACHE_VERSION = 59
+CACHE_VERSION = 60
 
 
 def _configure_data_dir(path):
@@ -46,7 +46,7 @@ def _configure_data_dir(path):
 def _peer_cache_ok(version):
     # v1.7.0 mirrors lack optional attribution/precision fields, but the reader
     # still supports their rows just as it supports archived local entries.
-    return type(version) is int and version in (52, 53, 54, 55, 56, 57, 58, CACHE_VERSION)
+    return type(version) is int and version in (52, 53, 54, 55, 56, 57, 58, 59, CACHE_VERSION)
 
 # ---------------------------------------------------------------------------
 # In-memory store of per-file aggregates, refreshed on a background interval.
@@ -280,7 +280,7 @@ def load_cache():
     if data.get("version") == CACHE_VERSION:
         _state["files"] = files
         return
-    if data.get("version") in (53, 54, 55, 56, 57, 58):
+    if data.get("version") in (53, 54, 55, 56, 57, 58, 59):
         # Only optional compaction/pricing/account/SDK/effort metadata changed. Keep every entry
         # until its replacement parses successfully; update_file backfills Claude
         # and Codex logs lacking metadata, and Claude Haiku 5.5 pricing detail.
@@ -1116,6 +1116,26 @@ def _build_payload_locked():
                                         (session.get("end") or session.get("start") or "")[:10],
                                         session, has_logged_cost)["cost"])
             sessions.append(s2)
+
+    # Parent resolution uses full source IDs and the exporting device, never a
+    # title, project label, shared root-session ID or eight-character table ID.
+    parent_candidates = {}
+    for session in sessions:
+        identity = session.get("rename_id")
+        if session.get("source") == "codex" and isinstance(identity, str) and re.fullmatch(
+                r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", identity):
+            key = (session["device"], identity.lower())
+            parent_candidates.setdefault(key, []).append(session)
+    for session in sessions:
+        parent_id = session.get("parent_id")
+        if session.get("source") != "codex" or not session.get("subagent") or not isinstance(parent_id, str):
+            continue
+        candidates = parent_candidates.get((session["device"], parent_id), [])
+        if len(candidates) == 1 and candidates[0] is not session:
+            parent = candidates[0]
+            session["subagent_parent"] = {
+                "id": parent["rename_id"], "title": parent.get("title") or parent.get("project") or parent_id,
+                "source": "codex", "device": parent["device"]}
 
     rec_list = []
     for (date, source, model, project, ide, device), v in records.items():
