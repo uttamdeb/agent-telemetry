@@ -5,15 +5,17 @@ branching icon, and session identifier. Search accepts the displayed identifier 
 the full native session ID as well as session titles. Open a session's title with
 the mouse or keyboard to see its classification and recorded delegation evidence.
 
-The Sessions-only selector shows **All sessions**, **Subagents**, or **Other
-sessions**. Counts reflect the currently loaded sessions after the dashboard's
+The Sessions-only selector shows **All sessions**, **Main agents**, and **Subagents**
+in that order. Counts reflect the currently loaded sessions after the dashboard's
 date, tool, project, model, device, precision, and search filters. The selector is
 saved as `?session_type=subagents` or `?session_type=other`; All is the default.
+The existing `other` URL value continues to select Main agents for compatibility
+with saved links.
 It changes the session list, leaving Overview, Cost, and other analytics totals
 unchanged. Project and comparison drilldowns reset the selector to All so it
 cannot hide the sessions behind a chart or comparison.
 
-**Other sessions** means not identified as a subagent. Some tools and older
+**Main agents** shows sessions not identified as subagents. Some tools and older
 retained or shared entries do not carry that marker, so it does not mean that
 delegation never happened. An archived or remote session keeps a subagent label
 when its retained data includes the marker. The UI does not infer a parent-child

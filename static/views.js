@@ -1167,8 +1167,8 @@ function sessionRowsForType(rows,type=S.sessionType){
 function syncSessionTypeControls(counts){
   const options=[
     ["all","All sessions","sessTypeCountAll"],
+    ["other","Main agents","sessTypeCountOther"],
     ["subagents","Subagents","sessTypeCountSubagents"],
-    ["other","Other sessions","sessTypeCountOther"],
   ];
   for(const [type,label,countId] of options){
     const button=document.querySelector(`[data-session-type="${type}"]`), count=document.getElementById(countId);
@@ -1196,7 +1196,7 @@ function sessionDelegationBadge(s){
 function sessionTypeDetails(s){
   if(s.subagent)
     return `<div class="session-type-detail"><svg class="ic" aria-hidden="true"><use href="#i-subagent"/></svg><div><b>Subagent session</b><p>The source log recorded a subagent marker. A parent session is not linked here.</p></div></div>`;
-  return `<div class="session-type-detail"><svg class="ic" aria-hidden="true"><use href="#i-subagent"/></svg><div><b>Other session</b><p>Not marked as a subagent. Some tools and older logs do not record this.</p></div></div>`;
+  return `<div class="session-type-detail"><svg class="ic" aria-hidden="true"><use href="#i-subagent"/></svg><div><b>Main agent session</b><p>Not marked as a subagent. Some tools and older logs do not record this.</p></div></div>`;
 }
 function sessionDelegationDetails(s){
   const notes=[];
@@ -1314,7 +1314,7 @@ function viewSessions(d){
   const sorted=sortRows(rows,S.sessSort).slice(0,400);
   const emptyMessage=rows.length?"":`<tr><td colspan="${cols.length}"><div class="session-empty" role="status">
       <p>${S.sessionType==="all"?(S.search?"No sessions match this search.":"No sessions match the current dashboard filters and date range."):
-        `No ${S.sessionType==="subagents"?"subagent":"other"} sessions match the current dashboard filters, date range and search.`}</p>
+        `No ${S.sessionType==="subagents"?"subagent":"main agent"} sessions match the current dashboard filters, date range and search.`}</p>
       ${S.sessionType!=="all"?'<button type="button" class="session-empty-action" data-session-type-reset>Show all sessions</button>':
         S.search?'<button type="button" class="session-empty-action" data-session-search-reset>Clear search</button>':""}
     </div></td></tr>`;
@@ -1344,7 +1344,7 @@ function viewSessions(d){
   const capped = RAW.sessions_total && RAW.sessions_total > RAW.sessions.length;
   const clipped = rows.filter(x=>x.clipped).length;
   document.getElementById("sessHint").textContent =
-    `${fmtNum(rows.length)} ${S.sessionType==="subagents"?"subagent ":S.sessionType==="other"?"other ":""}session${rows.length===1?"":"s"} active in range`
+    `${fmtNum(rows.length)} ${S.sessionType==="subagents"?"subagent ":S.sessionType==="other"?"main agent ":""}session${rows.length===1?"":"s"} active in range`
     + (S.sessionType==="all"?` · ${fmtNum(counts.subagents)} marked Subagent`:` · ${fmtNum(allRows.length)} matching session${allRows.length===1?"":"s"} across all types`)
     + (clipped?` · ${clipped} with scoped figures (◔ = range and model filters)`:"")
     + (rows.length>400?" · showing the top 400 by the current sort":"")
@@ -1363,7 +1363,7 @@ function openSession(i){
   const s=SESS_CACHE[i]; if(!s) return;
   const row=(k,v)=>v==null||v===""?"":`<div class="kv"><span class="k">${k}</span><span class="v">${v}</span></div>`;
   openDrawer(`
-    <div class="eyebrow">${s.subagent?"Subagent session":"Session"}</div>
+    <div class="eyebrow">${s.subagent?"Subagent session":"Main agent session"}</div>
     <h2>${esc(s.title||s.project||s.id)}</h2>
     <div style="margin-bottom:16px;display:flex;gap:8px;align-items:center">${srcBadge(s.source)} <span class="dim" style="font-size:12px">${esc(s.id)}</span>${renameButton(s,true)}</div>
     ${sessionTypeDetails(s)}
@@ -2799,11 +2799,11 @@ async function load(){
     const hi=dates.length?dates.reduce((a,b)=>a>b?a:b):"—";
     const fresh=new Date(RAW.meta.last_refresh*1000).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"});
     document.getElementById("statusText").textContent = (S.live ? "Live" : "Paused") + " · updated " + fresh;
-    document.getElementById("coverage").textContent = `${fmtNum(RAW.meta.files)} logs · ${lo} → ${hi}`
-      + (RAW.openclaw_undecoded ? ` · ${fmtNum(RAW.openclaw_undecoded)} OpenClaw events unread — install zstd` : "");
-    if(RAW.cache_error) document.getElementById("coverage").textContent += " · " + RAW.cache_error;
-    if(RAW.meta.parse_errors) document.getElementById("coverage").textContent += ` · ${fmtNum(RAW.meta.parse_errors)} log errors — see Settings`;
-    if(RAW.meta.backup_error) document.getElementById("coverage").textContent += " · backup failed — see Settings";
+    document.getElementById("coverage").innerHTML = `<span>${fmtNum(RAW.meta.files)} logs</span><span class="coverage-dates">${esc(lo)} → ${esc(hi)}</span>`
+      + (RAW.openclaw_undecoded ? `<span class="coverage-detail">${fmtNum(RAW.openclaw_undecoded)} OpenClaw events unread — install zstd</span>` : "")
+      + (RAW.cache_error ? `<span class="coverage-detail">${esc(RAW.cache_error)}</span>` : "")
+      + (RAW.meta.parse_errors ? `<span class="coverage-detail">${fmtNum(RAW.meta.parse_errors)} log errors — see Settings</span>` : "")
+      + (RAW.meta.backup_error ? `<span class="coverage-detail">backup failed — see Settings</span>` : "");
     renderVersion();
     // a device that was disconnected can't stay selected, or it would filter out everything
     for(const id of [...S.devs]) if(!devices().some(v=>v.id===id)) S.devs.delete(id);
