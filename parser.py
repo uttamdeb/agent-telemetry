@@ -2312,7 +2312,7 @@ def _update_copilot_sdk(previous, path):
     sid = _leaf(os.path.dirname(path))
     hosts = _copilot_sdk_hosts().get(sid, [])
     sig = [_sdk_stat(path)] + [[db, _sdk_stat(db), _sdk_stat(db + "-wal")] for db, _ in hosts]
-    if previous and previous.get("_sig") == sig and previous.get("copilot_sdk", {}).get("version") == 1:
+    if previous and previous.get("_sig") == sig and previous.get("copilot_sdk", {}).get("version") == 2:
         return previous
     lines, offset = _read_new_bytes(path, 0)
     fresh = _blank_agg("copilot", path)
@@ -2347,15 +2347,16 @@ def parse_copilot_sdk(agg, lines, hosts=(), previous=None):
             continue
         seen.add(eid)
         events.append(e)
-    info = {"version": 1, "usage_status": "unavailable", "usage_sources": [],
+    info = {"version": 2, "usage_status": "unavailable", "usage_sources": [],
             "errors": 0, "aborts": 0, "missing_turns": 0, "limitations": [], "recorded_fields": []}
     agg["copilot_sdk"] = info
     agg["compactions"] = {}
     agg["editor"], agg["entry"] = "Copilot SDK", "copilot-agent"
-    segments, message_segments, segment, current_model = {}, {}, None, "Unknown"
+    segments, message_segments, turn_segments, segment, current_model = {}, {}, {}, None, "Unknown"
+    origin_owners = {}
     calls, tool_ids, reply_ids = set(), set(), set()
     call_segments, active_segment = {}, None
-    usage_events, shutdowns, compaction_start, started = [], [], None, None
+    usage_events, pending_usage, shutdowns, compaction_start, started = [], {}, [], None, None
     for e in events:
         t, d = e.get("type"), e["data"]
         dt = _from_iso(e.get("timestamp", ""))
@@ -2391,11 +2392,28 @@ def parse_copilot_sdk(agg, lines, hosts=(), previous=None):
                        "messages": [], "message_usage": [], "usage": []}
             segments[e["id"]] = segment
             if d.get("messageId"): message_segments[d["messageId"]] = segment
+            if d.get("turnId"):
+                # SDK turn counters restart on resume. An explicitly reused
+                # user turn id starts a new namespace; old counter values must
+                # not steal later continuation calls from this new prompt.
+                if d["turnId"] in turn_segments:
+                    turn_segments.clear()
+                    origin_owners.clear()
+                turn_segments[d["turnId"]] = segment
             _set_title(agg, content)
         elif t == "assistant.message":
             # A user can queue another prompt while an earlier turn is working.
             # The originating native message id wins over stream adjacency.
-            target = message_segments.get(d.get("originatingMessageId"), segment)
+            # New runtimes sometimes retain an earlier originatingMessageId.
+            # A direct native user/assistant turnId match is stronger evidence.
+            origin = d.get("originatingMessageId")
+            native_turn = turn_segments.get(d.get("turnId"))
+            target = native_turn or origin_owners.get(origin) or message_segments.get(origin, segment)
+            if native_turn and origin and not child:
+                # Subsequent API turns can keep this same stale origin too.
+                # Re-anchor only from the explicit user/assistant turnId match,
+                # never from prompt text or time proximity (queued prompts).
+                origin_owners[origin] = native_turn
             message_id = (e.get("agentId"), d.get("messageId") or e["id"])
             if message_id in reply_ids:
                 continue
@@ -2410,7 +2428,7 @@ def parse_copilot_sdk(agg, lines, hosts=(), previous=None):
                 call = d.get("apiCallId")
                 if isinstance(call, str) and call and (e.get("agentId"), call) not in calls:
                     calls.add((e.get("agentId"), call))
-                    target["calls"].add(call)
+                    target["calls"].add((e.get("agentId"), call))
                     target["call_events"].append((dt, model))
                     call_segments[(e.get("agentId"), call)] = target
                     _rec(agg, _buckets(dt)[0], model)["req"] += 1
@@ -2433,14 +2451,36 @@ def parse_copilot_sdk(agg, lines, hosts=(), previous=None):
                 _tool(agg, _buckets(dt)[0], d.get("toolName") or "tool")
                 _rec(agg, _buckets(dt)[0], current_model)["tools"] += 1
                 if segment: segment["tool_events"].append((dt, current_model))
-        elif t == "assistant.usage":
+        elif t in ("assistant.usage", "session.usage_record"):
+            if t == "session.usage_record":
+                d = d.get("usage")
+                if not isinstance(d, dict) or _sdk_tokens(d) is None:
+                    raise ValueError("Invalid persisted SDK usage receipt")
             if d.get("interactionType") == "conversation-compaction":
                 continue  # the same request is recorded by compaction_complete
-            entry = {"model": _sdk_model(d.get("model")), "data": d, "dt": dt}
-            owner = call_segments.get((e.get("agentId"), d.get("apiCallId")), active_segment or segment)
-            (owner["usage"] if owner else usage_events).append(entry)
+            accounting = d.get("accounting") or {}
+            if not isinstance(accounting, dict):
+                raise ValueError("Invalid SDK usage accounting identity")
+            if accounting.get("sourceSessionId") not in (None, sid) and not child:
+                continue  # a copied receipt does not belong to this session
+            call = d.get("apiCallId")
+            identity = call or accounting.get("usageId") or e["id"]
+            scope = e.get("agentId") or accounting.get("sourceSessionId") or sid
+            key = (scope, identity)
+            entry = {"model": _sdk_model(d.get("model")), "data": d, "dt": dt,
+                     "call": (e.get("agentId"), call) if call else None,
+                     "owner": active_segment or segment,
+                     "source": "usage_receipts" if t == "session.usage_record" else "usage_events"}
+            # Receipts may precede their assistant message and may be replayed
+            # under a new event id. One API call contributes once, including its
+            # ephemeral assistant.usage twin. Prefer the durable receipt.
+            old = pending_usage.get(key)
+            if not old or entry["source"] == "usage_receipts" or old["source"] != "usage_receipts":
+                if old and old["source"] == "usage_receipts":
+                    entry["dt"], entry["owner"] = old["dt"], old["owner"]
+                pending_usage[key] = entry
         elif t == "assistant.turn_start" and not child:
-            active_segment = segment
+            active_segment = turn_segments.get(d.get("turnId"), segment)
         elif t == "assistant.turn_end" and not child:
             active_segment = None
         elif t == "subagent.started":
@@ -2456,16 +2496,28 @@ def parse_copilot_sdk(agg, lines, hosts=(), previous=None):
         elif t == "session.compaction_complete" and not child:
             tokens = d.get("compactionTokensUsed")
             if isinstance(tokens, dict):
-                entry = {"model": _sdk_model(tokens.get("model")), "data": tokens, "dt": dt}
+                entry = {"model": _sdk_model(tokens.get("model")), "data": tokens, "dt": dt,
+                         "source": "usage_events", "compaction": True}
                 (active_segment["usage"] if active_segment else usage_events).append(entry)
             if d.get("success") is True:
                 before = _sdk_number(d.get("preCompactionTokens"))
                 after = _sdk_number(d.get("postCompactionTokens"))
                 duration = (dt - compaction_start).total_seconds() * 1000 if compaction_start else None
                 agg["compactions"][e["id"]] = {"id": e["id"], "timestamp": dt.isoformat(),
-                    "date": _buckets(dt)[0], "trigger": d.get("trigger") if d.get("trigger") in ("manual", "auto") else "unknown",
+                    "date": _buckets(dt)[0], "trigger": d.get("trigger") if d.get("trigger") in
+                    ("manual", "auto", "threshold", "context_limit_retry", "memory_pressure", "model_switch") else "unknown",
                     "before": before, "after": after, "duration_ms": duration if duration is not None and duration >= 0 else None}
             compaction_start = None
+
+    for entry in pending_usage.values():
+        owner = call_segments.get(entry["call"], entry["owner"])
+        if entry["call"] and entry["call"] not in calls:
+            calls.add(entry["call"])
+            _rec(agg, _buckets(entry["dt"])[0], entry["model"])["req"] += 1
+            if owner:
+                owner["calls"].add(entry["call"])
+                owner["call_events"].append((entry["dt"], entry["model"]))
+        (owner["usage"] if owner else usage_events).append(entry)
 
     # Retain already recovered, numeric-only turn snapshots if the auxiliary
     # database is later deleted. Never retain its prompts, tool output or config.
@@ -2552,6 +2604,8 @@ def parse_copilot_sdk(agg, lines, hosts=(), previous=None):
             _bump_time(agg, dt, sum(tokens[k] for k in ("in", "out", "cr", "cc")), 0)
         return True
 
+    stream_dates = {_buckets(ts)[0] for e in events
+                    if (ts := _from_iso(e.get("timestamp", ""))) is not None and (not started or ts >= started)}
     timed_activity = []
     for anchor, seg in segments.items():
         dt, model = seg["dt"], seg["model"]
@@ -2569,8 +2623,35 @@ def parse_copilot_sdk(agg, lines, hosts=(), previous=None):
                 timed_activity.append((ts, mdl, anchor))
         saved = stored.get(anchor)
         covered = False
-        if saved and saved["totals"] and len(seg["dates"]) == 1:
+        entries = [entry for entry in seg["usage"] if _sdk_tokens(entry["data"]) is not None]
+        dated_entries = [entry for entry in entries if entry.get("call") or entry.get("compaction")]
+        recorded_calls = {entry.get("call") for entry in entries if entry.get("call")}
+        if recorded_calls:
+            entries = dated_entries  # anonymous live twins cannot be added safely
+        receipts_complete = bool(seg["calls"]) and seg["calls"] <= recorded_calls
+        # Host totals can include calls/subagents absent from the event stream.
+        # Prefer dated per-call receipts only when they also cover that snapshot.
+        if receipts_complete and saved:
+            observed, expected = {}, {}
+            for rows, dest in (([(e["model"], e["data"]) for e in dated_entries], observed),
+                               ([(_sdk_model(r.get("model")), r) for r in saved["totals"]], expected)):
+                for mdl, data in rows:
+                    tokens = _sdk_tokens(data)
+                    for field in ("in", "out", "cr", "cc"):
+                        dest[(mdl, field)] = dest.get((mdl, field), 0) + tokens[field]
+            receipts_complete = all(observed.get(key, 0) >= value for key, value in expected.items())
+        saved_dated = (len(seg["dates"] | {_buckets(dt)[0]}) == 1
+                       and (bool(seg["dates"]) or len(stream_dates) == 1))
+        if receipts_complete:
+            for entry in dated_entries:
+                add_usage(entry["dt"], entry["model"], entry["data"])
+                info["usage_sources"].append(entry["source"])
+            covered = True
+        elif saved and saved["totals"] and saved_dated:
             moments = seg.get("moments") or [dt]
+            # An explicit DB/user-event join still recovers a turn whose reply
+            # carries a stale origin id, but only if the whole stream is on one
+            # local date. Never invent a day for an undated multi-day total.
             same_hour = len({(_buckets(ts)[0], ts.hour) for ts in moments}) == 1
             if not same_hour: info["limitations"].append("hourly_usage")
             for row in saved["totals"]:
@@ -2580,11 +2661,13 @@ def parse_copilot_sdk(agg, lines, hosts=(), previous=None):
             if not saved["complete"]:
                 info["missing_turns"] += 1
         elif seg["usage"]:
-            valid = 0
-            for entry in seg["usage"]:
-                valid += bool(add_usage(entry["dt"], entry["model"], entry["data"]))
-            info["usage_sources"].append("usage_events")
-            covered = valid >= max(1, len(seg["calls"]))
+            for entry in entries:
+                add_usage(entry["dt"], entry["model"], entry["data"])
+            info["usage_sources"].extend(entry["source"] for entry in entries)
+            # Compaction usage is not evidence of a covered conversation call.
+            conversation = [entry for entry in entries if not entry.get("compaction")]
+            covered = (seg["calls"] <= recorded_calls if recorded_calls else
+                       len(conversation) >= max(1, len(seg["calls"])))
             if not covered: info["missing_turns"] += 1
         else:
             info["missing_turns"] += 1
@@ -2616,7 +2699,7 @@ def parse_copilot_sdk(agg, lines, hosts=(), previous=None):
         agg["_active_last"] = dt.isoformat()
     for entry in usage_events:
         add_usage(entry["dt"], entry["model"], entry["data"])
-        info["usage_sources"].append("usage_events")
+        info["usage_sources"].append(entry["source"])
     # Shutdown snapshots are cumulative: never add them to turn/event usage.
     # Only a single usage day permits assigning a session total to a daily row.
     # Multi-day totals remain visible as supplemental metadata, never invented

@@ -25,6 +25,8 @@ assert.equal(run(`sdkUsageBadge({copilot_sdk:{usage_status:'recorded'}})`),'');
 assert.equal(run(`sdkField({copilot_sdk:{recorded_fields:['in','out']}},'cc','0')`),'Unavailable');
 assert.equal(run(`sdkField({copilot_sdk:{recorded_fields:['cc']}},'cc','0')`),'0');
 assert.match(run(`sdkUsageDetails({copilot_sdk:{usage_status:'recorded',usage_sources:['vscode_turn_usage']}})`),/VS Code saved turn totals/);
+assert.match(run(`sdkUsageDetails({copilot_sdk:{usage_status:'recorded',usage_sources:['usage_receipts']}})`),/Saved SDK per-call receipts/);
+assert.match(run(`sdkUsageNote({copilot_sdk:{usage_status:'partial',missing_turns:2}})`),/2 session turns without fully reconciled usage/);
 assert.doesNotMatch(run(`sdkUsageDetails({copilot_sdk:{usage_status:'partial',limitations:['undated_usage'],shutdown_totals:[{model:'<img src=x onerror=alert(1)>',in:100}]}})`),/<img src=x/);
 assert.match(run(`quotaWindowHTML({label:'5-hour limit',remaining_percent:89,resets_at:2000},{observed_at:1000},1000)`),/89% left/);
 assert.match(run(`quotaWindowHTML({label:'5-hour limit',remaining_percent:0,resets_at:2000},{observed_at:1000},1000)`),/value="0"/);
@@ -367,6 +369,16 @@ assert.match(timedCodexHTML,/>Not recorded</);
 assert.doesNotMatch(timedCodexHTML,/Unknown|\bunknown\b|— → —/);
 assert.match(run(`compactionDetails({source:'codex',compactions:[{timestamp:'2026-10-12T11:42:38+06:00',trigger:'unknown',before:null,after:null,duration_ms:null}]})`),/missing or cannot be matched uniquely\."\>Unavailable<\/td>/);
 assert.match(run(`compactionDetails({source:'codex',compactions:[{timestamp:'2026-10-12T11:42:38+06:00',trigger:'unknown',before:null,after:null,duration_ms:0}]})`),/>0s<\/td>/);
+const sdkCompactions=run(`compactionDetails({source:'copilot',copilot_sdk:{},compactions:
+  ['threshold','context_limit_retry','memory_pressure','model_switch','manual','unknown'].map(trigger=>({trigger}))})`);
+assert.match(sdkCompactions,/3 auto/);
+assert.match(sdkCompactions,/1 manual/);
+assert.match(sdkCompactions,/1 model switch/);
+assert.match(sdkCompactions,/1 without a recorded trigger/);
+assert.match(sdkCompactions,/Auto · context threshold/);
+assert.match(sdkCompactions,/Auto · context limit/);
+assert.match(sdkCompactions,/Auto · memory pressure/);
+assert.match(sdkCompactions,/>Model switch<\/td>/);
 assert.equal(run(`compactionDetails({source:'copilot'})`),'');
 run(`S.tools=new Set(['codex']);var codexCompactSession={...compactSession,source:'codex',compactions:[
   {id:'response:fixture',date:'2026-10-10',timestamp:'2026-10-10T13:09:08+06:00',trigger:'unknown',before:null,after:null,duration_ms:null}]};
