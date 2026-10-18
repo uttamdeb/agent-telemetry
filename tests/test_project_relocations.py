@@ -108,6 +108,9 @@ class ProjectRelocationTests(unittest.TestCase):
             snapshot = D.build_editor_snapshot(query(roots=("/fixtures/new-project",)))
             self.assertEqual(snapshot["summary"]["tokens"],135)
             self.assertEqual(snapshot["sessions"][0]["project"],"new-project")
+            old_workspace = D.build_editor_snapshot(query(roots=("/fixtures/old-project",)))
+            self.assertEqual(old_workspace["summary"]["tokens"], snapshot["summary"]["tokens"])
+            self.assertEqual(old_workspace["scope"]["roots"], snapshot["scope"]["roots"])
             self.assertEqual(D.build_editor_snapshot(query(roots=("/elsewhere/new-project",)))["sessions_total"],0)
             remote = copy.deepcopy(raw)
             remote["_device"] = "remote"
