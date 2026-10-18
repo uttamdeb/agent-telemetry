@@ -3,9 +3,11 @@
 
   const SOURCE_LABELS = {codex: 'Codex', claude: 'Claude Code', copilot: 'GitHub Copilot', cursor: 'Cursor', opencode: 'OpenCode', hermes: 'Hermes Agent', openclaw: 'OpenClaw', 'claude-desktop': 'Claude Desktop'};
   const RANGE_LABELS = {today: 'Today', '7d': 'Last 7 days', '30d': 'Last 30 days'};
+  const EFFORT_LABELS = {none: 'None', minimal: 'Minimal', low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max', ultra: 'Ultra', unrecorded: 'Not recorded'};
   const n = value => typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : 0;
   const text = value => typeof value === 'string' ? value : '';
   const sourceLabel = source => SOURCE_LABELS[source] || text(source) || 'Unknown tool';
+  const effortLabel = value => EFFORT_LABELS[value] || text(value) || 'Not recorded';
   function compact(value) {
     const amount = n(value);
     if (amount >= 1e9) return (amount / 1e9).toLocaleString('en-US', {maximumFractionDigits: 2}) + 'B';
@@ -57,7 +59,7 @@
     return {byKey, parent, children, roots: [...byKey.values()].filter(session => !parent.has(session.key))};
   }
 
-  if (typeof module !== 'undefined' && module.exports) module.exports = {compact, money, composition, forest};
+  if (typeof module !== 'undefined' && module.exports) module.exports = {compact, money, composition, forest, effortLabel};
   if (typeof document === 'undefined') return;
 
   const api = acquireVsCodeApi();
@@ -284,7 +286,7 @@
     const metadata = el('dl', 'metadata');
     const efforts = Array.isArray(session.efforts) ? session.efforts.filter(value => typeof value === 'string') : [];
     const compactions = typeof session.compactions === 'number' && Number.isFinite(session.compactions) && session.compactions >= 0 ? n(session.compactions).toLocaleString('en-US') + ' recorded' : 'Unavailable';
-    const entries = [['Model', text(session.model) || 'Not recorded'], ['Recorded effort', efforts.length ? efforts.map(value => value === 'unrecorded' ? 'Not recorded' : value).join(' · ') : 'Not recorded'], ['Compactions', compactions], ['Last record', session.end ? shortDate(session.end.slice(0, 10)) + ' · ' + time(session.end) : 'Unavailable']];
+    const entries = [['Model', text(session.model) || 'Not recorded'], ['Recorded effort', efforts.length ? efforts.map(effortLabel).join(' · ') : 'Not recorded'], ['Compactions', compactions], ['Last record', session.end ? shortDate(session.end.slice(0, 10)) + ' · ' + time(session.end) : 'Unavailable']];
     for (const [label, value] of entries) metadata.append(el('dt', '', label), el('dd', '', value));
     nodes.push(metadata, renderComposition(session));
     const scope = state.snapshot && state.snapshot.from !== state.snapshot.to ? shortDate(state.snapshot.from) + ' — ' + shortDate(state.snapshot.to) : RANGE_LABELS[state.range];

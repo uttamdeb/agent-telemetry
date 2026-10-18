@@ -36,6 +36,8 @@ async function checkBrowser(page, base) {
   await page.keyboard.press('ArrowRight'); await page.keyboard.press('ArrowRight'); await page.keyboard.press('Enter');
   ensure(await page.locator('.detail-title').textContent() === 'Shape the command palette', 'keyboard selects child');
   ensure(await page.locator('.detail-parent').textContent() === 'Recorded parent: Make the search feel instant', 'recorded relationship');
+  await page.evaluate(() => { const state = structuredClone(window.__deskPreview.current()); state.snapshot.sessions.find(session => session.key === state.selected_session).efforts = ['ultra', 'unrecorded']; window.__deskPreview.update(state); });
+  ensure((await page.locator('.metadata').textContent()).includes('Ultra · Not recorded'), 'recorded effort labels preserve partial evidence');
   const before = await page.evaluate(() => document.activeElement.dataset.focus);
   await page.evaluate(() => { const state = structuredClone(window.__deskPreview.current()); state.snapshot.summary.tokens += 10; window.__deskPreview.update(state); });
   ensure(await page.evaluate(() => document.activeElement.dataset.focus) === before, 'polling preserves keyboard focus');

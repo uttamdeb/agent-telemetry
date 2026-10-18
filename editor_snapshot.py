@@ -16,7 +16,7 @@ import urllib.parse
 
 MAX_SESSIONS = 500
 _UUID = re.compile(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}")
-_EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
+_EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra")
 _FIELDS = {"input": "in", "output": "out", "cache_read": "cr", "cache_write": "cc"}
 
 
@@ -151,13 +151,15 @@ def _efforts(session, first, last):
     found = set()
     for key, row in metadata.get("days", {}).items():
         if isinstance(key, str) and first <= key.split("\t", 1)[0] <= last and isinstance(row, dict):
+            if _number(row.get("unrecorded")):
+                found.add("unrecorded")
             levels = row.get("levels") or {}
             if not isinstance(levels, dict):
                 continue
             for level, count in levels.items():
                 if level in _EFFORTS and _number(count):
                     found.add(level)
-    return [level for level in _EFFORTS if level in found]
+    return [level for level in (*_EFFORTS, "unrecorded") if level in found]
 
 
 def build_snapshot(items, local, query, revision, *, price_usage, deduplicate,

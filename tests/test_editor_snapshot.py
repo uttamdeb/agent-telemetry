@@ -195,6 +195,20 @@ class EditorSnapshotTests(unittest.TestCase):
         self.assertEqual(week["sessions"][0]["cost"], week["summary"]["cost"])
         self.assertEqual(sum(d["tokens"] for d in week["days"]), week["summary"]["tokens"])
 
+    def test_ultra_and_partial_effort_remain_visible_without_changing_usage(self):
+        agg = aggregate()
+        yesterday = (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
+        agg["sessions"][0]["reasoning_effort"] = {"days": {
+            TODAY + "\t" + MODEL: {"levels": {"ultra": 2}, "unrecorded": 1},
+            yesterday + "\t" + MODEL: {"levels": {"xhigh": 1}, "unrecorded": 0}}}
+        today = self.snapshot([agg])
+        self.assertEqual(today["sessions"][0]["efforts"], ["ultra", "unrecorded"])
+        self.assertEqual(today["summary"]["tokens"], 135)
+        self.assertEqual(self.snapshot([agg], query(period="7d"))["sessions"][0]["efforts"],
+                         ["xhigh", "ultra", "unrecorded"])
+        agg["sessions"][0]["reasoning_effort"]["days"][TODAY + "\t" + MODEL]["levels"] = {}
+        self.assertEqual(self.snapshot([agg])["sessions"][0]["efforts"], ["unrecorded"])
+
     def test_parent_edges_require_native_identity_and_keep_child_usage_separate(self):
         parent, child = aggregate(), aggregate(CHILD, subagent=True, inp=10)
         child["sessions"][0]["parent_id"] = PARENT
