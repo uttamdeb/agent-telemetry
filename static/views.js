@@ -1113,6 +1113,33 @@ function viewProjects(d){
 }
 
 /* ---------------- SESSIONS ---------------- */
+const REASONING_EFFORT_LABELS = {none:"None",minimal:"Minimal",low:"Low",medium:"Medium",high:"High",xhigh:"Extra high",max:"Max",ultra:"Ultra"};
+function reasoningEffortSummary(s){
+  const detail=s.reasoning_effort_scoped||reasoningEffortInRange(s,range());
+  const labels=detail.levels.map(level=>REASONING_EFFORT_LABELS[level]);
+  const label=labels.length>1?"Mixed":labels[0]?labels[0]+(detail.unrecorded?" · partially recorded":""):"Not recorded";
+  const description=`Recorded effort: ${label}. `+(labels.length>1?`Recorded values: ${labels.join(", ")}. `:"")
+    +(detail.unrecorded&&labels.length>1?"Some observations did not record a usable effort. ":"")
+    +"Selected date range and model/provider filters. Missing effort is not inferred.";
+  return {...detail,label,description};
+}
+function reasoningEffortLabel(s){
+  if(!["claude","codex"].includes(s.source)) return "";
+  const summary=reasoningEffortSummary(s);
+  return `<span class="session-effort" role="note" aria-label="${esc(summary.description)}" title="${esc(summary.description)}">Recorded effort: ${esc(summary.label)}</span>`;
+}
+function reasoningEffortDetails(s){
+  if(!["claude","codex"].includes(s.source)) return "";
+  const summary=reasoningEffortSummary(s);
+  const associations=summary.levels.length>1?`<ul class="reasoning-effort-associations" aria-label="Recorded effort by date and model">${summary.entries.map(entry=>`<li><time>${esc(entry.date)}</time><span><b>${esc(entry.model)}</b> · ${esc(entry.levels.map(level=>REASONING_EFFORT_LABELS[level]).join(" / ")||"Not recorded")}${entry.unrecorded&&entry.levels.length?" · partially recorded":""}</span></li>`).join("")}</ul>`:"";
+  const notes=["Selected date range and model/provider filters. Recorded effort settings are separate from reasoning token counts; missing values are not inferred."];
+  if(summary.unrecorded&&summary.levels.length) notes.push("Some observations did not record a usable effort.");
+  if(s.source==="claude"&&summary.unrecorded&&summary.levels.length) notes.push("Inline child usage is not assigned the parent's effort.");
+  if(s.source==="codex"&&summary.levels.includes("low")) notes.push("Codex may call Low “Light”.");
+  if(s.source==="codex"&&summary.levels.includes("ultra")) notes.push("Ultra is a Codex delegation setting.");
+  if(summary.levels.length) notes.push("Claude and Codex effort levels use their own scales.");
+  return `<div class="kv"><span class="k">Recorded effort</span><span class="v">${esc(summary.label)}</span></div><div class="reasoning-effort-detail">${associations}<p class="hint">${esc(notes.join(" "))}</p></div>`;
+}
 function sessionWhen(s){
   if(!["in","out","cr","cc","user","asst","req","tools","active"].some(k=>s[k])
       && Array.isArray(s.compactions) && s.compactions.length)
@@ -1301,7 +1328,7 @@ function viewSessions(d){
         <div class="session-name-line">${s.clipped?`<span class="dim session-clipped-mark" title="Figures reflect the selected range and model filters.">◔</span>`:""}<button type="button" class="session-open" data-session-open="${i}" aria-label="${esc(ariaName)}" title="${esc(ariaName)}"><span class="session-title-text">${esc(s.name)}</span></button>${renameButton(s)}</div>
         ${sessionMeta?`<div class="session-name-meta">${sessionMeta}</div>`:""}</td>
       <td class="dim">${esc(s.project||"—")}</td>
-      <td>${esc(s.model)}${s.nmodels>1?` <span class="dim" title="${esc((s.models||[]).join(" · "))}">+${s.nmodels-1}</span>`:""}</td>
+      <td>${esc(s.model)}${s.nmodels>1?` <span class="dim" title="${esc((s.models||[]).join(" · "))}">+${s.nmodels-1}</span>`:""}${reasoningEffortLabel(s)}</td>
       <td class="r">${s.copilot_sdk?.usage_status==="unavailable"?'<span class="dim" title="Token usage was not saved">—</span>':fmtTok(s.tok)}</td><td class="r"><b>${s.copilot_sdk?.usage_status==="unavailable"?'<span class="dim" title="Cost cannot be estimated without token usage">—</span>':fmtUSD(s.cost)}</b></td>
       <td class="r">${fmtNum(s.user)}</td><td class="r">${fmtNum(s.copilot_sdk?s.asst:(s.asst||s.req))}</td>
       <td class="r">${fmtNum(s.tools)}</td>
@@ -1338,6 +1365,7 @@ function openSession(i){
     ${row("Device",multiDevice()?esc(deviceName(s.device||RAW.device.id)):null)}
     ${row("Project",esc(s.project||"—"))}
     ${row("Model",esc((s.models||[s.model]).join(" · ")))}
+    ${reasoningEffortDetails(s)}
     ${row("Git branch",s.branch?esc(s.branch):null)}
     ${row("Entrypoint",s.entry?esc(s.entry):null)}
     ${row("Daily detail",s.detail_limited?"Limited in this older ledger entry":null)}

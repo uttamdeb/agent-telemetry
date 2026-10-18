@@ -83,6 +83,15 @@ Recorded delegation counts and Claude sidechain usage are explained in the drawe
 Unmarked or older entries are not assumed to be primary sessions, and parent links
 are not inferred. See [behavior and limitations](docs/subagent-sessions.md).
 
+## Recorded reasoning effort
+
+Sessions shows **Recorded effort** below the model for Claude and Codex. Open a
+session for the recorded levels and their date/model scope. Changing the date,
+model or provider filter changes this label alongside the session figures.
+Missing metadata says **Not recorded**; mixed settings and partial coverage are
+explicit. These are recorded controls, not a measurement of reasoning quality or
+thinking tokens. See [sources and limitations](docs/recorded-effort.md).
+
 ## Subscription limits and account details
 
 The bottom of Cost shows subscription limits for Codex and Claude Code when they
