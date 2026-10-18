@@ -561,3 +561,72 @@ console.log('Frontend regression checks passed: pricing, precision, scope, model
   assert.notStrictEqual(nodes.nativeAppToggle,toggle,'Changed status was not rendered');
   console.log('Native Settings retains the toggle across unchanged status polls.');
 })().catch(error=>{console.error(error);process.exitCode=1;});
+
+{
+  // Model labels are display metadata; synthetic vectors still drive accounting.
+  const scoped=vm.createContext({console,Date,Set,URLSearchParams,document,
+    location:{search:'',hash:''},getComputedStyle:()=>({getPropertyValue:()=> '#000'})});
+  for(const file of ['static/core.js','static/charts.js','static/insights.js'])
+    vm.runInContext(fs.readFileSync(path.join(root,file),'utf8'),scoped);
+  vm.runInContext(views.slice(0,views.indexOf('document.getElementById("tabs").addEventListener')),scoped);
+  const check=code=>vm.runInContext(code,scoped),json=code=>JSON.parse(check(`JSON.stringify(${code})`));
+  check(`RAW={model_vendor:{Historical:'Anthropic',Fable:'Anthropic',Other:'OpenAI'}};
+    var session={source:'claude',model:'Historical',models:['Historical','Fable','Other'],nmodels:3,
+      model_days:{Historical:{'2026-10-17':[4,4000,400,0,0,4,1,0,0,0,4]},
+        Fable:{'2026-10-18':[1,100,10,0,0,1,1,0,0,0,1]},
+        Other:{'2026-10-19':[2,200,20,900,0,2,1,0,0,0,2]}},
+      days:{'2026-10-17':[4,4000,400,0,0,4,1,0,0,0,4],
+        '2026-10-18':[1,100,10,0,0,1,1,0,0,0,1],
+        '2026-10-19':[2,200,20,900,0,2,1,0,0,0,2]}};
+    var original=JSON.stringify(session),range18={from:'2026-10-18',to:'2026-10-18'},
+      rangeAll={from:'2026-10-17',to:'2026-10-19'};
+    var selected=clipSession(session,range18);`);
+  assert.deepEqual(json('selected.model_scoped'),{model:'Fable',models:['Fable'],nmodels:1,scope:'selected'});
+  assert.equal(check('selected.in'),100);assert.equal(check('selected.cost'),1);
+  assert.equal(check('selected.model'),'Historical','Historical metadata is retained unchanged');
+  assert.equal(check('JSON.stringify(session)===original'),true,'Scoping does not mutate stored session metadata');
+  assert.strictEqual(check('selected.model_days===session.model_days'),true,'The complete model-day maps remain available');
+  assert.equal(check('sessionModelsInRange(session,rangeAll).model'),'Historical');
+  check(`S.models=new Set(['Fable']);`);
+  assert.deepEqual(json('sessionModelsInRange(session,rangeAll).models'),['Fable']);
+  check(`S.models.clear();S.provs=new Set(['OpenAI']);`);
+  assert.deepEqual(json('sessionModelsInRange(session,rangeAll).models'),['Other']);
+  check(`S.provs.clear();`);
+  assert.deepEqual(json(`sessionModelsInRange(session,{from:'2026-10-18',to:'2026-10-19'}).models`),['Other','Fable'],'Token ranking includes cache tokens in the selected scope');
+  assert.match(check('sessionModelHTML(selected)'),/>Fable<\/span>/);
+  assert.doesNotMatch(check('sessionModelHTML(selected)'),/>Historical</);
+  check(`S.preset='custom';S.from=range18.from;S.to=range18.to;S.search='Fable';`);
+  assert.equal(check('sessionRows({sessions:[selected]}).length'),1,'Search follows the displayed scoped model');
+  check(`S.search='Historical';`);
+  assert.equal(check('sessionRows({sessions:[selected]}).length'),0,'An out-of-range historical model does not satisfy model-name search');
+  check(`var opposite={...selected,model:'A historical',model_scoped:{model:'Zulu',models:['Zulu'],nmodels:1,scope:'selected'}};`);
+  assert.deepEqual(json(`sortSessionRows([opposite,selected],{key:'model',dir:1}).map(s=>s.model_scoped.model)`),['Fable','Zulu'],'Model sorting follows the displayed scoped label');
+  assert.equal(check('opposite.model'),'A historical','Sorting preserves stored historical model names');
+  for(const maps of [{},{'(user)':{'2026-10-18':[0,0,0,0,0,0,1]}},{Fable:{'2026-10-18':Array(15).fill(0)}}]){
+    scoped.emptyMaps=maps;
+    assert.equal(check('sessionModelsInRange({...session,model_days:emptyMaps},range18).model'),'No model usage');
+  }
+  assert.equal(check(`clipSession({...session,model_days:{},days:{},compactions:[{date:'2026-10-18'}]},range18).model_scoped.model`),'No model usage','Compaction-only activity does not inherit a historical model');
+  assert.equal(check(`sessionModelsInRange({...session,model_days:{Fable:{'2026-10-18':[0,0,0,0,0,1]}}},range18).model`),'Fable','An observed reply can identify a model even when token usage is zero');
+  check(`var old={source:'claude',model:'Historical',models:['Historical'],nmodels:1};`);
+  assert.equal(check('sessionModelsInRange(old,range18).scope'),'whole-session');
+  assert.match(check('sessionModelHTML(old)'),/Whole session/);
+  assert.match(check('sessionModelHTML(old)'),/no model-by-day detail/);
+  check(`S.exactOnly=true;var copilot={...session,source:'copilot',exact_model_days:{Exact:{'2026-10-18':[.1,1,2,0,0,1]}},exact_days:{'2026-10-18':[.1,1,2,0,0,1]}};`);
+  assert.equal(check('clipSession(copilot,range18).model_scoped.model'),'Exact');
+  assert.equal(check('clipSession(copilot,range18).in'),1);
+  assert.equal(check('sessionModelsInRange({...copilot,exact_model_days:undefined},range18).scope'),'whole-session','Missing precision maps do not borrow estimated model identities');
+  check(`S.exactOnly=false;var many={...session,model_days:Object.fromEntries(Array.from({length:8},(_,i)=>['Model '+i,{'2026-10-18':[1,100-i,1]}]))};var bounded=clipSession(many,range18);`);
+  assert.equal(check('bounded.model_scoped.models.length'),6);
+  assert.equal(check('bounded.model_scoped.nmodels'),8);
+  assert.match(check('sessionModelHTML(bounded)'),/\+7/,'The +N total must count every scoped model');
+  assert.match(check('sessionModelList(bounded.model_scoped)'),/2 more models/,'A bounded list explicitly discloses omitted names');
+  assert.equal(check('Object.keys(bounded.model_days).length'),8);
+  check(`S.search='Model 7';`);
+  assert.equal(check('sessionRows({sessions:[bounded]}).length'),1,'Search includes scoped models beyond the six names displayed');
+  check(`S.models=new Set(['Model 0']);`);
+  assert.equal(check('sessionRows({sessions:[bounded]}).length'),0,'Search must not include a model excluded by the selected model filter');
+  check(`S.models.clear();S.search='';`);
+  assert.doesNotMatch(check(`sessionModelHTML({...old,model:'<img src=x>',models:['<img src=x>']})`),/<img src=x>/,'Labels and tooltips remain escaped');
+  console.log('Sessions model labels follow date/model/provider/precision scope; zero activity, historical limitations and bounded lists stay honest.');
+}

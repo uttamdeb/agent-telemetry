@@ -1156,7 +1156,25 @@ function sessionRow(s){
 }
 function sessionRows(d){
   const q=S.search.toLowerCase();
-  return d.sessions.map(sessionRow).filter(s=>!q || (s.name+" "+(s.original_title||"")+" "+(s.project||"")+" "+(s.model||"")+" "+(s.branch||"")+" "+(s.id||"")+" "+(s.rename_id||"")).toLowerCase().includes(q));
+  return d.sessions.map(sessionRow).filter(s=>!q || (s.name+" "+(s.original_title||"")+" "+(s.project||"")+" "+sessionModelList(sessionModelsInRange(s,range(),Infinity))+" "+(s.branch||"")+" "+(s.id||"")+" "+(s.rename_id||"")).toLowerCase().includes(q));
+}
+function sessionModelSummary(s){ return s.model_scoped||sessionModelsInRange(s,range()); }
+function sortSessionRows(rows,st=S.sessSort){
+  if(st.key!=="model") return sortRows(rows,st);
+  return rows.slice().sort((a,b)=>st.dir*sessionModelSummary(a).model.localeCompare(sessionModelSummary(b).model));
+}
+function sessionModelList(summary){
+  const names=summary.models.length?summary.models.join(" · "):summary.model;
+  const remaining=summary.nmodels-summary.models.length;
+  return names+(remaining>0?` · ${fmtNum(remaining)} more model${remaining===1?"":"s"}`:"");
+}
+function sessionModelHTML(s){
+  const summary=sessionModelSummary(s), limited=summary.scope==="whole-session";
+  const description=limited?"Whole-session model. This older entry has no model-by-day detail for the current range.":
+    summary.nmodels?"Models with recorded usage in the selected date range and model/provider filters.":"No model usage was recorded in the selected date range and model/provider filters.";
+  return `<span title="${esc(description)}">${esc(summary.model)}</span>`
+    +(summary.nmodels>1?` <span class="dim" title="${esc(sessionModelList(summary))}">+${summary.nmodels-1}</span>`:"")
+    +(limited?'<small class="session-model-scope">Whole session</small>':"");
 }
 function sessionTypeCounts(rows){
   const subagents=rows.filter(s=>s.subagent).length;
@@ -1323,7 +1341,7 @@ function viewSessions(d){
     ["tools","Tools"],
     ["active","Time","estimated active time — consecutive turns no more than 5 minutes apart, so a resumed session's idle days don't count"],
     ["cache","Cache %"]];
-  const sorted=sortRows(rows,S.sessSort).slice(0,400);
+  const sorted=sortSessionRows(rows).slice(0,400);
   const emptyMessage=rows.length?"":`<tr><td colspan="${cols.length}"><div class="session-empty" role="status">
       <p>${S.sessionType==="all"?(S.search?"No sessions match this search.":"No sessions match the current dashboard filters and date range."):
         `No ${S.sessionType==="subagents"?"subagent":"main agent"} sessions match the current dashboard filters, date range and search.`}</p>
@@ -1346,7 +1364,7 @@ function viewSessions(d){
         <div class="session-name-line">${s.clipped?`<span class="dim session-clipped-mark" title="Figures reflect the selected range and model filters.">◔</span>`:""}<button type="button" class="session-open" data-session-open="${i}" aria-label="${esc(ariaName)}" title="${esc(ariaName)}"><span class="session-title-text">${esc(s.name)}</span></button>${renameButton(s)}</div>
         ${sessionMeta?`<div class="session-name-meta">${sessionMeta}</div>`:""}</td>
       <td class="dim">${esc(s.project||"—")}</td>
-      <td>${esc(s.model)}${s.nmodels>1?` <span class="dim" title="${esc((s.models||[]).join(" · "))}">+${s.nmodels-1}</span>`:""}${reasoningEffortLabel(s)}</td>
+      <td>${sessionModelHTML(s)}${reasoningEffortLabel(s)}</td>
       <td class="r">${s.copilot_sdk?.usage_status==="unavailable"?'<span class="dim" title="Token usage was not saved">—</span>':fmtTok(s.tok)}</td><td class="r"><b>${s.copilot_sdk?.usage_status==="unavailable"?'<span class="dim" title="Cost cannot be estimated without token usage">—</span>':fmtUSD(s.cost)}</b></td>
       <td class="r">${fmtNum(s.user)}</td><td class="r">${fmtNum(s.copilot_sdk?s.asst:(s.asst||s.req))}</td>
       <td class="r">${fmtNum(s.tools)}</td>
@@ -1394,7 +1412,8 @@ function openSessionDetails(s,related=false){
     ${sessionDelegationDetails(s)}
     ${row("Device",multiDevice()?esc(deviceName(s.device||RAW.device.id)):null)}
     ${row("Project",esc(s.project||"—"))}
-    ${row("Model",esc((s.models||[s.model]).join(" · ")))}
+    ${row(sessionModelSummary(s).scope==="whole-session"?"Models (whole session)":"Models in selected range",esc(sessionModelList(sessionModelSummary(s))))}
+    ${sessionModelSummary(s).scope==="whole-session"?'<p class="hint">Model detail for this range is unavailable in this older entry. The model names cover the whole session.</p>':""}
     ${reasoningEffortDetails(s)}
     ${row("Git branch",s.branch?esc(s.branch):null)}
     ${row("Entrypoint",s.entry?esc(s.entry):null)}
