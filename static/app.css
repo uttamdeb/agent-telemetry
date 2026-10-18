@@ -696,3 +696,44 @@ code.cmd{display:block;background:var(--surface-2);border:1px solid var(--border
   border-radius:8px;padding:8px 11px;margin:0 0 10px}
 .modal-note.bad{border-left-color:var(--bad)}
 .modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}
+
+/* Change contributions use signed text as well as neutral magnitude bars. */
+.change-head{flex-wrap:wrap}
+.change-seg{flex-wrap:wrap;max-width:100%}
+.change-periods,.change-note{color:var(--text-3);font-size:12px;margin:0 0 10px}
+.change-note{color:var(--text-2)}
+.change-table table{width:100%;min-width:440px}
+.change-table td:last-child{position:relative;isolation:isolate;min-width:105px}
+.change-bar{position:absolute;inset:22% 0 22% auto;background:var(--surface-3);border-radius:3px;z-index:-1}
+.change-link{font:inherit;color:var(--text);background:none;border:0;padding:3px 0;cursor:pointer;text-align:inherit}
+.change-link:hover{text-decoration:underline}
+.change-link:focus-visible{outline:2px solid var(--text-2);outline-offset:3px}
+.change-method,.change-all{margin-top:12px;color:var(--text-2);font-size:12px}
+.change-method summary,.change-all summary{cursor:pointer}
+.change-method p{max-width:78ch;margin:8px 0;line-height:1.6}
+.change-table tfoot th,.change-table tfoot td{border-top:1px solid var(--border);font-weight:600}
+.session-timeline{margin-top:24px;border-top:1px solid var(--border);padding-top:16px}
+.session-timeline h3{font-size:14px;margin:0 0 12px}
+.session-timeline .hint{font-size:12px;line-height:1.5;color:var(--text-3);margin:8px 0}
+.session-timeline-table{max-width:100%;overflow:auto}
+.session-timeline-table table{width:100%;min-width:360px;font-size:12px}
+.session-timeline-table caption{text-align:left;color:var(--text-2);padding-bottom:8px}
+.session-timeline-events{padding:0;list-style:none;max-height:480px;overflow:auto}
+.session-timeline-events li{display:grid;grid-template-columns:120px minmax(0,1fr);gap:12px;padding:10px 0;border-top:1px solid var(--border);font-size:12px}
+.session-timeline-events time{color:var(--text-3)}
+.session-timeline-events strong,.session-timeline-events li span{display:block;overflow-wrap:anywhere}
+.session-timeline-events strong{font-weight:550}
+.session-timeline-events li span{color:var(--text-3);margin-top:4px}
+.maintenance-row,.maintenance-backup{padding:12px 0;border-bottom:1px solid var(--border);font-size:12px}
+.maintenance-row-head,.maintenance-backup{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.maintenance-row-head{flex-wrap:wrap}
+.maintenance-row-head span,.maintenance-summary{color:var(--text-3)}
+.maintenance-backup>div{min-width:0;overflow-wrap:anywhere}
+.maintenance-backup .btn{flex-shrink:0}
+.maintenance-issues{margin-top:12px;font-size:12px;color:var(--text-2)}
+.maintenance-issues summary{cursor:pointer}
+.maintenance-issues li{margin:10px 0;line-height:1.5}
+@media(max-width:520px){
+  .change-seg{width:100%;margin-top:8px}
+  .session-timeline-events li{grid-template-columns:1fr;gap:4px}
+}

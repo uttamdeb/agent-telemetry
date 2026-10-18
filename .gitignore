@@ -2,6 +2,7 @@
 # project names, timestamps) and is regenerated locally on first run.
 .usage_cache.json
 .usage_cache.json.tmp
+.usage-backups/
 # Your devices: this install's id and pairing codes, and the usage copied from
 # the other machines you connected
 .peers.json

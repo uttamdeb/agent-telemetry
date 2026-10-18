@@ -6,6 +6,7 @@ const context=vm.createContext({document,console,URLSearchParams,Set,Date,locati
   getComputedStyle:()=>({getPropertyValue:()=>"#000"})});
 vm.runInContext(fs.readFileSync(path.join(root,'static/core.js'),'utf8'),context);
 vm.runInContext(fs.readFileSync(path.join(root,'static/charts.js'),'utf8'),context);
+vm.runInContext(fs.readFileSync(path.join(root,'static/insights.js'),'utf8'),context);
 const views=fs.readFileSync(path.join(root,'static/views.js'),'utf8');
 vm.runInContext(views.slice(0,views.indexOf('document.getElementById("tabs").addEventListener')),context);
 const run=code=>vm.runInContext(code,context);
@@ -70,7 +71,7 @@ assert.doesNotMatch(run(`accountEntryHTML({source:'codex',profile:'<img src=x on
     document:{addEventListener(){},getElementById:node,
       querySelector:selector=>selector==='.tv[data-tv="monthlyRhythm"]'?node('monthToggle'):null},
     getComputedStyle:()=>({getPropertyValue:()=>"#000"})});
-  for(const file of ['static/core.js','static/charts.js'])
+  for(const file of ['static/core.js','static/charts.js','static/insights.js'])
     vm.runInContext(fs.readFileSync(path.join(root,file),'utf8'),overview);
   vm.runInContext(views.slice(0,views.indexOf('document.getElementById("tabs").addEventListener')),overview);
   const check=code=>vm.runInContext(code,overview);
@@ -154,6 +155,7 @@ assert.ok(costShell.indexOf('accountLimitsCard')>costShell.indexOf('tv-dailyCost
     document:{querySelectorAll:()=>[],getElementById:id=>id==='v-cost'?host:id==='filters'?filtersNode:node},
     syncRangeUI(){},syncMetricUI(){},buildFilterPanels(){},renderPills(){},renderSidebarDevices(){},filtersToURL(){},
     runFinders:()=>[],slice:()=>({recs:[],sessions:[]}),viewCost(){costRenders++;}});
+  emptyCost.hasPrev=()=>false;
   vm.runInContext(views.slice(views.indexOf('function activeQuotaSources('),views.indexOf('function quotaEntries(')),emptyCost);
   vm.runInContext(views.slice(views.indexOf('const VIEW_HTML={};'),views.indexOf('function syncSearchBoxes(')),emptyCost);
   vm.runInContext('renderAll()',emptyCost);

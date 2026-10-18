@@ -45,7 +45,7 @@ def stage(source, destination, archive, version):
         "commit": commit, "packaging_commit": packaging_commit, "python": "3.13.16", "python_url": PYTHON_URL,
         "python_sha256": PYTHON_SHA256}, indent=2) + "\n", encoding="utf-8")
     assert (runtime / "pythonw.exe").is_file()
-    forbidden = {".usage_cache.json", ".peers.json", ".peers", "server.log"}
+    forbidden = {".usage_cache.json", ".usage-backups", ".peers.json", ".peers", "server.log"}
     if any(path.name in forbidden for path in destination.rglob("*")):
         raise ValueError("Personal telemetry found in release payload.")
 

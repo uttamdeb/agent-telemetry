@@ -2,6 +2,7 @@
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -26,6 +27,25 @@ REGISTER = module("windows_release_register", ROOT / "windows" / "installer" / "
 
 
 class PackagingTests(unittest.TestCase):
+    @unittest.skipIf(os.name == "nt", "macOS packaging uses a POSIX shell")
+    def test_macos_packaging_guard_refuses_private_ledger_backups(self):
+        script = (ROOT / "macos/AgentTelemetryMac/Scripts/package-app.sh").read_text()
+        start = script.index('if find "$AT_APP_PATH/Contents/Resources"')
+        guard = script[start:script.index("\nfi", start) + len("\nfi")]
+        with tempfile.TemporaryDirectory() as directory:
+            app = Path(directory) / "fixture.app"
+            resources = app / "Contents" / "Resources"
+            resources.mkdir(parents=True)
+            environment = dict(os.environ, AT_APP_PATH=str(app))
+            result = subprocess.run(["bash", "-c", guard], env=environment, capture_output=True)
+            self.assertEqual(result.returncode, 0)
+            backups = resources / ".usage-backups"
+            backups.mkdir()
+            (backups / "fixture.json").write_bytes(b"private synthetic history")
+            result = subprocess.run(["bash", "-c", guard], env=environment, capture_output=True)
+            self.assertEqual(result.returncode, 1)
+            self.assertIn(b"Refusing to package user telemetry", result.stderr)
+
     def test_source_installer_cannot_remove_a_bundled_runtime_or_uninstaller(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -61,12 +81,14 @@ class PackagingTests(unittest.TestCase):
             self.assertTrue((payload / "windows" / "register_install.py").is_file())
             self.assertEqual((payload / "session_names.py").read_bytes(), (ROOT / "session_names.py").read_bytes())
             self.assertEqual((payload / "accounts.py").read_bytes(), (ROOT / "accounts.py").read_bytes())
+            for name in ("ledger_backups.py", "session_timeline.py", "diagnostics.py"):
+                self.assertEqual((payload / name).read_bytes(), (ROOT / name).read_bytes())
             self.assertEqual((payload / "local_servers.py").read_bytes(), (ROOT / "local_servers.py").read_bytes())
             self.assertEqual((payload / "local_servers_windows.py").read_bytes(), (ROOT / "local_servers_windows.py").read_bytes())
             for icon in (ROOT / "static" / "tool-icons").glob("*.svg"):
                 self.assertEqual((payload / "static" / "tool-icons" / icon.name).read_bytes(), icon.read_bytes())
             self.assertFalse(any(
-                p.name in {".usage_cache.json", ".peers.json", ".peers", "server.log", ".local_servers.json"}
+                p.name in {".usage-backups", ".usage_cache.json", ".peers.json", ".peers", "server.log", ".local_servers.json"}
                 or p.name.startswith(".local_servers.")
                 for p in payload.rglob("*")
             ))

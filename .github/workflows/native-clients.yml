@@ -19,6 +19,9 @@ jobs:
         with:
           node-version: '22'
       - run: node tests/test_frontend.js
+      - run: node tests/test_insights_frontend.js
+      - run: node tests/test_timeline_frontend.js
+      - run: node tests/test_maintenance_frontend.js
       - run: node tests/test_local_servers_frontend.js
       - if: runner.os == 'Windows'
         run: python windows/tray.py --self-test

@@ -22,6 +22,9 @@ import parser as P
 import native as N
 import session_names as SN
 import accounts as A
+import ledger_backups as LB
+import diagnostics as DG
+import session_timeline as ST
 from local_servers import LocalServerInventory
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -52,6 +55,8 @@ _lock = threading.Lock()
 _state = {"files": {}, "version": CACHE_VERSION}
 _cache_error = {"v": None}
 _meta = {"last_refresh": 0.0, "last_duration": 0.0, "files": 0, "building": False}
+_backup_day = {"key": None}
+_restore_tickets = {}
 _refresh_sync_lock = threading.Lock()
 _sync_manual = 0
 _sync_start = uuid.uuid4().hex
@@ -214,6 +219,8 @@ def update_action(action):
         raise ValueError("This checkout has local changes; commit or stash them, then update.")
     if ahead:
         raise ValueError(f"This checkout has {ahead} commit(s) not on {up}; update it with git.")
+    with _refresh_lock:
+        _preserve_ledger_locked()
     try:
         _git("merge", "--ff-only", "--quiet", up, timeout=30)
     except RuntimeError as e:
@@ -299,12 +306,14 @@ def save_cache():
     if _cache_error["v"]:
         return False
     try:
+        _scheduled_backup_locked()
         tmp = CACHE_PATH + ".tmp"
         with open(tmp, "w") as f:
             json.dump(_state, f)
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp, CACHE_PATH)
+        _scheduled_backup_locked()
         _meta.pop("cache_error", None)
         return True
     except Exception as e:
@@ -323,7 +332,15 @@ def _refresh_locked(verbose=False):
     t0 = time.time()
     _meta["building"] = True
     proj_map = P._copilot_project_map()
-    found = P.discover()
+    try:
+        found = P.discover()
+    except Exception as error:
+        DG.begin_scan([])
+        DG.record_failure("discovery", "", error)
+        DG.finish_scan()
+        _meta["building"] = False
+        raise
+    DG.begin_scan(source for source, _, _ in found)
     files = _state["files"]
     seen = set()
     changed = False
@@ -344,10 +361,12 @@ def _refresh_locked(verbose=False):
             elif mark != _parse_mark(updated):
                 changed = _grew["v"] = True
             files[path] = updated
+            DG.record_success(source, path)
         except Exception as e:
             # A failed full reparse must not replace the last valid ledger entry
             # with an empty aggregate or advance its signature. Retry next time.
             sys.stderr.write(f"[parse:{source}] {path}: {type(e).__name__}: {e}\n")
+            DG.record_failure(source, path, e)
         if verbose and (i % 5 == 0 or i == len(found) - 1):
             sys.stderr.write(f"\r[scan] {i+1}/{len(found)} files...")
             sys.stderr.flush()
@@ -366,6 +385,8 @@ def _refresh_locked(verbose=False):
         sys.stderr.write("\n")
     _meta.update(last_refresh=time.time(), last_duration=time.time() - t0,
                  files=len(files), building=False)
+    DG.finish_scan()
+    _meta["parse_errors"] = DG.get_scan_report()["errors"]
     if changed:
         _gen["v"] += 1                # a connected device's next pull gets the new data
     # The cache is ~1MB; rewriting it every interval when nothing changed is a
@@ -376,6 +397,157 @@ def _refresh_locked(verbose=False):
         if save_cache():
             _dirty["v"] = _grew["v"] = False
             _grew["saved"] = time.time()
+
+
+def _scheduled_backup_locked():
+    """At most one on-disk snapshot per UTC day, without delaying normal saves on failure."""
+    key = (CACHE_PATH, time.strftime("%Y-%m-%d", time.gmtime()))
+    if _backup_day["key"] == key or not os.path.isfile(CACHE_PATH):
+        return
+    try:
+        item = LB.create_backup(CACHE_PATH, expected_version=CACHE_VERSION)
+        if item is None or item.get("valid"):
+            _backup_day["key"] = key
+        _meta.pop("backup_error", None)
+    except (OSError, ValueError):
+        _meta["backup_error"] = "Automatic backup failed. Check free space and permissions in Settings."
+        sys.stderr.write("[backup] automatic backup failed; normal ledger saving continues\n")
+
+
+def _preserve_ledger_locked():
+    """A failed safeguard blocks a destructive action, never the parser's normal saves."""
+    if not _cache_error["v"] and not save_cache():
+        raise ValueError("The current ledger could not be saved. Retry after checking free space and permissions.")
+    try:
+        return LB.create_backup(CACHE_PATH, reason="manual", force=True, expected_version=CACHE_VERSION)
+    except (OSError, ValueError) as error:
+        raise ValueError("A safety backup could not be created. Check free space and permissions before retrying.") from error
+
+
+def _ledger_summary_locked():
+    files = _state["files"]
+    return {"files": len(files), "sessions": sum(len(a.get("sessions") or []) for a in files.values()),
+            "archived": sum(bool(a.get("archived")) for a in files.values())}
+
+
+def backup_status():
+    with _refresh_lock:
+        try:
+            return {"backups": LB.list_backups(CACHE_PATH, expected_version=CACHE_VERSION),
+                    "error": _meta.get("backup_error")}
+        except (OSError, ValueError):
+            return {"backups": [], "error": "Backups could not be read. Check directory permissions."}
+
+
+def backup_action(body):
+    with _refresh_lock:
+        action = body.get("action")
+        if action == "create":
+            item = _preserve_ledger_locked()
+            if item is None:
+                raise ValueError("There is no saved ledger to back up yet.")
+            return {"ok": True, "backup": item}
+        if action == "preview":
+            if not _cache_error["v"] and not save_cache():
+                raise ValueError("The current ledger could not be saved. Resolve the save error before restoring.")
+            preview = LB.preview_restore(CACHE_PATH, body.get("id"), expected_version=CACHE_VERSION)
+            now = time.monotonic()
+            for key in list(_restore_tickets):
+                if _restore_tickets[key]["expires"] <= now:
+                    del _restore_tickets[key]
+            if len(_restore_tickets) >= 20:
+                _restore_tickets.pop(next(iter(_restore_tickets)))
+            ticket = secrets.token_urlsafe(32)
+            _restore_tickets[ticket] = {"expires": now + 300, "generation": _gen["v"], "preview": preview}
+            summary = preview["summary"]
+            metadata = next((b for b in LB.list_backups(CACHE_PATH, expected_version=CACHE_VERSION)
+                             if b["id"] == preview["backup_id"]), {})
+            return {"ticket": ticket, "backup": dict(metadata, sessions=summary["sessions"]),
+                    "current": _ledger_summary_locked(),
+                    "warning": "Restoring replaces the current ledger, including archived history. A safety copy of the current ledger is saved first."}
+        if action != "restore":
+            raise ValueError("Choose create, preview or restore.")
+        if body.get("confirmed") is not True:
+            raise ValueError("Review and confirm the restore preview first.")
+        ticket = body.get("ticket")
+        if not isinstance(ticket, str):
+            raise ValueError("Review a fresh restore preview first.")
+        saved = _restore_tickets.pop(ticket, None)
+        if saved is None or saved["expires"] <= time.monotonic():
+            raise ValueError("The restore preview expired or was already used. Review a fresh preview.")
+        if saved["generation"] != _gen["v"]:
+            raise ValueError("Usage changed after the preview. Review a fresh preview before restoring.")
+        preview = saved["preview"]
+        LB.restore_backup(CACHE_PATH, preview["backup_id"], preview["sha256"],
+                          preview["current_sha256"], expected_version=CACHE_VERSION)
+        # The validated restore is an explicit request to retain all its entries,
+        # including older live entries. Routine load_cache version migration can
+        # intentionally drop old live entries, so do not route a restore through it.
+        with open(CACHE_PATH, encoding="utf-8") as stream:
+            restored = json.load(stream)
+        _state.clear()
+        _state.update(files=restored["files"], version=CACHE_VERSION)
+        _cache_error["v"] = None
+        _meta.pop("cache_error", None)
+        _gen["v"] += 1
+        _dirty["v"] = True
+        _grew["v"] = False
+        _meta.update(files=len(_state["files"]), building=False)
+        _restore_tickets.clear()
+        _peer["export"] = None
+    notify_refresh()
+    return {"ok": True}
+
+
+def build_diagnostics():
+    with _refresh_lock:
+        report = DG.get_scan_report()
+        present = {row["source"] for row in report["sources"]}
+        for source in sorted({a.get("source") for a in _state["files"].values() if a.get("source")} - present):
+            report["sources"].append({"source": source, "status": "retained_only", "discovered": 0,
+                                      "read": 0, "errors": 0, "last_success": None,
+                                      "hint": "Only retained history is available. New figures need readable source logs."})
+        if _cache_error["v"]:
+            report["ledger"] = {"status": "Unreadable", "hint": "Original preserved. Restore a valid backup below."}
+        elif _meta.get("cache_error"):
+            report["ledger"] = {"status": "Save failed", "hint": "Free disk space and check permissions, then refresh. In-memory figures are retained."}
+        else:
+            report["ledger"] = {"status": "Available"}
+        if _meta.get("backup_error"):
+            report["backup_error"] = _meta["backup_error"]
+        missing = set()
+        for aggregate in _state["files"].values():
+            for _, bucket in _record_buckets(aggregate):
+                for key, row in bucket.items():
+                    date, model = key.split("\t", 1)
+                    if model != "(user)" and any(row.get(f) for f in ("in", "out", "cr", "cc")) and not any(P.price_of(model, date)):
+                        if aggregate["source"] not in ("opencode", "openclaw") or not row.get("cost"):
+                            missing.add(model)
+        report["missing_prices"] = sorted(missing)[:100]
+        return report
+
+
+def build_session_timeline(device, source, session_id, date_from=None, date_to=None):
+    """Resolve a full native id from this ledger, never a caller-supplied filename."""
+    if source not in ("claude", "codex", "claude-desktop") or not isinstance(session_id, str) or not 0 < len(session_id) <= 512:
+        raise ValueError("Select a supported session with its full native identity.")
+    if device != _local_id():
+        return {"available": False, "events": [], "truncated": False, "detail": "Source events are available on the original device."}
+    with _refresh_lock:
+        selected = None
+        for aggregate in _state["files"].values():
+            if aggregate.get("source") != source or aggregate.get("archived"):
+                continue
+            if any(SN.identity(aggregate, s) == session_id for s in aggregate.get("sessions", [])):
+                selected = (aggregate.get("path", ""), aggregate.get("size"), aggregate.get("mtime"))
+                break
+        if selected is None:
+            return {"available": False, "events": [], "truncated": False, "detail": "The source log is unavailable; retained daily detail is unchanged."}
+        path = selected[0]
+        known = {(s, os.path.realpath(p)) for s, p, _ in P.discover()}
+        if (source, os.path.realpath(path)) not in known:
+            return {"available": False, "events": [], "truncated": False, "detail": "The original source log could not be verified."}
+    return ST.timeline(source, path, session_id, date_from=date_from, date_to=date_to)
 
 
 # ---------------------------------------------------------------------------
@@ -1356,6 +1528,7 @@ def _cache_action_locked(action):
     """
     if action not in ("rebuild", "delete"):
         raise ValueError("action must be 'rebuild' or 'delete'")
+    _preserve_ledger_locked()
     removed = False
     if os.path.exists(CACHE_PATH):
         try:
@@ -2174,6 +2347,21 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, json.dumps(refresh_sync()))
         elif route == "/api/accounts":
             self._send(200, json.dumps(build_account_payload()))
+        elif route == "/api/backups":
+            self._send(200, json.dumps(backup_status()))
+        elif route == "/api/diagnostics":
+            self._send(200, json.dumps(build_diagnostics()))
+        elif route == "/api/session-timeline":
+            query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+            try:
+                result = build_session_timeline(*(query.get(k, [""])[0] for k in ("device", "source", "id")),
+                                                date_from=query.get("from", [None])[0], date_to=query.get("to", [None])[0])
+                self._send(200, json.dumps(result))
+            except ValueError as error:
+                self._send(400, json.dumps({"error": str(error)}))
+            except OSError:
+                self._send(200, json.dumps({"available": False, "events": [], "truncated": False,
+                                           "detail": "The source log could not be read."}))
         elif route == "/api/summary":
             try:
                 self._send(200, client_snapshot()[1])
@@ -2277,7 +2465,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/local-servers/start",
             "/api/local-servers/restart",
         }
-        if route in ("/api/settings", "/api/cache", "/api/update", "/api/devices", "/api/refresh", "/api/native", "/api/shutdown", "/api/sync", "/api/session-name", "/api/accounts") or route in local_server_routes:
+        if route in ("/api/settings", "/api/cache", "/api/update", "/api/devices", "/api/refresh", "/api/native", "/api/shutdown", "/api/sync", "/api/session-name", "/api/accounts", "/api/backups") or route in local_server_routes:
             if route in local_server_routes and not self._loopback_client():
                 self._send(403, json.dumps({"error": "local servers can be managed only on this machine"}))
                 return
@@ -2303,6 +2491,11 @@ class Handler(BaseHTTPRequestHandler):
                 if route == "/api/accounts":
                     A.refresh_account(body.get("source"), body.get("confirmed"))
                     result = build_account_payload()
+                elif route == "/api/backups":
+                    try:
+                        result = backup_action(body)
+                    except OSError as error:
+                        raise ValueError("Backup operation failed. Check free space and directory permissions, then retry.") from error
                 elif route == "/api/session-name":
                     result = set_session_name(body)
                 elif route == "/api/native":

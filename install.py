@@ -10,11 +10,13 @@ import tempfile
 import native
 
 ROOT = Path(__file__).resolve().parent
-BACKEND_FILES = ("dashboard.py", "parser.py", "native.py", "session_names.py", "accounts.py", "local_servers.py", "local_servers_windows.py", "index.html", "chart.umd.min.js",
+BACKEND_FILES = ("dashboard.py", "parser.py", "native.py", "session_names.py", "accounts.py",
+                 "local_servers.py", "local_servers_windows.py", "ledger_backups.py",
+                 "session_timeline.py", "diagnostics.py", "index.html", "chart.umd.min.js",
                  "manifest.json", "sw.js", "LICENSE")
 WINDOWS_FILES = ("tray.py", "monitor.py", "win32.py", "popover.py", "presentation.py")
 WINDOWS_ASSETS = ("AgentTelemetry.ico", "TrayIcon.ico")
-PRIVATE_TELEMETRY_NAMES = {".usage_cache.json", ".peers.json", ".peers", "server.log"}
+PRIVATE_TELEMETRY_NAMES = {".usage-backups", ".usage_cache.json", ".peers.json", ".peers", "server.log"}
 
 
 def _is_private_telemetry(path):

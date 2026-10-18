@@ -306,6 +306,41 @@ search box, and `#cost`, `#sessions`… for the tab. For example
 `/?range=7d&metric=cost&tools=claude&projects=sims#cost`. Only what differs from the default
 is written, and changing a filter never adds a browser-history entry.
 
+**What changed?** — Overview and Cost compare the selected range with the preceding
+equal-length range. Switch between projects, models, tools and (for tokens/cost)
+token types to see signed contributions, including decreases and categories that
+disappeared. Each breakdown reconciles independently to the total change. Click a
+category for current-period sessions or its previous value for earlier sessions.
+All usage filters apply; All time has no comparison. Missing prior observations and
+an unfinished current period are labeled. Contributions identify where usage changed,
+not a causal explanation. Cost remains an API-equivalent estimate.
+
+**Session timeline** — the session drawer combines daily retained usage with recorded
+compaction markers and local Claude/Codex source events: model requests, tool calls,
+user turns and recorded subagent starts. No prompts or tool arguments are returned.
+The read is bounded to the first 64 MiB and 400 events in the selected date range;
+truncation is explicit. Date filters use local dates; model filters apply to events
+with model attribution. Archived/remote sessions and unsupported formats retain
+daily detail where available; missing timestamps or history are not reconstructed.
+
+**Backups and troubleshooting** — Settings shows detected-source scan results,
+actionable parsing errors, ledger failures and models missing prices. An inactive
+tool is not reported as stale merely because it has no recent activity. Backups are
+private copies of the ledger in `.usage-backups/` beside it (including with
+`--data-dir`), excluded from device sharing and installation payloads. A saved-ledger
+snapshot is kept on the first save each UTC day; updates and cache resets require a
+safety copy first. Retention keeps 7 daily snapshots and up to 5 each of manual,
+pre-restore and corrupt-file recovery copies. A failed daily backup does not stop
+normal ledger saving and is reported in Settings.
+
+Restore shows stored-session counts and requires a one-use, five-minute confirmation
+ticket. Changed backups, disk contents or newly parsed usage invalidate the preview.
+The current ledger is preserved before replacement, including unreadable bytes as
+a non-restorable recovery copy. Backups cover aggregates, not original transcripts,
+device pairing settings or native preferences; local backups do not protect against
+loss of the drive. Use `python tests/preview_features.py --port 8896` for an isolated
+preview with invented data.
+
 **Version and updates** — the sidebar footer shows the running version. *Check for updates*
 asks GitHub (the only time the dashboard goes online, and only when you click); *Update*
 fast-forwards your checkout and restarts the server. It refuses if you have local edits or

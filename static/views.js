@@ -512,6 +512,7 @@ async function refreshAccount(source){
 }
 
 function viewOverview(d){
+  renderUsageChange("overview",d);
   const pd = hasPrev() ? slice(prevRange()) : null;
   const days = dateList(d.r), val = metricOf(), fmt = fmtOf();
   const t = totals(d.recs), pt = pd ? totals(pd.recs) : null;
@@ -672,6 +673,7 @@ function renderTokenMix(d){
 /* ---------------- COST ---------------- */
 function viewCost(d){
   renderAccountLimits();
+  renderUsageChange("cost",d);
   const pd = hasPrev() ? slice(prevRange()) : null;
   const t = totals(d.recs), pt = pd ? totals(pd.recs) : null;
   const days = dateList(d.r), active = Math.max(1, t.days.size);
@@ -1291,8 +1293,10 @@ function openSession(i){
     ${row("Subagent tokens",s.side?fmtNum(s.side):null)}
     ${row("Log size",s.bytes?fmtBytes(s.bytes):null)}
     ${compactionDetails(s)}
+    ${sessionTimelineHTML(s)}
     ${s.archived?'<div class="warnbar">This log has been pruned from disk; its numbers are kept from an earlier scan.</div>':""}
   `);
+  loadSessionTimeline(s,document.querySelector('#drawerBody .session-timeline-detail'));
 }
 
 function compactionDetails(s){
@@ -1642,6 +1646,8 @@ function renderSettings(cfg){
     <h2 class="stg-h stg-sec">Your devices</h2>
     <div id="devBox"><div class="stg-hint">Loading…</div></div>
 
+    <div id="maintenanceSettings"></div>
+
     <h2 class="stg-h stg-sec">Analytics cache</h2>
     <div class="stg-note">This dashboard's own parsed data &mdash;
       <b>${fmtBytes(cfg.cache_bytes||0)}</b> across ${fmtNum(cfg.cache_files||0)} files:
@@ -1661,6 +1667,7 @@ function renderSettings(cfg){
     <div class="stg-path"><b>Cache file</b><span>${esc(cfg.cache_path||"")}</span></div>
   `);
   loadNativeSettings();
+  renderMaintenance();
   nativeSettingsTimer=setInterval(()=>{
     if(!document.getElementById("nativeAppBox")){ clearInterval(nativeSettingsTimer); return; }
     // Do not replace controls or their errors while a user is operating them.
@@ -2624,7 +2631,8 @@ function renderAll(){
   try{ nFound = runFinders(d).length; }catch(e){}
   document.getElementById("optCount").textContent = nFound || "";
   const empty = !d.recs.length && !d.sessions.length;
-  if(empty && S.view!=="storage" && !(S.view==="cost"&&activeQuotaSources().length)){
+  const priorUsage = hasPrev() && ["overview","cost"].includes(S.view) && filteredRecords(prevRange()).length;
+  if(empty && !priorUsage && S.view!=="storage" && !(S.view==="cost"&&activeQuotaSources().length)){
     host.innerHTML = `<div class="grid"><div class="card col-12"><div class="empty">
       No activity for this period and filter combination.</div></div></div>`;
     host.dataset.emptied = "1";
@@ -2685,6 +2693,8 @@ async function load(){
     document.getElementById("coverage").textContent = `${fmtNum(RAW.meta.files)} logs · ${lo} → ${hi}`
       + (RAW.openclaw_undecoded ? ` · ${fmtNum(RAW.openclaw_undecoded)} OpenClaw events unread — install zstd` : "");
     if(RAW.cache_error) document.getElementById("coverage").textContent += " · " + RAW.cache_error;
+    if(RAW.meta.parse_errors) document.getElementById("coverage").textContent += ` · ${fmtNum(RAW.meta.parse_errors)} log errors — see Settings`;
+    if(RAW.meta.backup_error) document.getElementById("coverage").textContent += " · backup failed — see Settings";
     renderVersion();
     // a device that was disconnected can't stay selected, or it would filter out everything
     for(const id of [...S.devs]) if(!devices().some(v=>v.id===id)) S.devs.delete(id);

@@ -85,6 +85,11 @@ fi
 if [[ -f "$AT_REPO_ROOT/accounts.py" ]]; then
   cp "$AT_REPO_ROOT/accounts.py" "$AT_BACKEND_DIR/"
 fi
+for AT_MODULE in ledger_backups.py session_timeline.py diagnostics.py; do
+  if [[ -f "$AT_REPO_ROOT/$AT_MODULE" ]]; then
+    cp "$AT_REPO_ROOT/$AT_MODULE" "$AT_BACKEND_DIR/"
+  fi
+done
 ditto "$AT_REPO_ROOT/static" "$AT_BACKEND_DIR/static"
 
 if [[ -n "${AGENT_TELEMETRY_PYTHON_ARCHIVE:-}" ]]; then
@@ -114,7 +119,7 @@ EOF
 
 "$AT_APP_PATH/Contents/Resources/AgentTelemetryRuntime/bin/python3" --version
 
-if find "$AT_APP_PATH/Contents/Resources" \( -name .usage_cache.json -o -name server.log \
+if find "$AT_APP_PATH/Contents/Resources" \( -name .usage_cache.json -o -name .usage-backups -o -name server.log \
      -o -name .peers.json -o -name .peers -o -name .local_servers.json \
      -o -name '.local_servers.*' \) -print -quit | grep -q .; then
   echo "Refusing to package user telemetry data." >&2
