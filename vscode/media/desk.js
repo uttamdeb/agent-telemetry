@@ -293,6 +293,7 @@
     if (session.usage_in_parent) nodes.push(el('p', 'detail-note', 'This child’s recorded usage is already included in its Copilot parent and the overall totals. Do not add it again.'));
     if (session.usage_status === 'unavailable') nodes.push(el('p', 'detail-note', 'Token usage is unavailable in the recorded data. This is not a known zero.'));
     if (session.usage_status === 'partial') nodes.push(el('p', 'detail-note', 'Recorded usage is incomplete; these figures are a lower bound.'));
+    if (session.source === 'copilot' && session.usage_status !== 'unavailable') nodes.push(el('p', 'detail-note', 'Cache figures reflect Copilot’s saved report. Custom-model bridges can record zero when provider cache usage is unavailable. Zero does not prove there were no cache hits; estimated cost may overstate the provider’s charge.'));
     const scope = state.snapshot && state.snapshot.from !== state.snapshot.to ? shortDate(state.snapshot.from) + ' — ' + shortDate(state.snapshot.to) : RANGE_LABELS[state.range];
     nodes.push(el('p', 'detail-scope', 'Usage & compactions: ' + scope + ' · ' + (state.scope === 'all' ? 'all local projects' : 'this workspace') + '. Effort reflects recorded metadata, never your current settings.'));
     if (session.detail_limited) nodes.push(el('p', 'detail-note', 'Some historical detail is unavailable. Missing metadata has not been reconstructed from other sessions.'));

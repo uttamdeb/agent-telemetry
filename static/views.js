@@ -1266,6 +1266,7 @@ function sdkUsageDetails(s){
   const children=Array.isArray(sdk.agents)?sdk.agents.filter(a=>a&&typeof a==="object"&&!Array.isArray(a)):[];
   const delegation=children.length?`<h3>Recorded Copilot subagents</h3><p class="hint">Whole-session identities. Their recorded usage is already included in this parent; Agent desk shows the scoped child breakdown.</p>${children.map(a=>`<div class="kv"><span class="k">${esc(a.title||"Copilot subagent")}</span><span class="v">${esc(a.model||"Unknown")}</span></div>`).join("")}`:"";
   return `<div class="kv"><span class="k">Usage records</span><span class="v">${esc((sdk.usage_sources||[]).map(x=>sources[x]||"Saved SDK records").join(" · ")||"Not available")}</span></div>
+    <p class="hint">Cache figures reflect Copilot's saved report. Custom-model bridges can record zero when provider cache usage is unavailable. Zero does not prove there were no cache hits; estimated cost may overstate the provider's charge.</p>
     ${note?`<div class="warnbar">${esc(note)}</div>`:""}${totals}${delegation}`;
 }
 function sdkField(s,key,value){
