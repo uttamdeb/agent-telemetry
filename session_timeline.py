@@ -10,10 +10,16 @@ import json
 import os
 import re
 
-from parser import (
-    FAST_SUFFIX, US_SUFFIX, _CODEX_SKIP, _buckets, _first_text, _from_iso,
-    _is_subagent_path, normalize_claude, normalize_codex,
-)
+if __package__:
+    from .parser import (
+        FAST_SUFFIX, US_SUFFIX, _CODEX_SKIP, _buckets, _first_text, _from_iso,
+        _is_subagent_path, normalize_claude, normalize_codex,
+    )
+else:
+    from parser import (
+        FAST_SUFFIX, US_SUFFIX, _CODEX_SKIP, _buckets, _first_text, _from_iso,
+        _is_subagent_path, normalize_claude, normalize_codex,
+    )
 
 
 MAX_BYTES = 64 * 1024 * 1024

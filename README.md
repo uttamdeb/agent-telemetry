@@ -54,13 +54,32 @@ Security → Open Anyway**; Windows SmartScreen may require **More info → Run 
 
 ## Quick start
 
+Install with Python 3.9+:
+
+```bash
+python -m pip install agenttelemetry-app
+agenttelemetry
+```
+
+Or, with [uv](https://docs.astral.sh/uv/getting-started/installation/) installed:
+
+```bash
+uvx agenttelemetry-app
+```
+
+Then open **http://127.0.0.1:7878**. The Python package starts the local browser dashboard;
+use the [app downloads](#download-the-app) for the menu bar or system tray companion.
+See [Python package details](docs/python-package.md) for its per-user data location.
+
+To run from a source checkout with Python 3.8+:
+
 ```bash
 git clone https://github.com/uttamdeb/agent-telemetry.git
 cd agent-telemetry
 python3 dashboard.py
 ```
 
-Then open **http://127.0.0.1:7878**. That's it — no `pip install`, no setup.
+Then open **http://127.0.0.1:7878**. The source checkout needs no package installation.
 
 > First run parses your local logs (can take ~30–60s if you have large Codex logs), writes
 > a cache, and is instant thereafter. The page auto-refreshes every ~15s, so a session

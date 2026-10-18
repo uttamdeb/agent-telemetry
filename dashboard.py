@@ -18,14 +18,25 @@ import os, re, sys, json, time, glob, threading, argparse, shutil, mimetypes, pl
 import gzip, hmac, io, ipaddress, secrets, socket, uuid, signal, urllib.parse, urllib.request, urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-import parser as P
-import native as N
-import session_names as SN
-import accounts as A
-import ledger_backups as LB
-import diagnostics as DG
-import session_timeline as ST
-from local_servers import LocalServerInventory
+if __package__:
+    from . import parser as P
+    from . import native as N
+    from . import session_names as SN
+    from . import accounts as A
+    from . import ledger_backups as LB
+    from . import diagnostics as DG
+    from . import session_timeline as ST
+    from .local_servers import LocalServerInventory
+else:
+    # Source checkouts and native app payloads retain their top-level scripts.
+    import parser as P
+    import native as N
+    import session_names as SN
+    import accounts as A
+    import ledger_backups as LB
+    import diagnostics as DG
+    import session_timeline as ST
+    from local_servers import LocalServerInventory
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = HERE
@@ -2556,6 +2567,16 @@ class Server(ThreadingHTTPServer):
     # silently failed to load ("heroHTML is not defined") once in a few dozen loads.
     request_queue_size = 128
     daemon_threads = True
+    allow_reuse_port = False
+    # Windows SO_REUSEADDR can let a second listener take the same port. The
+    # ledger needs a single owner, so reserve the address exclusively there.
+    allow_reuse_address = os.name != "nt"
+
+    def server_bind(self):
+        if os.name == "nt":
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
     def handle_error(self, request, client_address):
         # A browser tab closed/refreshed mid-response is normal traffic, not a
         # server fault — don't spam stderr with a traceback for it.
@@ -2586,57 +2607,68 @@ def main():
     ap.add_argument("--rebuild", action="store_true", help="ignore cache, full reparse")
     args = ap.parse_args()
 
+    # Reserve the service port before loading, rebuilding or saving the shared
+    # ledger. A second package/native launch must fail without becoming a second
+    # writer; a separate "is this port free?" probe leaves a race before bind.
     try:
-        _configure_data_dir(args.data_dir)
+        srv = Server((args.host, args.port), Handler)
     except OSError as e:
-        ap.error(f"cannot use data directory: {e}")
+        ap.error(f"cannot listen on {args.host}:{args.port}: {e}")
 
     stopping = threading.Event()
-
-    def _request_shutdown(signum, frame):
-        stopping.set()
-
-    signal.signal(signal.SIGTERM, _request_shutdown)
-    signal.signal(signal.SIGINT, _request_shutdown)
-
-    if args.rebuild and os.path.exists(CACHE_PATH):
-        os.remove(CACHE_PATH)
-    load_cache()
-    sys.stderr.write("[init] parsing local logs (first run reads everything, "
-                     "incl. one large Codex log)...\n")
-    refresh(verbose=True)
-    sys.stderr.write(f"[init] {_meta['files']} files in {_meta['last_duration']:.1f}s\n")
-    if stopping.is_set():
-        with _refresh_lock, _lock:
-            save_cache()
-        return
-
-    threading.Thread(target=background_refresher, args=(args.interval, stopping), daemon=True).start()
-
-    # other devices: only if the user turned them on in Settings
-    _load_mirrors()
-    if _peer_cfg()["share"].get("on"):
-        _share_start()
-    threading.Thread(target=peer_puller, args=(stopping,), daemon=True).start()
-
-    BIND.update(host=args.host, port=args.port)
-    srv = Server((args.host, args.port), Handler)
     srv.stopping = stopping
-    url = f"http://{args.host}:{args.port}"
-    sys.stderr.write(f"\n  ✦ AgentTelemetry live at  {url}  ·  {DEVICE['name']}\n")
-    sys.stderr.write(f"    refreshing every {args.interval}s · Ctrl-C to stop\n\n")
+    loaded = False
     try:
+        try:
+            _configure_data_dir(args.data_dir)
+        except OSError as e:
+            ap.error(f"cannot use data directory: {e}")
+
+        def _request_shutdown(signum, frame):
+            stopping.set()
+
+        signal.signal(signal.SIGTERM, _request_shutdown)
+        signal.signal(signal.SIGINT, _request_shutdown)
+
+        if args.rebuild and os.path.exists(CACHE_PATH):
+            os.remove(CACHE_PATH)
+        load_cache()
+        loaded = True
+        sys.stderr.write("[init] parsing local logs (first run reads everything, "
+                         "incl. one large Codex log)...\n")
+        refresh(verbose=True)
+        sys.stderr.write(f"[init] {_meta['files']} files in {_meta['last_duration']:.1f}s\n")
+        if stopping.is_set():
+            return
+
+        threading.Thread(target=background_refresher, args=(args.interval, stopping), daemon=True).start()
+
+        # other devices: only if the user turned them on in Settings
+        _load_mirrors()
+        if _peer_cfg()["share"].get("on"):
+            _share_start()
+        threading.Thread(target=peer_puller, args=(stopping,), daemon=True).start()
+
+        BIND.update(host=args.host, port=srv.server_port)
+        url = f"http://{args.host}:{srv.server_port}"
+        sys.stderr.write(f"\n  ✦ AgentTelemetry live at  {url}  ·  {DEVICE['name']}\n")
+        sys.stderr.write(f"    refreshing every {args.interval}s · Ctrl-C to stop\n\n")
         srv.timeout = 0.5
         while not stopping.is_set():
             srv.handle_request()
     finally:
         stopping.set()
-        _share_stop()
-        srv.server_close()
-        with _refresh_lock, _lock:
-            if not save_cache():
-                sys.stderr.write("[shutdown] cache flush failed; see the cache error above\n")
-        sys.stderr.write("\nbye\n")
+        try:
+            if loaded:
+                _share_stop()
+                with _refresh_lock, _lock:
+                    if not save_cache():
+                        sys.stderr.write("[shutdown] cache flush failed; see the cache error above\n")
+                sys.stderr.write("\nbye\n")
+        finally:
+            # Keep ownership through the final flush: another launcher may use
+            # this same ledger as soon as the service port becomes available.
+            srv.server_close()
 
 
 if __name__ == "__main__":
