@@ -88,17 +88,31 @@ assert.equal(buttons.get('all').attributes['aria-pressed'],'false');
 assert.equal(node('sessTypeCountAll').textContent,'4');
 assert.equal(node('sessTypeCountSubagents').textContent,'2');
 assert.equal(node('sessTypeCountOther').textContent,'2');
+assert.equal(buttons.get('other').attributes['aria-label'],'Main agents, 2');
+const typeControls=[...fs.readFileSync(path.join(root,'index.html'),'utf8')
+  .matchAll(/<button[^>]*data-session-type="([^"]+)"[^>]*>([^<]*)<span/g)]
+  .map(match=>[match[1],match[2].trim()]);
+assert.deepEqual(typeControls,[['all','All sessions'],['other','Main agents'],['subagents','Subagents']],
+  'The selector follows the requested visible labels and order while preserving saved-link values');
 assert.deepEqual(json('SESS_CACHE.map(s=>s.id)'),['child002','child001'],'Row indices must match only the displayed, sorted sessions');
 
+run(`S.sessionType='other';viewSessions(slice())`);
+assert.match(node('sessHint').textContent,/^2 main agent sessions active in range/);
+assert.deepEqual(json('SESS_CACHE.map(s=>s.id)'),['legacy01','parent01'],'The wording change must not reclassify unmarked older sessions');
+run(`S.search='Same task';viewSessions(slice())`);
+assert.match(node('sessHint').textContent,/^1 main agent session active in range/);
+
 run(`S.search='child001';S.sessionType='other';viewSessions(slice())`);
-assert.match(node('sessTable').innerHTML,/No other sessions match/);
+assert.match(node('sessTable').innerHTML,/No main agent sessions match/);
+assert.doesNotMatch(node('sessTable').innerHTML,/other sessions/i);
 assert.match(node('sessTable').innerHTML,/data-session-type-reset/);
 assert.match(node('sessTable').innerHTML,/Show all sessions/);
 assert.equal(json('SESS_CACHE').length,0);
 
-// An older/unmarked row is not asserted to be a primary session. Delegation
-// counts are whole-session evidence, and Claude side tokens remain a subset.
+// Main agents is a display label for unmarked rows, with the source limitation
+// retained. Delegation counts and Claude side tokens keep their original scope.
 assert.match(run(`sessionTypeDetails({subagent:true})`),/Subagent session/);
+assert.match(run(`sessionTypeDetails({})`),/>Main agent session</);
 assert.match(run(`sessionTypeDetails({})`),/not record|unmarked|Not marked/i);
 assert.doesNotMatch(run(`sessionTypeDetails({})`),/confirmed primary|never delegated/i);
 assert.match(run(`sessionDelegationDetails({source:'codex',subagents:2})`),/whole session/);
@@ -113,6 +127,10 @@ run(`S.search='';S.sessionType='all';viewSessions(slice());var opened='';openDra
 assert.match(run('opened'),/Subagent session/);
 assert.match(run('opened'),/session-type-detail/);
 assert.doesNotMatch(run('opened'),/<img src=x/);
+run('openSession(0)');
+assert.match(run('opened'),/<div class="eyebrow">Main agent session<\/div>/);
+assert.match(run('opened'),/Not marked as a subagent/);
+assert.doesNotMatch(run('opened'),/Other session|confirmed primary|never delegated/i);
 run(`S.sessionType='subagents';S.search='hidden';resetFilters();filtersToURL()`);
 assert.equal(run('S.sessionType'),'all','Reset and Clear all must also clear the Sessions-only selector');
 assert.equal(run('S.search'),'');
