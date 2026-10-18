@@ -342,10 +342,15 @@ data; never commit, share or package them. They do not alter the ledger schema.
 `session_timeline.py` supplies on-demand `GET /api/session-timeline` detail only
 after resolving the full native ID, source device, ledger entry and discovered
 source path. Never accept a caller-supplied filename. Reads are bounded and return
-only event kinds/timestamps/model/tool labels/numeric usage, not prompts, arguments
+only event kinds/timestamps/model/tool labels/numeric usage and per-log agent ordinals, not prompts, arguments
 or account data. Keep token-count/usage-record handover and fork/block dedup aligned
 with `parser.py`. Date bounds filter returned events, not the parsing state needed
-to identify earlier model/replay/usage context. Remote/deleted/unsupported sources
+to identify earlier model/replay/usage context. Local Claude/Codex and Copilot SDK events include recorded model/effort changes,
+subagent request/lifecycle markers and available session/turn lifecycle events.
+`view=activity|all|requests|tools|compactions` filters before the event cap; Activity
+is the drawer default. Claude tool requests are not proof of execution, and a
+background tool return is not proof of completion. Deduplicate source/ledger
+compactions by timestamp and agent ordinal. Remote/deleted/unsupported sources
 use retained daily/compaction detail. Missing metadata remains unavailable.
 
 `diagnostics.py` tracks scan counts and static, actionable error categories in memory;

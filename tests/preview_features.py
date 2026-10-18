@@ -35,12 +35,18 @@ def main():
             path = root / ("fixture-%d.jsonl" % index)
             identity = "fixture-thread-%d" % index
             lines = [("session_meta", {"id": identity, "cwd": str(root / project)}),
-                     ("turn_context", {"model": "gpt-6.1-sol"}),
+                     ("turn_context", {"model": "gpt-6.1-sol", "effort": "high"}),
+                     ("event_msg", {"type": "task_started"}),
                      ("event_msg", {"type": "user_message", "message": "Invented preview task"}),
+                     ("event_msg", {"type": "item_completed", "item": {"type": "SubAgentActivity",
+                         "kind": "started", "agent_thread_id": "preview-worker"}}),
                      ("response_item", {"type": "function_call", "name": "read_file", "arguments": "{}"}),
                      ("token_usage_record", {"response_id": "fixture-response", "usage": {
                          "input_tokens": tokens, "cached_input_tokens": tokens // 2, "output_tokens": tokens // 20}}),
-                     ("compacted", {"compaction_response_id": "fixture-compact"})]
+                     ("compacted", {"compaction_response_id": "fixture-compact"}),
+                     ("event_msg", {"type": "item_completed", "item": {"type": "SubAgentActivity",
+                         "kind": "completed", "agent_thread_id": "preview-worker"}}),
+                     ("event_msg", {"type": "task_complete"})]
             path.write_text("".join(json.dumps({"type": kind, "payload": body,
                 "timestamp": (stamp + timedelta(seconds=n * 12)).isoformat()})+"\n"
                 for n, (kind, body) in enumerate(lines)), encoding="utf-8")

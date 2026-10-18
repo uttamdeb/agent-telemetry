@@ -109,7 +109,7 @@ class SessionNameTests(unittest.TestCase):
             path, aggregate, body = self.child(workflow=workflow)
             result = D.build_session_timeline("fixture-device", "claude", body["id"])
             self.assertTrue(result["available"])
-            self.assertEqual([event["kind"] for event in result["events"]], ["user_turn", "request"])
+            self.assertEqual([event["kind"] for event in result["events"]], ["user_turn", "model", "request"])
             self.assertEqual(result["events"][-1]["input"], 25)
             self.assertNotIn("Child fixture task", json.dumps(result))
         with patch.object(P, "discover", return_value=[]):
@@ -136,7 +136,7 @@ class SessionNameTests(unittest.TestCase):
                 with patch.object(P, "discover", return_value=[("claude", str(path), None)]):
                     result = D.build_session_timeline("fixture-device", "claude", body["id"])
                     self.assertTrue(result["available"])
-                    self.assertEqual([event["kind"] for event in result["events"]], ["user_turn", "request"])
+                    self.assertEqual([event["kind"] for event in result["events"]], ["user_turn", "model", "request"])
                 D._state["files"].pop("duplicate-ledger-key")
 
     def test_child_display_name_never_writes_transcripts_ledger_summary_or_peer_exports(self):

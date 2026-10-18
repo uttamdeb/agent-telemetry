@@ -41,6 +41,33 @@ events still establish model context, fork replay boundaries, and usage-source
 precedence even when they fall outside the displayed date range. A recent interval
 after the byte limit can have no readable events; retained daily figures remain.
 
+The drawer opens on **Activity**: recorded user turns, model/effort changes,
+subagent lifecycle markers, available session/turn lifecycle events, and completed
+compactions. **All events**, **Model requests**, **Tools**, and **Compactions** let
+you narrow the list. The source reader applies this selector before the event cap,
+so a long run of tool calls cannot hide agent activity. This display selector does
+not change usage totals or the dashboard's shared filters.
+
+Local Claude/Claude Desktop and Codex logs provide turn, request and tool activity.
+Claude Agent/Task tool calls are labeled **Subagent requested**; a matched synchronous
+tool result records completion or failure. Background tool returns are labeled as
+returns, without claiming the worker has finished. Codex's explicit SubAgentActivity
+markers provide starts, contacts, completions, failures and closes where recorded.
+Effort/model changes use only recorded values, not current configuration.
+
+Copilot SDK logs additionally supply explicit subagent starts/completions, model and
+reasoning configuration changes, session starts/resumes/stops, interruptions and
+recorded errors. Legacy Copilot storage still uses retained daily/compaction detail.
+Successful SDK compactions include the recorded trigger and context sizes; source
+and ledger twins are displayed once. Child compactions remain separate. Requests
+use per-call saved usage receipts where available; missing receipts are not inferred
+from the inclusive daily totals. Receipt replays, ephemeral twins and repeated tool
+starts are deduplicated. Child request counts are breakdowns of the parent's usage.
+
+Subagent numbers are local to the source log. They let you match a request/start to
+its recorded result without exposing native identities, task descriptions or prompts.
+They are not a reconstructed cross-session parent/child tree.
+
 Claude response blocks and resumed UUIDs are deduplicated using the parser's rules.
 Codex retains legacy token-count usage until the first own usage record, ignores its
 later twins, and splits cached input from fresh input. Synthetic fixtures cross-check

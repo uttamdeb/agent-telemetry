@@ -113,7 +113,7 @@ class FeatureIntegrationTests(unittest.TestCase):
     def test_timeline_resolves_full_native_ids_on_original_device(self):
         data = D.build_session_timeline("fixture-device", "codex", "full-fixture-id")
         self.assertTrue(data["available"])
-        self.assertEqual(data["events"][0]["kind"], "request")
+        self.assertEqual([e["kind"] for e in data["events"]], ["model", "request"])
         for device, identity in (("remote", "full-fixture-id"), ("fixture-device", "full-fix"), ("fixture-device", "../../secret")):
             with patch.object(D.ST, "timeline") as reader:
                 self.assertFalse(D.build_session_timeline(device, "codex", identity)["available"])
@@ -121,6 +121,22 @@ class FeatureIntegrationTests(unittest.TestCase):
         with patch.object(P, "discover", return_value=[]), patch.object(D.ST, "timeline") as reader:
             self.assertFalse(D.build_session_timeline("fixture-device", "codex", "full-fixture-id")["available"])
             reader.assert_not_called()
+
+    def test_copilot_sdk_timeline_requires_discovered_ledger_identity_and_passes_view(self):
+        sdk = self.root / "sdk-id" / "events.jsonl"
+        sdk.parent.mkdir()
+        sdk.write_text(json.dumps({"id": "start", "type": "session.start", "timestamp": "2026-10-12T10:00:00Z",
+            "data": {"sessionId": "sdk-id", "selectedModel": "glm-5.3"}})+'\n', encoding="utf-8")
+        aggregate = {"source": "copilot", "path": str(sdk), "copilot_sdk": {}, "sessions": [{"_sid": "sdk-id"}]}
+        with patch.dict(D._state, {"files": {str(sdk): aggregate}}), patch.object(P, "discover", return_value=[("copilot", str(sdk), None)]):
+            data = D.build_session_timeline("fixture-device", "copilot", "sdk-id", view="activity")
+            self.assertEqual([e["kind"] for e in data["events"]], ["session", "model"])
+            self.assertFalse(D.build_session_timeline("remote", "copilot", "sdk-id")["available"])
+            self.assertFalse(D.build_session_timeline("fixture-device", "copilot", "sdk")["available"])
+            aggregate.pop("copilot_sdk")
+            self.assertFalse(D.build_session_timeline("fixture-device", "copilot", "sdk-id")["available"])
+        with self.assertRaises(ValueError):
+            D.build_session_timeline("fixture-device", "codex", "full-fixture-id", view="bad")
 
     def test_private_routes_are_csrf_and_origin_guarded_and_health_stays_minimal(self):
         server = D.Server(("127.0.0.1", 0), D.Handler)
