@@ -5,9 +5,13 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing release tag (application code is built from this tag)
+        description: Existing release tag (preserved when refreshing downloads)
         required: true
         default: v2.0.0
+      source_commit:
+        description: Optional full descendant commit for refreshed assets; empty builds the original tag
+        required: false
+        default: ''
 permissions:
   contents: read
 jobs:
@@ -19,7 +23,7 @@ jobs:
           path: packaging
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag || 'v2.0.0' }}
+          ref: ${{ inputs.source_commit || inputs.tag || 'v2.0.0' }}
           path: application
           fetch-depth: 0
       - uses: actions/setup-python@v5
@@ -29,9 +33,12 @@ jobs:
         shell: pwsh
         env:
           RELEASE_TAG: ${{ inputs.tag || 'v2.0.0' }}
+          RELEASE_SOURCE_COMMIT: ${{ inputs.source_commit }}
         run: |
           $compiler = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
-          python packaging/windows/installer/build.py --source application --output artifacts --tag $env:RELEASE_TAG --compiler $compiler
+          $refreshArgs = @()
+          if ($env:RELEASE_SOURCE_COMMIT) { $refreshArgs = @('--source-commit', $env:RELEASE_SOURCE_COMMIT) }
+          python packaging/windows/installer/build.py --source application --output artifacts --tag $env:RELEASE_TAG --compiler $compiler @refreshArgs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $installer = (Get-ChildItem artifacts/*.exe).FullName
           $expectedVersion = $env:RELEASE_TAG.Substring(1)
@@ -54,15 +61,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag || 'v2.0.0' }}
+          ref: ${{ inputs.source_commit || inputs.tag || 'v2.0.0' }}
           fetch-depth: 0
+      - uses: actions/checkout@v4
+        with:
+          path: packaging
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
       - name: Build and verify DMG
         env:
           AGENT_TELEMETRY_OUTPUT_DIR: ${{ github.workspace }}/artifacts
+          RELEASE_TAG: ${{ inputs.tag || 'v2.0.0' }}
+          RELEASE_SOURCE_COMMIT: ${{ inputs.source_commit }}
         run: |
+          python -c 'import os, runpy; from pathlib import Path; runpy.run_path("packaging/windows/installer/build.py")["validate_source"](Path("."), os.environ["RELEASE_TAG"], os.environ.get("RELEASE_SOURCE_COMMIT") or None)'
           swift build --package-path macos/AgentTelemetryMac
           python tests/run_mac_native.py
           macos/AgentTelemetryMac/Scripts/package-app.sh

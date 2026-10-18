@@ -4,6 +4,7 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -14,6 +15,26 @@ import zipfile
 PYTHON_URL = "https://www.python.org/ftp/python/3.13.16/python-3.13.16-embed-amd64.zip"
 PYTHON_SHA256 = "97dae5274cc54867065e8d5a3226e48c35017ed332a0fdb0e27d5b5821961297"
 HERE = Path(__file__).resolve().parent
+
+
+def validate_source(source, tag, source_commit=None):
+    """Keep the release tag intact; an explicit refresh must pin its descendant."""
+    if not re.fullmatch(r"v\d+\.\d+\.\d+", tag):
+        raise ValueError("Expected a release tag such as v2.0.0.")
+    def git(*arguments):
+        return subprocess.check_output(["git", "-C", str(source), *arguments], text=True).strip()
+    tagged = git("rev-parse", "--verify", "refs/tags/" + tag + "^{commit}")
+    head = git("rev-parse", "HEAD")
+    if source_commit:
+        if not re.fullmatch(r"[0-9a-f]{40}", source_commit) or head != source_commit:
+            raise ValueError("A refresh requires the full source commit checked out at HEAD.")
+        if subprocess.run(["git", "-C", str(source), "merge-base", "--is-ancestor", tagged, head]).returncode:
+            raise ValueError("The refreshed source must descend from the original release tag.")
+    elif head != tagged:
+        raise ValueError("The source must be checked out at the requested release tag.")
+    if git("status", "--porcelain", "--untracked-files=no"):
+        raise ValueError("Refusing a modified release checkout.")
+    return head
 
 
 def stage(source, destination, archive, version):
@@ -57,14 +78,14 @@ def main():
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--tag", required=True)
+    parser.add_argument("--source-commit", help="Explicit full commit for a refreshed build; never moves the release tag")
     parser.add_argument("--compiler", type=Path, required=True)
     args = parser.parse_args()
     source, output = args.source.resolve(), args.output.resolve()
-    actual = subprocess.check_output(["git", "-C", str(source), "describe", "--tags", "--exact-match"], text=True).strip()
-    if actual != args.tag or not args.tag.startswith("v") or any(c not in "0123456789.v" for c in args.tag):
-        parser.error("The source must be checked out at the requested release tag.")
-    if subprocess.check_output(["git", "-C", str(source), "status", "--porcelain", "--untracked-files=no"], text=True).strip():
-        parser.error("Refusing a modified release checkout.")
+    try:
+        validate_source(source, args.tag, args.source_commit)
+    except (ValueError, subprocess.CalledProcessError) as error:
+        parser.error(str(error))
     output.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="AgentTelemetry-package-") as temporary:
         root = Path(temporary)
