@@ -50,8 +50,21 @@ carries its parent's full native ID, current title, tool, and device as display
 metadata. Missing or ambiguous parents stay unresolved; no source path is exposed
 by that descriptor.
 
-No parser, ledger shape, cache version, source files, or sharing protocol changes
-are needed. Test the interface using invented data only:
+The child drawer shows the resolved parent's name and an **Open parent** action.
+It opens that session's detail without changing dashboard filters; the figures
+still follow the selected date and model filters. A parent outside that scope is
+labelled accordingly. Missing or ambiguous identities remain unavailable.
+
+Codex links use the explicit `session_meta.parent_thread_id`, or the documented
+`source.subagent.thread_spawn.parent_thread_id` form. `session_id` can identify
+the root of a multi-agent tree, and `forked_from_id` describes copied history;
+neither is used as an immediate-parent substitute. See the
+[upstream Codex protocol](https://github.com/openai/codex/blob/main/codex-rs/protocol/src/protocol.rs).
+
+Cache version 60 retains all entries from versions 53–59. Available Codex logs
+missing parent metadata are reparsed transactionally; archived entries remain
+intact, with unresolved relationships left unknown. Usage calculations and source
+files do not change, and no rebuild is needed. Test with invented data only:
 
 ```bash
 python3 tests/preview_subagents.py --port 8897

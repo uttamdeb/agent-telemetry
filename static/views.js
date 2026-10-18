@@ -1146,14 +1146,17 @@ function sessionWhen(s){
     return s.compactions[s.compactions.length-1].timestamp||"";
   return s.end||s.start||"";
 }
-function sessionRows(d){
-  const q=S.search.toLowerCase();
-  return d.sessions.map(s=>({...s,
+function sessionRow(s){
+  return {...s,
     tok:(s.in||0)+(s.out||0)+(s.cr||0)+(s.cc||0),
     when:sessionWhen(s),
     cache:((s.in||0)+(s.cr||0)+(s.cc||0))?(s.cr||0)/((s.in||0)+(s.cr||0)+(s.cc||0)):0,
     name:s.title||s.project||s.id,
-  })).filter(s=>!q || (s.name+" "+(s.original_title||"")+" "+(s.project||"")+" "+(s.model||"")+" "+(s.branch||"")+" "+(s.id||"")+" "+(s.rename_id||"")).toLowerCase().includes(q));
+  };
+}
+function sessionRows(d){
+  const q=S.search.toLowerCase();
+  return d.sessions.map(sessionRow).filter(s=>!q || (s.name+" "+(s.original_title||"")+" "+(s.project||"")+" "+(s.model||"")+" "+(s.branch||"")+" "+(s.id||"")+" "+(s.rename_id||"")).toLowerCase().includes(q));
 }
 function sessionTypeCounts(rows){
   const subagents=rows.filter(s=>s.subagent).length;
@@ -1194,14 +1197,23 @@ function sessionDelegationBadge(s){
   return "";
 }
 function sessionTypeDetails(s){
-  if(s.subagent)
-    return `<div class="session-type-detail"><svg class="ic" aria-hidden="true"><use href="#i-subagent"/></svg><div><b>Subagent session</b><p>The source log recorded a subagent marker. A parent session is not linked here.</p></div></div>`;
+  if(s.subagent){
+    const parent=s.subagent_parent;
+    const linked=parent && typeof parent.id==="string" && typeof parent.title==="string"
+      && typeof parent.source==="string" && typeof parent.device==="string";
+    const identity=linked?JSON.stringify([parent.device,parent.source,parent.id]):"";
+    const available=linked && RAW.sessions.filter(x=>sessionIdentity(x)===identity).length===1;
+    const detail=linked
+      ? `<p>Parent session: ${available?`<button type="button" class="session-parent-link" data-session-parent="${esc(identity)}" aria-label="Open parent session ${esc(parent.title)}">${esc(parent.title)} <span aria-hidden="true">↗</span></button>`:esc(parent.title)}</p>`
+      : '<p>The source log recorded a subagent marker. Its parent could not be resolved from retained session metadata.</p>';
+    return `<div class="session-type-detail"><svg class="ic" aria-hidden="true"><use href="#i-subagent"/></svg><div><b>Subagent session</b>${detail}</div></div>`;
+  }
   return `<div class="session-type-detail"><svg class="ic" aria-hidden="true"><use href="#i-subagent"/></svg><div><b>Main agent session</b><p>Not marked as a subagent. Some tools and older logs do not record this.</p></div></div>`;
 }
 function sessionDelegationDetails(s){
   const notes=[];
   if(Number.isSafeInteger(s.subagent_children) && s.subagent_children>0)
-    notes.push(`At least ${fmtNum(s.subagent_children)} recorded subagent transcript${s.subagent_children===1?" is":"s are"} associated with this Claude session by its source directory. This covers the whole session, independently of selected date or model filters. Missing or unknown transcript layouts cannot be counted. Each child keeps its own usage; this count adds no tokens or cost and is not added to other delegation evidence.`);
+    notes.push(`At least ${fmtNum(s.subagent_children)} recorded child transcript${s.subagent_children===1?"":"s"} across the whole session. This count does not follow date or model filters. Each child keeps its own usage; the count adds no tokens or cost.`);
   if((s.subagents||0)>0) notes.push(`${fmtNum(s.subagents)} subagent${s.subagents===1?"":"s"} recorded across this whole session; the count is not tied to the selected date or model filters.`);
   if(!s.subagent && s.source==="claude" && (s.side||0)>0)
     notes.push(`Claude Code recorded ${fmtTok(s.side)} sidechain tokens across this whole session. They are already included in the session total and are not additional usage.`);
@@ -1361,11 +1373,23 @@ function viewSessions(d){
 }
 function openSession(i){
   const s=SESS_CACHE[i]; if(!s) return;
+  openSessionDetails(s);
+}
+function openSessionParent(identity){
+  const matches=RAW.sessions.filter(s=>sessionIdentity(s)===identity);
+  if(matches.length!==1) return;
+  const s=sessionRow(clipSession(matches[0],range()));
+  openSessionDetails(s,true);
+}
+function openSessionDetails(s,related=false){
+  const relatedLimited=related&&!sessionDays(s);
   const row=(k,v)=>v==null||v===""?"":`<div class="kv"><span class="k">${k}</span><span class="v">${v}</span></div>`;
   openDrawer(`
     <div class="eyebrow">${s.subagent?"Subagent session":"Main agent session"}</div>
     <h2>${esc(s.title||s.project||s.id)}</h2>
     <div style="margin-bottom:16px;display:flex;gap:8px;align-items:center">${srcBadge(s.source)} <span class="dim" style="font-size:12px">${esc(s.id)}</span>${renameButton(s,true)}</div>
+    ${related?(relatedLimited?'<p class="hint">Parent session · whole-session figures. This older entry has no daily detail, so its usage cannot be scoped to your date or model filters.</p>':'<p class="hint">Parent session. Figures follow the selected date and model filters; your table filters are unchanged.</p>'):''}
+    ${related&&!activeInRange(s,range())?'<div class="warnbar">This parent has no recorded activity matching the selected date and model filters.</div>':''}
     ${sessionTypeDetails(s)}
     ${sessionDelegationDetails(s)}
     ${row("Device",multiDevice()?esc(deviceName(s.device||RAW.device.id)):null)}
@@ -3113,6 +3137,8 @@ document.addEventListener("click",e=>{
   }
   const sessionOpen=e.target.closest("[data-session-open]");
   if(sessionOpen){e.preventDefault();openSession(+sessionOpen.dataset.sessionOpen);return;}
+  const sessionParent=e.target.closest("[data-session-parent]");
+  if(sessionParent){e.preventDefault();openSessionParent(sessionParent.dataset.sessionParent);return;}
   const tv=e.target.closest(".tv[data-tv]");
   if(tv){ const id=tv.dataset.tv; if(S.tableView.has(id)) S.tableView.delete(id); else S.tableView.add(id);
     applyTableView(id); return; }

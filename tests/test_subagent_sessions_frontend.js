@@ -131,9 +131,10 @@ assert.match(children,/At least 25 recorded child transcripts/);
 assert.doesNotMatch(children,/28 subagents/,'Observed child transcripts and spawn counts are independent evidence');
 const childDetail=run(`sessionDelegationDetails({source:'claude',subagent_children:25,subagents:3,side:1000})`);
 assert.match(childDetail,/whole session/);
-assert.match(childDetail,/independently of selected date or model filters/);
+assert.match(childDetail,/does not follow date or model filters/);
 assert.match(childDetail,/adds no tokens or cost/);
-assert.match(childDetail,/not added to other delegation evidence/);
+assert.match(childDetail,/3 subagents recorded/);
+assert.doesNotMatch(childDetail,/28 subagents/,'Independent evidence must not be summed');
 assert.match(childDetail,/already included/,'Inline usage explanations remain separate');
 for(const value of ['undefined','0','-1','1.5','"<img src=x>"'])
   assert.equal(run(`sessionDelegationBadge({source:'claude',subagent_children:${value}})`),'','Missing/invalid child evidence must not assert zero or a count');
@@ -154,4 +155,31 @@ run(`S.sessionType='subagents';S.search='hidden';resetFilters();filtersToURL()`)
 assert.equal(run('S.sessionType'),'all','Reset and Clear all must also clear the Sessions-only selector');
 assert.equal(run('S.search'),'');
 assert.equal(new URLSearchParams(location.search).has('session_type'),false);
-console.log('Subagent Sessions URL state, scope, counts, ID search, accessible rows, evidence and escaping checks passed.');
+// Parent navigation resolves full device/tool/native identity, even while the
+// table shows only children or a search excludes its parent. It keeps filters.
+run(`RAW.sessions[2].rename_id='parent01-full-native-id';
+RAW.sessions[2].days={'2026-10-18':[1,100,10,0,0,1,1,0,0,0,1]};
+RAW.sessions[0].subagent_parent={id:'parent01-full-native-id',source:'codex',device:'local',title:'Parent <safe>'};
+S.search='child001';S.sessionType='subagents';`);
+const parentLink=run('sessionTypeDetails(RAW.sessions[0])');
+assert.match(parentLink,/data-session-parent/);
+assert.match(parentLink,/Parent &lt;safe&gt;/);
+assert.doesNotMatch(parentLink,/<safe>/);
+assert.match(parentLink,/aria-label="Open parent session/);
+const stateBefore=json('[S.search,S.sessionType,S.preset,S.from,S.to]');
+run(`openSessionParent(JSON.stringify(['local','codex','parent01-full-native-id']))`);
+assert.match(run('opened'),/<h2>Same task<\/h2>/);
+assert.match(run('opened'),/Parent session\. Figures follow the selected date and model filters/);
+assert.deepEqual(json('[S.search,S.sessionType,S.preset,S.from,S.to]'),stateBefore);
+run(`RAW.sessions.push({...RAW.sessions[2]});opened='unchanged';openSessionParent(JSON.stringify(['local','codex','parent01-full-native-id']))`);
+assert.equal(run('opened'),'unchanged','Ambiguous native IDs never open an arbitrary parent');
+assert.doesNotMatch(run('sessionTypeDetails(RAW.sessions[0])'),/data-session-parent/);
+run(`RAW.sessions.pop();opened='unchanged';openSessionParent(JSON.stringify(['remote','codex','parent01-full-native-id']))`);
+assert.equal(run('opened'),'unchanged','A same-named session on another device is not a parent match');
+run(`delete RAW.sessions[2].days;delete RAW.sessions[2].model_days;
+RAW.sessions[2].end='2026-09-01T10:00:00';RAW.sessions[2].cost=123;
+openSessionParent(JSON.stringify(['local','codex','parent01-full-native-id']))`);
+assert.match(run('opened'),/whole-session figures/);
+assert.match(run('opened'),/cannot be scoped to your date or model filters/);
+assert.doesNotMatch(run('opened'),/Figures follow the selected date and model filters/);
+console.log('Subagent Sessions state, recorded evidence, parent navigation, scope and escaping checks passed.');
