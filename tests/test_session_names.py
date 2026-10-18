@@ -115,6 +115,30 @@ class SessionNameTests(unittest.TestCase):
         with patch.object(P, "discover", return_value=[]):
             self.assertFalse(D.build_session_timeline("fixture-device", "claude", body["id"])["available"])
 
+    def test_child_timeline_refuses_ambiguous_discovered_copies_but_keeps_unique_source(self):
+        for workflow in (None, "wf_duplicate_timeline"):
+            with self.subTest(workflow=workflow):
+                path, aggregate, body = self.child(workflow=workflow)
+                copied, _, copied_body = self.child(workflow=workflow, root=self.root / "different-profile")
+                self.assertEqual(body["id"], copied_body["id"])
+                before = copy.deepcopy(D._state["files"])
+                with patch.object(D.ST, "timeline") as timeline:
+                    result = D.build_session_timeline("fixture-device", "claude", body["id"])
+                    self.assertFalse(result["available"])
+                    self.assertEqual(result["events"], [])
+                    self.assertIn("More than one", result["detail"])
+                    timeline.assert_not_called()
+                self.assertEqual(D._state["files"], before)
+                # An undiscovered retained duplicate must not hide the one
+                # verified source. Duplicate ledger keys for that same path
+                # must not make the file ambiguous either.
+                D._state["files"]["duplicate-ledger-key"] = copy.deepcopy(aggregate)
+                with patch.object(P, "discover", return_value=[("claude", str(path), None)]):
+                    result = D.build_session_timeline("fixture-device", "claude", body["id"])
+                    self.assertTrue(result["available"])
+                    self.assertEqual([event["kind"] for event in result["events"]], ["user_turn", "request"])
+                D._state["files"].pop("duplicate-ledger-key")
+
     def test_child_display_name_never_writes_transcripts_ledger_summary_or_peer_exports(self):
         path, aggregate, body = self.child(workflow="wf_fixture")
         before = copy.deepcopy(D._state["files"])

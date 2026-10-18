@@ -545,19 +545,22 @@ def build_session_timeline(device, source, session_id, date_from=None, date_to=N
     if device != _local_id():
         return {"available": False, "events": [], "truncated": False, "detail": "Source events are available on the original device."}
     with _refresh_lock:
-        selected = None
+        selected = []
         for aggregate in _state["files"].values():
             if aggregate.get("source") != source or aggregate.get("archived"):
                 continue
             if any(SN.identity(aggregate, s) == session_id for s in aggregate.get("sessions", [])):
-                selected = (aggregate.get("path", ""), aggregate.get("size"), aggregate.get("mtime"))
-                break
-        if selected is None:
+                selected.append(aggregate.get("path", ""))
+        if not selected:
             return {"available": False, "events": [], "truncated": False, "detail": "The source log is unavailable; retained daily detail is unchanged."}
-        path = selected[0]
         known = {(s, os.path.realpath(p)) for s, p, _ in P.discover()}
-        if (source, os.path.realpath(path)) not in known:
+        verified = {os.path.realpath(path): path for path in selected
+                    if (source, os.path.realpath(path)) in known}
+        if not verified:
             return {"available": False, "events": [], "truncated": False, "detail": "The original source log could not be verified."}
+        if len(verified) != 1:
+            return {"available": False, "events": [], "truncated": False, "detail": "More than one original source log matches this session identity; source events are unavailable."}
+        path = next(iter(verified.values()))
     # The API resolved the full child identity above. Claude's child records
     # retain the enclosing session UUID in their sessionId field.
     child = SN.claude_child_identity(path) if source == "claude" else ""
