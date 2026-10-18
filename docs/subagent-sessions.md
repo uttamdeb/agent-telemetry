@@ -22,10 +22,31 @@ tree from matching titles, projects, dates, or models.
 Recorded delegation is separate from child-session classification. Codex and
 some other tools record a count on the session that delegated work. Claude can
 record sidechain tokens inside a parent session; these tokens are already part of
-that session's total and are not added again. These figures describe the whole
-session, independently of the selected date and model filters, and do not identify
-which visible child rows belong to it. The existing usage calculations are
+that session's total and are not added again.
+
+Claude parent sessions also show a count when retained child transcripts use its
+recognized source directory: `<parent UUID>/subagents/agent-<full ID>.jsonl`, or
+`<parent UUID>/subagents/workflows/wf_<workflow ID>/agent-<full ID>.jsonl`. The
+child must already be marked as a Claude subagent. The full parent UUID, project
+directory, and source device must agree. A child's full relative transcript path
+counts once; workflow directories are part of that identity because names such as
+`agent-a0` can be reused by different workflows. Duplicate retained copies of the
+same relative transcript do not add another count. Archived entries and shared-device copies keep
+this evidence, including copied Windows paths. Unknown layouts are left unlinked.
+
+This is a lower bound on **recorded child transcripts**, not a live worker count.
+It covers the whole session, independently of the selected date or model filters.
+Missing evidence is not shown as zero. Child transcripts, recorded spawn counts,
+and inline sidechain usage remain separate evidence and are never added together.
+Children keep their own usage rows; the parent badge adds no tokens or cost and
+does not imply that a child's usage is included in its parent's figures. These
+associations use retained source paths without rereading logs or guessing from
+matching titles, projects, dates, or models. The existing usage calculations are
 unchanged; the feature makes no new claim about cross-transcript deduplication.
+When exactly one retained parent matches that full source identity, a child also
+carries its parent's full native ID, current title, tool, and device as display
+metadata. Missing or ambiguous parents stay unresolved; no source path is exposed
+by that descriptor.
 
 No parser, ledger shape, cache version, source files, or sharing protocol changes
 are needed. Test the interface using invented data only:
