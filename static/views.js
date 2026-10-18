@@ -1199,6 +1199,10 @@ function syncSessionTypeControls(counts){
   }
 }
 function sessionDelegationBadge(s){
+  if(Number.isSafeInteger(s.subagent_children) && s.subagent_children>0){
+    const n=s.subagent_children;
+    return ` <span class="delegation-badge" title="At least ${fmtNum(n)} recorded child transcript${n===1?"":"s"} associated by Claude's session directory. Whole session; date and model filters do not change this count.">${fmtNum(n)} subagent${n===1?"":"s"} recorded</span>`;
+  }
   if((s.subagents||0)>0){
     const n=s.subagents;
     return ` <span class="delegation-badge" title="Subagents recorded across the whole session.">${fmtNum(n)} subagent${n===1?"":"s"} recorded</span>`;
@@ -1214,6 +1218,8 @@ function sessionTypeDetails(s){
 }
 function sessionDelegationDetails(s){
   const notes=[];
+  if(Number.isSafeInteger(s.subagent_children) && s.subagent_children>0)
+    notes.push(`At least ${fmtNum(s.subagent_children)} recorded subagent transcript${s.subagent_children===1?" is":"s are"} associated with this Claude session by its source directory. This covers the whole session, independently of selected date or model filters. Missing or unknown transcript layouts cannot be counted. Each child keeps its own usage; this count adds no tokens or cost and is not added to other delegation evidence.`);
   if((s.subagents||0)>0) notes.push(`${fmtNum(s.subagents)} subagent${s.subagents===1?"":"s"} recorded across this whole session; the count is not tied to the selected date or model filters.`);
   if(!s.subagent && s.source==="claude" && (s.side||0)>0)
     notes.push(`Claude Code recorded ${fmtTok(s.side)} sidechain tokens across this whole session. They are already included in the session total and are not additional usage.`);
@@ -2186,14 +2192,13 @@ function findContextTax(d){
 /* Recorded delegation can keep the parent's context small; missing markers do not prove none occurred. */
 function findSubagents(d){
   const parents = d.sessions.filter(s => !s.subagent);
-  // "delegated" shows up two different ways depending on the tool: Claude Code's
-  // subagent tokens land back on the parent's own token stream (s.side); Codex's
-  // subagents are wholly separate sessions, so the parent only carries a spawn
-  // COUNT (s.subagents, from SubAgentActivity "started" markers in its own log).
-  const heavy = parents.filter(s => s.tools >= 150 && !s.side && !s.subagents);
+  // Inline sidechain usage, source spawn counts and associated child transcripts
+  // are distinct evidence. Any positive evidence rules out "no recorded delegation".
+  const hasChildren=s=>Number.isSafeInteger(s.subagent_children) && s.subagent_children>0;
+  const heavy = parents.filter(s => s.tools >= 150 && !s.side && !s.subagents && !hasChildren(s));
   if(heavy.length < 2) return null;
   const spend = heavy.reduce((a,s)=>a+s.cost,0);
-  const used = parents.filter(s => s.side > 0 || s.subagents > 0).length;
+  const used = parents.filter(s => s.side > 0 || s.subagents > 0 || hasChildren(s)).length;
   return {
     id:"subagents", impact: spend*0.15, sev: spend>100?"high":"low", tools:[...new Set(heavy.map(x=>x.source))],
     title:"Tool-heavy sessions with no recorded delegation",

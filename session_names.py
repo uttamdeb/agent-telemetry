@@ -11,7 +11,10 @@ import threading
 import time
 import uuid
 
-import native as N
+if __package__:
+    from . import native as N
+else:
+    import native as N
 
 SUPPORTED = {"claude", "codex", "opencode"}
 _plans = {}

@@ -13,7 +13,10 @@ Mac/Linux install of the same tools.
 No third-party dependencies — stdlib only.
 """
 import os, sys, json, glob, re, time, shutil, subprocess, copy, hashlib
-import accounts as A
+if __package__:
+    from . import accounts as A
+else:
+    import accounts as A
 from datetime import datetime, timezone
 
 HOME = os.path.expanduser("~")
