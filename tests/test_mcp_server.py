@@ -176,15 +176,52 @@ class MCPServerTests(unittest.TestCase):
             _message("what/is/this", 12, modern),
             _message("ping", True, modern),
         ]
-        output = io.BytesIO()
-        server.serve(io.BytesIO(b"".join(messages)), output)
+        replies_ready = threading.Event()
+        input_stream = WaitForRepliesEOF(b"".join(messages), replies_ready)
+        output = ReplyCountingOutput(replies_ready, expected=len(messages))
+
+        # Release these validation requests in reverse input order to ensure the
+        # assertions do not rely on worker completion order.
+        from concurrent.futures import ThreadPoolExecutor
+
+        class ReverseOrderExecutor:
+            def __init__(self, *args, **kwargs):
+                self._executor = ThreadPoolExecutor(*args, **kwargs)
+                self._gates = [threading.Event() for _ in messages]
+                self._gates[-1].set()
+                self._next = 0
+
+            def submit(self, function, *args):
+                index = self._next
+                self._next += 1
+
+                def run():
+                    if not self._gates[index].wait(timeout=5):
+                        raise TimeoutError("controlled reply order timed out")
+                    try:
+                        return function(*args)
+                    finally:
+                        if index:
+                            self._gates[index - 1].set()
+
+                return self._executor.submit(run)
+
+            def shutdown(self, wait=True, cancel_futures=False):
+                self._executor.shutdown(wait=wait, cancel_futures=cancel_futures)
+
+        with patch.object(mcp_server, "ThreadPoolExecutor", ReverseOrderExecutor):
+            server.serve(input_stream, output)
+
+        self.assertTrue(replies_ready.is_set())
         replies = _decode_lines(output.getvalue())
         self.assertEqual(len(replies), 4)
-        self.assertEqual(replies[0]["error"]["code"], -32602)
-        self.assertEqual(replies[1]["error"]["code"], -32602)
-        self.assertEqual(replies[2]["error"]["code"], -32601)
-        self.assertEqual(replies[3]["id"], None)
-        self.assertEqual(replies[3]["error"]["code"], -32600)
+        replies_by_id = {reply["id"]: reply for reply in replies}
+        self.assertEqual(set(replies_by_id), {"bad-args", "unknown", 12, None})
+        self.assertEqual(replies_by_id["bad-args"]["error"]["code"], -32602)
+        self.assertEqual(replies_by_id["unknown"]["error"]["code"], -32602)
+        self.assertEqual(replies_by_id[12]["error"]["code"], -32601)
+        self.assertIsNone(replies_by_id[None]["id"])
+        self.assertEqual(replies_by_id[None]["error"]["code"], -32600)
         self.assertFalse(calls)
 
     def test_legacy_initialize_notifications_and_tool_result_shape(self):

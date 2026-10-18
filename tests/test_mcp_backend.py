@@ -422,12 +422,21 @@ class MCPBackendTests(unittest.TestCase):
         self.assertEqual(caught.exception.status, 403)
 
     def test_settings_response_contains_local_config_but_never_key(self):
-        result = mcp_backend.settings_response(self.url, self.data, r"C:\Python\pythonw.exe", r"C:\App\mcp_server.py")
+        pythonw = self.root / "pythonw.exe"
+        python = self.root / "python.exe"
+        server_script = self.root / "mcp_server.py"
+        pythonw.touch()
+        python.touch()
+        server_script.touch()
+
+        result = mcp_backend.settings_response(
+            self.url, self.data, str(pythonw), str(server_script))
         rendered = json.dumps(result)
         self.assertNotIn(self.token, rendered)
         self.assertNotIn("Bearer", rendered)
         config = result["client_config"]["mcpServers"]["agent-telemetry"]
-        self.assertEqual(config["command"], r"C:\Python\pythonw.exe")
+        self.assertEqual(config["command"], str(python))
+        self.assertEqual(config["args"][0], str(server_script))
         self.assertEqual(config["args"][-2:], ["--backend", self.url])
         self.assertEqual(set(result) - {"enabled", "include_names", "include_peers", "warning", "client_config"}, set())
 
