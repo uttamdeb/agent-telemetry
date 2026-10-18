@@ -815,6 +815,12 @@ def build_editor_snapshot(query):
             items = list(_state["files"].items())
         local, aliases, alias_error = _local_id(), {}, False
         preferences, project_error = _project_preferences()
+        # An already-open editor may still send the previous workspace root.
+        # Apply the same explicit relocation to both sides of workspace matching.
+        query = urllib.parse.urlencode([
+            (key, N.relocated_project_path(value, preferences) if key == "root" else value)
+            for key, value in urllib.parse.parse_qsl(query, keep_blank_values=True)
+        ])
         items = N.project_items(items, local, preferences)
         try:
             names = SN.display_names()
