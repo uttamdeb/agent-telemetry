@@ -249,6 +249,21 @@ so that file stops being a cache and becomes the sole record. Two consequences:
   discarding them on a version change would silently destroy history the UI promised
   to keep. Newer fields are read with `.get()` defaults, so an old-shape archived
   entry degrades rather than breaks.
+- Cache **59** adds optional Claude/Codex `reasoning_effort` metadata. Retain all
+  v53–58 entries; peers v52–58 remain readable. Available supported logs lacking
+  `reasoning_effort_version:1` reparse transactionally before the unchanged-file
+  shortcut. Failed backfills retry; deleted archives remain unchanged. Never rebuild.
+  Safe session metadata uses local-date/canonical-model buckets of recognized
+  `levels` and `unrecorded` observations, with bounded response/context identity
+  state kept private. It never changes model keys, prices, tokens, calls or time.
+  Claude uses its own assistant `perTurnEffort` override or `effort`; null overrides
+  fall back, malformed nonnull overrides remain unavailable. Inline sidechain usage
+  stays unrecorded in the parent, while standalone children read their own fields.
+  Codex uses recorded top-level turn-context effort matched to accepted usage;
+  missing/invalid contexts clear earlier settings. Never infer historical effort
+  from current config, thinking-token counts, spawn arguments or another session.
+  Sessions labels and drawer details follow date/model/provider/device scope.
+  See docs/recorded-effort.md for verified sources and limits.
 - Versions 53/54 → **55** add optional Claude/Codex compaction metadata. Version **56**
   adds Haiku 5.5 request-tier pricing subsets. These migrations
   retain every existing entry; `update_file()` fully reparses available Claude/Codex logs
@@ -892,7 +907,7 @@ local network. Both switches are off until the user turns them on, and each asks
   copy to `.peers/<device id>.json` (0600). While the other machine sleeps, the copy still
   shows, along with the error explaining why it couldn't be reached. An export or saved
   copy with an incompatible `CACHE_VERSION` is refused with "update both". The
-  version-58 reader explicitly accepts versions 52–57, whose missing optional
+  version-59 reader explicitly accepts versions 52–58, whose missing optional
   precision/attribution/compaction/pricing fields retain the older detail limits; other
   versions are refused.
 - `build_payload` adds the copies to its file loop as `peer:<id>:<path>` with

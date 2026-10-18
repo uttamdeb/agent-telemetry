@@ -301,10 +301,46 @@ function compactionsInRange(s, r){
   if(!Array.isArray(s.compactions)) return null; // older archive/peer: unknown
   return s.compactions.filter(e=>e.date>=r.from && e.date<=r.to);
 }
+/* Effort is recorded metadata, never a model identity or another usage metric.
+   Keep its original date/model map so a clipped session can be scoped again. */
+const REASONING_EFFORT_LEVELS = ["none","minimal","low","medium","high","xhigh","max","ultra"];
+function reasoningEffortInRange(s, r){
+  const result={levels:[],unrecorded:false,entries:[]};
+  const metadata=s.reasoning_effort;
+  if(!["claude","codex"].includes(s.source) || !metadata || metadata.version!==1
+      || !metadata.days || typeof metadata.days!=="object" || Array.isArray(metadata.days)) return result;
+  const allowed=s.source==="claude"?["low","medium","high","xhigh","max"]:REASONING_EFFORT_LEVELS;
+  const observed=new Set();
+  for(const [key,value] of Object.entries(metadata.days)){
+    const parts=key.split("\t");
+    if(parts.length!==2) continue;
+    const [date,model]=parts;
+    if(!isDay(date) || date<r.from || date>r.to || !model || model==="(user)" || !passModel(model)
+        || !value || typeof value!=="object" || Array.isArray(value)) continue;
+    const levels=[];
+    let unrecorded=!Number.isSafeInteger(value.unrecorded) || value.unrecorded<0 || value.unrecorded>0;
+    if(value.levels && typeof value.levels==="object" && !Array.isArray(value.levels)){
+      for(const [level,count] of Object.entries(value.levels)){
+        if(!Number.isSafeInteger(count) || count<0){unrecorded=true;continue;}
+        if(!count) continue;
+        if(!allowed.includes(level)){unrecorded=true;continue;}
+        levels.push(level);observed.add(level);
+      }
+    }else unrecorded=true;
+    if(!levels.length && !unrecorded) continue;
+    levels.sort((a,b)=>REASONING_EFFORT_LEVELS.indexOf(a)-REASONING_EFFORT_LEVELS.indexOf(b));
+    result.entries.push({date,model,levels,unrecorded});
+    result.unrecorded ||= unrecorded;
+  }
+  result.levels=REASONING_EFFORT_LEVELS.filter(level=>observed.has(level));
+  result.entries.sort((a,b)=>a.date.localeCompare(b.date)||a.model.localeCompare(b.model));
+  return result;
+}
 /* Keep the first ten legacy slots; newer maps add calls and write tiers. */
 function clipSession(s, r){
   const compactions=compactionsInRange(s,r);
-  const events={compactions,compaction_count:compactions===null?null:compactions.length};
+  const events={compactions,compaction_count:compactions===null?null:compactions.length,
+    reasoning_effort_scoped:reasoningEffortInRange(s,r)};
   const D = sessionDays(s);
   if(!D) return Object.assign({}, s, {span:1, clipped:false, detail_limited:true}, events);
   const total=Array(15).fill(0); let inN=0,allN=0,callsKnown=true;

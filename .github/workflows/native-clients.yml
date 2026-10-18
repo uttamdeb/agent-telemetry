@@ -24,6 +24,7 @@ jobs:
       - run: node tests/test_maintenance_frontend.js
       - run: node tests/test_local_servers_frontend.js
       - run: node tests/test_subagent_sessions_frontend.js
+      - run: node tests/test_reasoning_effort_frontend.js
       - if: runner.os == 'Windows'
         run: python windows/tray.py --self-test
       - if: runner.os == 'Windows'

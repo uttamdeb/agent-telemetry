@@ -30,7 +30,7 @@ from local_servers import LocalServerInventory
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = HERE
 CACHE_PATH = os.path.join(DATA_DIR, ".usage_cache.json")
-CACHE_VERSION = 58
+CACHE_VERSION = 59
 
 
 def _configure_data_dir(path):
@@ -46,7 +46,7 @@ def _configure_data_dir(path):
 def _peer_cache_ok(version):
     # v1.7.0 mirrors lack optional attribution/precision fields, but the reader
     # still supports their rows just as it supports archived local entries.
-    return type(version) is int and version in (52, 53, 54, 55, 56, 57, CACHE_VERSION)
+    return type(version) is int and version in (52, 53, 54, 55, 56, 57, 58, CACHE_VERSION)
 
 # ---------------------------------------------------------------------------
 # In-memory store of per-file aggregates, refreshed on a background interval.
@@ -280,8 +280,8 @@ def load_cache():
     if data.get("version") == CACHE_VERSION:
         _state["files"] = files
         return
-    if data.get("version") in (53, 54, 55, 56, 57):
-        # Only optional compaction/pricing/account/SDK metadata changed. Keep every entry
+    if data.get("version") in (53, 54, 55, 56, 57, 58):
+        # Only optional compaction/pricing/account/SDK/effort metadata changed. Keep every entry
         # until its replacement parses successfully; update_file backfills Claude
         # and Codex logs lacking metadata, and Claude Haiku 5.5 pricing detail.
         _state["files"] = files

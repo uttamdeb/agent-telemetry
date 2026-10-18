@@ -12,7 +12,7 @@ Mac/Linux install of the same tools.
 
 No third-party dependencies — stdlib only.
 """
-import os, sys, json, glob, re, time, shutil, subprocess, copy
+import os, sys, json, glob, re, time, shutil, subprocess, copy, hashlib
 import accounts as A
 from datetime import datetime, timezone
 
@@ -550,6 +550,7 @@ def _blank_agg(source, path):
         if source in ("claude", "codex"):
             agg["account_metadata_version"] = A.METADATA_VERSION
         agg["compactions"] = {}
+        _reasoning_effort_init(agg)
     if source == "codex":
         _codex_timing_state(agg)  # empty logs need no repeated timing backfill
     return agg
@@ -567,6 +568,84 @@ def _rec(agg, date, model):
               "active": 0.0}
         bucket[key] = r
     return r
+
+
+_REASONING_EFFORT_VERSION = 1
+_CLAUDE_EFFORTS = frozenset(("low", "medium", "high", "xhigh", "max"))
+_CODEX_EFFORTS = _CLAUDE_EFFORTS | {"none", "minimal", "ultra"}
+
+
+def _reasoning_effort_init(agg):
+    """Optional recorded settings, separate from every accounting counter."""
+    agg["reasoning_effort_version"] = _REASONING_EFFORT_VERSION
+    return agg.setdefault("reasoning_effort", {"version": _REASONING_EFFORT_VERSION, "days": {}})
+
+
+def _effort_level(value, allowed):
+    # Never stringify source objects, infer a default, or interpret thinking tokens.
+    return value if isinstance(value, str) and value in allowed else None
+
+
+def _effort_identity(value):
+    """Bound correlation identities without adding source ids to public metadata."""
+    if not isinstance(value, str) or not 0 < len(value) <= 512:
+        return None
+    # json.loads accepts escaped lone surrogates in malformed source identities.
+    # Keep those hashable without ever publishing or attempting to render them.
+    return hashlib.sha256(value.encode("utf-8", errors="surrogatepass")).hexdigest()
+
+
+def _reasoning_effort_observe(agg, dt, model, level, memo_name, identity=None,
+                            limit=8, replace=False):
+    """Count one accepted response observation; later blocks can enrich it.
+
+    The observation keeps its original date/model even if a streamed correction
+    arrives after midnight. Missing later metadata cannot erase an earlier value;
+    explicit invalid metadata can. This does not create an accounting row.
+    """
+    if not dt:
+        return
+    bucket = f"{_buckets(dt)[0]}\t{model}"
+    if bucket not in agg["records"]:
+        return
+    metadata = _reasoning_effort_init(agg)
+    memo = agg["state"].setdefault(memo_name, {})
+    key = _effort_identity(identity)
+    previous = memo.pop(key, None) if key else None
+    if previous:
+        bucket, old_level = previous
+        if level is None and not replace:
+            level = old_level
+        memo[key] = [bucket, level]
+        if old_level == level:
+            return
+        row = metadata["days"][bucket]
+        if old_level is None:
+            row["unrecorded"] -= 1
+        else:
+            row["levels"][old_level] -= 1
+            if not row["levels"][old_level]:
+                del row["levels"][old_level]
+    else:
+        row = metadata["days"].setdefault(bucket, {"levels": {}, "unrecorded": 0})
+        if key:
+            memo[key] = [bucket, level]
+    if level is None:
+        row["unrecorded"] += 1
+    else:
+        row["levels"][level] = row["levels"].get(level, 0) + 1
+    while len(memo) > limit:
+        del memo[next(iter(memo))]
+
+
+def _claude_effort(obj):
+    # Claude Code's per-turn value supersedes its base effort only when nonnull.
+    # An explicitly malformed override is evidence of an unavailable setting.
+    value = obj.get("perTurnEffort")
+    if value is not None:
+        return _effort_level(value, _CLAUDE_EFFORTS), True
+    value = obj.get("effort")
+    return _effort_level(value, _CLAUDE_EFFORTS), value is not None
 
 
 def _finish_store_records(agg):
@@ -1159,6 +1238,7 @@ def _haiku_price_usage(agg, rk, model, date, full, delta, first, skill):
 
 def parse_claude(agg, lines):
     agg["account_metadata_version"] = A.METADATA_VERSION
+    _reasoning_effort_init(agg)
     project = agg["project"]
     st = agg["state"]
     # Every record already counted in this file, as the first 12 hex chars of its
@@ -1269,10 +1349,17 @@ def parse_claude(agg, lines):
                     old_key = next(iter(resp))
                     resp.pop(old_key)
                     st.get("haiku_context", {}).pop(old_key, None)
+                    st.get("claude_effort_responses", {}).pop(_effort_identity(old_key), None)
             if not first:
                 inp, out, cr, cc, cc5, cc1, reason, ws = (max(0, a - b) for a, b in zip(full, prev))
             if dt:
                 r = _rec(agg, _buckets(dt)[0], model)
+                effort, explicit = _claude_effort(o)
+                if side and not agg.get("subagent"):
+                    effort, explicit = None, True
+                if first or _effort_identity(rk):
+                    _reasoning_effort_observe(agg, dt, model, effort,
+                        "claude_effort_responses", rk, replace=explicit)
                 r["in"] += inp; r["out"] += out; r["cr"] += cr; r["cc"] += cc
                 r["cc5"] += cc5; r["cc1"] += cc1
                 r["reason"] += reason
@@ -1449,7 +1536,38 @@ _CODEX_BUILTIN_TOOLS = {"web_search_call": "web_search", "tool_search_call": "to
                         "image_generation_call": "image_generation"}
 
 
-def _codex_usage(agg, dt, u, model):
+def _codex_effort_context(agg, payload, model, replayed=False):
+    """Retain only explicit turn metadata, never current config/thread settings."""
+    key = _effort_identity(payload.get("turn_id"))
+    context_model = model if isinstance(payload.get("model"), str) and payload["model"] else None
+    level = None if replayed else _effort_level(payload.get("effort"), _CODEX_EFFORTS)
+    st = agg["state"]
+    st["codex_effort_context"] = [key, context_model, level]
+    contexts = st.setdefault("codex_effort_contexts", {})
+    if key:
+        contexts.pop(key, None)
+        contexts[key] = [context_model, level]
+        while len(contexts) > 32:
+            del contexts[next(iter(contexts))]
+
+
+def _codex_effort_usage(agg, dt, model, payload):
+    st = agg["state"]
+    identity = None
+    if payload is None:
+        context = st.get("codex_effort_context")
+        candidate = context[1:] if context else None
+    else:
+        turn = _effort_identity(payload.get("turn_id"))
+        candidate = st.get("codex_effort_contexts", {}).get(turn)
+        response = payload.get("response_id")
+        identity = response if _effort_identity(response) else None
+    level = candidate[1] if candidate and candidate[0] == model else None
+    _reasoning_effort_observe(agg, dt, model, level, "codex_effort_responses",
+                             identity, limit=32)
+
+
+def _codex_usage(agg, dt, u, model, effort_payload=None):
     """Count one model response's usage. `u` is a token_count's last_token_usage or
     a token_usage_record's usage — the two share a shape."""
     inp = int(u.get("input_tokens", 0) or 0)
@@ -1497,6 +1615,7 @@ def _codex_usage(agg, dt, u, model):
     T["in"] += fresh; T["cr"] += cached
     T["cc"] += written; T["cc5"] += written
     T["out"] += out; T["reason"] += reason; T["req"] += 1
+    _codex_effort_usage(agg, dt, model or "Unknown", effort_payload)
 
 
 _EXEC_CMD = re.compile(r"""\bcmd\s*:\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|`([^`]*)`)""")
@@ -1706,6 +1825,7 @@ def _codex_compaction(agg, payload, dt):
 
 def parse_codex(agg, lines):
     agg["account_metadata_version"] = A.METADATA_VERSION
+    _reasoning_effort_init(agg)
     cur_model = agg["state"].get("cur_model")
     project = agg["project"]
     for line in lines:
@@ -1741,6 +1861,7 @@ def parse_codex(agg, lines):
         # real work resumed 3.5-4.8s after session_meta in every fork seen, so a
         # fixed 5s cutoff would also clip the fork's own first turn.
         st = agg["state"]
+        context_replayed = False
         if st.get("replay_last") and dt:
             last = _from_iso(st["replay_last"])
             if last and (dt - last).total_seconds() <= 1.0:
@@ -1750,6 +1871,7 @@ def parse_codex(agg, lines):
                     st["replay_last"] = o["timestamp"]
                 if t != "turn_context":
                     continue
+                context_replayed = True
             else:
                 if not skip:
                     st["replay_last"] = None
@@ -1786,6 +1908,7 @@ def parse_codex(agg, lines):
             m = pl.get("model")
             if m:
                 cur_model = normalize_codex(m)
+            _codex_effort_context(agg, pl, cur_model, context_replayed)
             cwd = pl.get("cwd")
             if cwd:
                 project = _leaf(cwd) or cwd
@@ -1804,7 +1927,7 @@ def parse_codex(agg, lines):
             # usage comes from these alone — each is written BEFORE its token_count
             # twin, so the handover can't count a response twice.
             agg["state"]["usage_records"] = True
-            _codex_usage(agg, dt, pl.get("usage") or {}, cur_model)
+            _codex_usage(agg, dt, pl.get("usage") or {}, cur_model, pl)
         elif t == "event_msg":
             _codex_timing_completion(agg, pl)
             if pt == "patch_apply_end":
@@ -3940,6 +4063,11 @@ def update_file(agg, source, path, editor_hint, proj_map):
         return fresh
 
     # jsonl (claude / codex) — incremental append
+    if (source in ("claude", "claude-desktop", "codex") and agg
+            and agg.get("reasoning_effort_version") != _REASONING_EFFORT_VERSION):
+        # Available sources can backfill optional metadata without rebuilding the
+        # durable ledger. Failure leaves the caller's old entry/signature intact.
+        agg = None
     if (source == "codex" and agg
             and agg.get("state", {}).get("compaction_timing", {}).get("version") != _CODEX_COMPACTION_TIMING_VERSION):
         # Stage a full timing backfill locally; the caller retains its old ledger
@@ -4188,6 +4316,10 @@ def _finalize_session(agg, source, path):
         "active": round(active_total, 1),
         "bytes": agg.get("size", 0), "archived": bool(agg.get("archived")),
     }]
+    if "reasoning_effort" in agg:
+        # Only bounded level/count/date/model metadata is public; correlation
+        # state remains private and never appears in a session payload.
+        agg["sessions"][0]["reasoning_effort"] = copy.deepcopy(agg["reasoning_effort"])
     if "compactions" in agg:
         events = sorted(agg["compactions"].values(), key=lambda e: (e["timestamp"], e["id"]))
         session = agg["sessions"][0]
