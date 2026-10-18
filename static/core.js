@@ -118,6 +118,7 @@ const S = {
   ides:new Set(),        // which IDE / surface the work ran in
   devs:new Set(),        // which device (only offered once another one is connected)
   search:"",
+  sessionType:"all",    // session-list-only classification; never changes shared slices
   exactOnly:false,
   metric:"tokens", rateMetric:"all",   // tokens lead; cost is an estimate
   tableView:new Set(),   // chart ids currently shown as their table twin
@@ -200,7 +201,7 @@ function deviceName(id){ const d=devices().find(x=>x.id===id); return d ? d.name
    history entry rather than adding one, the way switching tab does. */
 const Q_DEFAULT = {preset:S.preset, metric:S.metric, rateMetric:S.rateMetric};
 const Q_SETS = [["provs","providers"],["models","models"],["projs","projects"],["ides","ides"],["devs","devices"]];
-const Q_OWNED = ["range","from","to","metric","rate","tools","exact","q", ...Q_SETS.map(x=>x[1])];
+const Q_OWNED = ["range","from","to","metric","rate","tools","exact","q","session_type", ...Q_SETS.map(x=>x[1])];
 const isDay = s => /^\d{4}-\d{2}-\d{2}$/.test(s||"") && dkey(new Date(s+"T00:00:00"))===s;
 
 /* A link is somebody else's text. Dates, tool ids, the range and the measure are checked
@@ -223,6 +224,8 @@ function filtersFromURL(){
   }
   S.exactOnly = ["1","true"].includes(q.get("exact"));
   S.search = (q.get("q")||"").trim().slice(0,200);
+  S.sessionType = ["all","subagents","other"].includes(q.get("session_type"))
+    ? q.get("session_type") : "all";
 }
 /* Called after every render, so a filter set by a key, a chip, a link or a click on the
    calendar is covered without each of them knowing about the URL. */
@@ -238,6 +241,7 @@ function filtersToURL(){
   for(const [key, param] of Q_SETS) [...S[key]].sort().forEach(v=>q.append(param, v));
   if(S.exactOnly) q.set("exact","1");
   if(S.search) q.set("q", S.search);
+  if(S.sessionType!=="all") q.set("session_type",S.sessionType);
   const qs = q.toString(), next = location.pathname + (qs ? "?"+qs : "") + location.hash;
   if(next !== location.pathname + location.search + location.hash){
     try{ history.replaceState(history.state, "", next); }catch(e){}

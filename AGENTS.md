@@ -134,6 +134,13 @@ reads it at boot and `filtersToURL()` writes it after every `renderAll()`, both 
 The params are `?range=` (a preset, or `custom` with `&from=&to=` as YYYY-MM-DD),
 `?metric=` (`tokens|cost|messages|time`), `?rate=out`, `?tools=`, `?providers=`, `?models=`,
 `?projects=`, `?ides=`, `?devices=` (each repeated once per value), `?exact=1` and `?q=`.
+The Sessions-only `?session_type=subagents|other` selector filters that list after
+the shared slice; it must not alter analytics totals. Unmarked rows are Other
+sessions, not confirmed primary sessions. Preserve ID search, accessible full
+Subagent labels, and the selector's reset on project/comparison drilldowns. Counts
+follow the current range, shared filters and search. Delegation counts and Claude
+sidechain tokens are whole-session evidence, not parent-child links; sidechain
+tokens are already included in the parent's total. See docs/subagent-sessions.md.
 Only what differs from the default is written, params that aren't the filters' own are left
 alone, and a change replaces the history entry the way switching tab does. `?theme=` and
 `?side=collapsed|open` preset the look (handy for headless screenshots). **A new filter goes
