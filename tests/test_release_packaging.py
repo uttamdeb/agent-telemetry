@@ -2,6 +2,7 @@
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -26,6 +27,25 @@ REGISTER = module("windows_release_register", ROOT / "windows" / "installer" / "
 
 
 class PackagingTests(unittest.TestCase):
+    @unittest.skipIf(os.name == "nt", "macOS packaging uses a POSIX shell")
+    def test_macos_packaging_guard_refuses_private_ledger_backups(self):
+        script = (ROOT / "macos/AgentTelemetryMac/Scripts/package-app.sh").read_text()
+        start = script.index('if find "$AT_APP_PATH/Contents/Resources"')
+        guard = script[start:script.index("\nfi", start) + len("\nfi")]
+        with tempfile.TemporaryDirectory() as directory:
+            app = Path(directory) / "fixture.app"
+            resources = app / "Contents" / "Resources"
+            resources.mkdir(parents=True)
+            environment = dict(os.environ, AT_APP_PATH=str(app))
+            result = subprocess.run(["bash", "-c", guard], env=environment, capture_output=True)
+            self.assertEqual(result.returncode, 0)
+            backups = resources / ".usage-backups"
+            backups.mkdir()
+            (backups / "fixture.json").write_bytes(b"private synthetic history")
+            result = subprocess.run(["bash", "-c", guard], env=environment, capture_output=True)
+            self.assertEqual(result.returncode, 1)
+            self.assertIn(b"Refusing to package user telemetry", result.stderr)
+
     def test_source_installer_cannot_remove_a_bundled_runtime_or_uninstaller(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

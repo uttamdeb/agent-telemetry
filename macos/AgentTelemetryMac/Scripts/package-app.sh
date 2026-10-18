@@ -119,7 +119,7 @@ EOF
 
 "$AT_APP_PATH/Contents/Resources/AgentTelemetryRuntime/bin/python3" --version
 
-if find "$AT_APP_PATH/Contents/Resources" \( -name .usage_cache.json -o -name server.log \
+if find "$AT_APP_PATH/Contents/Resources" \( -name .usage_cache.json -o -name .usage-backups -o -name server.log \
      -o -name .peers.json -o -name .peers -o -name .local_servers.json \
      -o -name '.local_servers.*' \) -print -quit | grep -q .; then
   echo "Refusing to package user telemetry data." >&2
