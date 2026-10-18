@@ -545,20 +545,27 @@ def build_session_timeline(device, source, session_id, date_from=None, date_to=N
     if device != _local_id():
         return {"available": False, "events": [], "truncated": False, "detail": "Source events are available on the original device."}
     with _refresh_lock:
-        selected = None
+        selected = []
         for aggregate in _state["files"].values():
             if aggregate.get("source") != source or aggregate.get("archived"):
                 continue
             if any(SN.identity(aggregate, s) == session_id for s in aggregate.get("sessions", [])):
-                selected = (aggregate.get("path", ""), aggregate.get("size"), aggregate.get("mtime"))
-                break
-        if selected is None:
+                selected.append(aggregate.get("path", ""))
+        if not selected:
             return {"available": False, "events": [], "truncated": False, "detail": "The source log is unavailable; retained daily detail is unchanged."}
-        path = selected[0]
         known = {(s, os.path.realpath(p)) for s, p, _ in P.discover()}
-        if (source, os.path.realpath(path)) not in known:
+        verified = {os.path.realpath(path): path for path in selected
+                    if (source, os.path.realpath(path)) in known}
+        if not verified:
             return {"available": False, "events": [], "truncated": False, "detail": "The original source log could not be verified."}
-    return ST.timeline(source, path, session_id, date_from=date_from, date_to=date_to)
+        if len(verified) != 1:
+            return {"available": False, "events": [], "truncated": False, "detail": "More than one original source log matches this session identity; source events are unavailable."}
+        path = next(iter(verified.values()))
+    # The API resolved the full child identity above. Claude's child records
+    # retain the enclosing session UUID in their sessionId field.
+    child = SN.claude_child_identity(path) if source == "claude" else ""
+    transcript_id = child.split("/", 1)[0] if child == session_id else session_id
+    return ST.timeline(source, path, transcript_id, date_from=date_from, date_to=date_to)
 
 
 # ---------------------------------------------------------------------------
@@ -694,7 +701,7 @@ def build_payload():
 
 
 def set_session_name(body):
-    """Prepare a concrete warning, then perform one confirmed original-tool rename."""
+    """Confirm a native rename or a strictly local Claude-child display name."""
     device, source, session_id = (body.get(k) for k in ("device", "source", "id"))
     if any(not isinstance(v, str) or not v or len(v) > 512 for v in (device, source, session_id)):
         raise ValueError("Expected device, source and session id.")
@@ -702,23 +709,31 @@ def set_session_name(body):
         raise ValueError("Rename this session on its source device.")
     with _refresh_lock:
         discovered = {(s, os.path.realpath(p)) for s, p, _ in P.discover()}
-        aggregate = None
+        matches = []
         for candidate in _state["files"].values():
             if candidate["source"] != source: continue
             if (source, os.path.realpath(candidate.get("path", ""))) not in discovered: continue
             session = next((s for s in candidate.get("sessions", []) if SN.identity(candidate, s) == session_id), None)
             if session is not None and os.path.isfile(candidate.get("path", "")):
-                aggregate = candidate; break
-        if aggregate is None:
+                matches.append((candidate, session))
+        if not matches:
             raise ValueError("The original session log is unavailable. Its telemetry is preserved.")
-        if session.get("subagent") and source == "claude":
-            raise ValueError("Rename the parent Claude session in the original tool.")
+        if len(matches) != 1:
+            raise ValueError("More than one source matches this session identity. A name cannot be changed safely.")
+        aggregate, session = matches[0]
         path = aggregate["path"]
         original = session.get("title") or session.get("project") or session_id
+        display_only = source == "claude" and bool(session.get("subagent"))
         if body.get("action") == "preview":
+            if display_only:
+                return SN.prepare_display(device, source, path, session_id, body.get("name"), original)
             return SN.prepare(device, source, path, session_id, body.get("name"), original)
         if body.get("action") != "rename":
-            raise ValueError("Review the original-tool rename warning before saving.")
+            raise ValueError("Review the name-change preview before saving.")
+        if display_only:
+            result = SN.commit_display(body.get("ticket"), device, source, path, session_id, body.get("confirmed"))
+            notify_refresh()
+            return result
         result = SN.commit(body.get("ticket"), device, source, path, session_id, body.get("confirmed"))
         # Parse the metadata through the existing source parser. No cache rebuild,
         # archived-history deletion or modifications to billed usage are involved.
@@ -912,6 +927,10 @@ def _claude_parent_descriptors(files, local):
 
 
 def _build_payload_locked():
+    try:
+        display_names, display_name_error = SN.display_names(), ""
+    except ValueError as error:
+        display_names, display_name_error = {}, str(error)
     records = {}      # (date, source, model, project, ide, device) -> aggregates
     tools = {}        # (date, source, name, device) -> count
     projects = {}     # (project, source) -> {tokens, msgs, sessions, cost}
@@ -1120,7 +1139,16 @@ def _build_payload_locked():
             if not s2["rename_id"]:
                 available, reason = False, "The full native session identity is unavailable."
             if source == "claude" and session.get("subagent"):
-                available, reason = False, "Rename the parent Claude session in the original tool."
+                available, reason = SN.display_availability(source, agg.get("path", ""), True, remote)
+                if not remote:
+                    s2["rename_scope"] = "display"
+                    if display_name_error:
+                        available, reason = False, display_name_error
+                    alias = SN.display_name(display_names, device, source, agg.get("path", ""), s2["rename_id"])
+                    if alias:
+                        s2["original_title"] = session.get("title") or session.get("project") or s2["rename_id"]
+                        s2["title"] = alias
+                        s2["display_alias"] = True
             s2["rename_available"], s2["rename_reason"] = available, reason
             s2["cost"] = (sum(d["cost"] for d in days.values()) if days else
                           _priced_usage(source, session["model"],

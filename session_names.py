@@ -1,9 +1,11 @@
-"""Title-only writes to verified local tool stores. No turns or model requests."""
+"""Verified native title edits and private Claude-child display names. No turns."""
+import hashlib
 import json
-from contextlib import closing
+from contextlib import closing, contextmanager
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import queue
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -18,13 +20,176 @@ else:
 
 SUPPORTED = {"claude", "codex", "opencode"}
 _plans = {}
+_display_lock = threading.Lock()
+_DISPLAY_FILE = "session-display-names.json"
+
+
+def claude_child_identity(path):
+    """Recognize native child layouts, including workflow transcripts.
+
+    Normalize separators for retained Windows paths without treating any caller
+    identity as a filename. Only the dashboard's discovered path reaches here.
+    """
+    text = str(path)
+    normalized = text.replace("\\", "/")
+    windows = "\\" in text or bool(re.match(r"^[A-Za-z]:/", normalized)) or normalized.startswith("//")
+    parts = PurePosixPath(normalized).parts
+    for index, part in enumerate(parts):
+        if part != "subagents" or index == 0: continue
+        try: parent = str(uuid.UUID(parts[index - 1]))
+        except ValueError: continue
+        child = parts[index + 1:]
+        if len(child) == 3:
+            if child[0] != "workflows" or not re.fullmatch(r"wf_[A-Za-z0-9_-]+", child[1]): continue
+        elif len(child) != 1: continue
+        if not re.fullmatch(r"agent-[A-Za-z0-9_-]+\.jsonl", child[-1]): continue
+        if windows: child = tuple(part.lower() for part in child)
+        identity = "/".join((parent, "subagents", *child))[:-6]
+        return identity if len(identity) <= 512 else ""
+    return ""
+
+
+def display_availability(source, path, subagent=False, remote=False):
+    if remote: return False, "Name this session on its source device."
+    if source != "claude" or not subagent or not claude_child_identity(path):
+        return False, "This Claude child transcript layout is not supported for a local display name."
+    if not os.path.isfile(path):
+        return False, "The original log is unavailable; its saved telemetry is preserved."
+    return True, "Names this subagent only in AgentTelemetry; Claude and its parent session stay unchanged."
+
+
+def display_names():
+    """Read strict private metadata; corrupt/unreadable data must never be replaced."""
+    try:
+        with open(N.support_dir() / _DISPLAY_FILE, "rb") as file:
+            raw = file.read(1024 * 1024 + 1)
+    except FileNotFoundError: return {}
+    except OSError as error:
+        raise ValueError("Saved display names could not be read. Check the private preferences directory before retrying.") from error
+    try:
+        data = json.loads(raw)
+        if (len(raw) > 1024 * 1024 or not isinstance(data, dict) or set(data) != {"version", "names"}
+                or type(data.get("version")) is not int or data["version"] != 1
+                or not isinstance(data.get("names"), dict)):
+            raise ValueError()
+        for key, name in data["names"].items():
+            if not re.fullmatch(r"[0-9a-f]{64}", key) or validate_name(name) != name:
+                raise ValueError()
+        return data["names"]
+    except (ValueError, TypeError) as error:
+        raise ValueError("Saved display names are invalid. Preserve or restore the private preferences file before retrying.") from error
+
+
+def _display_key(device, source, path, session_id):
+    value = [device, source, os.path.normcase(os.path.realpath(path)), session_id]
+    return hashlib.sha256(json.dumps(value, ensure_ascii=True).encode("utf-8")).hexdigest()
+
+
+def display_name(names, device, source, path, session_id):
+    return names.get(_display_key(device, source, path, session_id))
+
+
+@contextmanager
+def _display_store_lock():
+    root = N.support_dir()
+    root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    with _display_lock, open(root / (_DISPLAY_FILE + ".lock"), "a+b") as file:
+        if os.name != "nt": os.chmod(file.name, 0o600)
+        if os.name == "nt":
+            import msvcrt
+            file.seek(0, os.SEEK_END)
+            if not file.tell(): file.write(b"\0"); file.flush()
+            file.seek(0)
+            lock = lambda: msvcrt.locking(file.fileno(), msvcrt.LK_NBLCK, 1)
+            unlock = lambda: (file.seek(0), msvcrt.locking(file.fileno(), msvcrt.LK_UNLCK, 1))
+        else:
+            import fcntl
+            lock = lambda: fcntl.flock(file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            unlock = lambda: fcntl.flock(file.fileno(), fcntl.LOCK_UN)
+        deadline = time.monotonic() + 3
+        while True:
+            try: lock(); break
+            except (BlockingIOError, OSError):
+                if time.monotonic() >= deadline:
+                    raise ValueError("Another display-name save is still running. Wait and retry.")
+                time.sleep(.05)
+        try: yield
+        finally: unlock()
+
+
+def _write_display_names(names):
+    root = N.support_dir()
+    value = json.dumps({"version": 1, "names": names})
+    if len(value.encode("utf-8")) > 1024 * 1024:
+        raise ValueError("The private display-name file is full; existing names were preserved.")
+    temporary = root / (_DISPLAY_FILE + "." + uuid.uuid4().hex + ".tmp")
+    try:
+        with open(temporary, "x", encoding="utf-8") as file:
+            if os.name != "nt": os.chmod(temporary, 0o600)
+            file.write(value)
+            file.flush(); os.fsync(file.fileno())
+        os.replace(temporary, root / _DISPLAY_FILE)
+    finally:
+        try: temporary.unlink()
+        except FileNotFoundError: pass
+
+
+def prepare_display(device, source, path, session_id, name, original_title):
+    name = validate_name(name)
+    ok, reason = display_availability(source, path, True)
+    if not ok: raise ValueError(reason)
+    if session_id != claude_child_identity(path):
+        raise ValueError("The Claude child identity does not match its discovered transcript.")
+    names = display_names()
+    stat = os.stat(path)
+    key = _display_key(device, source, path, session_id)
+    ticket, now = uuid.uuid4().hex, time.monotonic()
+    for old in list(_plans):
+        if now - _plans[old]["at"] > 300: del _plans[old]
+    if len(_plans) >= 128: _plans.pop(next(iter(_plans)))
+    _plans[ticket] = {"scope": "display", "at": now, "device": device, "source": source,
+                      "path": path, "id": session_id, "name": name, "key": key,
+                      "previous": names.get(key), "original": original_title,
+                      "file_identity": [stat.st_dev, stat.st_ino]}
+    return {"ticket": ticket, "scope": "display", "name": name,
+            "current_name": names.get(key) or original_title,
+            "target": "AgentTelemetry local display name · " + session_id}
+
+
+def commit_display(ticket, device, source, path, session_id, confirmed):
+    if confirmed is not True:
+        raise ValueError("Confirm the AgentTelemetry-only display-name preview before saving.")
+    plan = _plans.pop(ticket, None) if isinstance(ticket, str) else None
+    if (plan is None or plan.get("scope") != "display" or time.monotonic() - plan["at"] > 300
+            or [plan[k] for k in ("device", "source", "path", "id")] != [device, source, path, session_id]
+            or session_id != claude_child_identity(path)):
+        raise ValueError("Display-name preview expired or the source changed. Review it again.")
+    stat = os.stat(path)
+    if ([stat.st_dev, stat.st_ino] != plan["file_identity"]
+            or _display_key(device, source, path, session_id) != plan["key"]):
+        raise ValueError("The source changed. Review the display-name preview again.")
+    with _display_store_lock():
+        names = display_names()
+        if names.get(plan["key"]) != plan["previous"]:
+            raise ValueError("The display name changed. Review the preview again.")
+        # Choosing the source name also removes a previous local override.
+        if plan["name"] == plan["original"]: names.pop(plan["key"], None)
+        else: names[plan["key"]] = plan["name"]
+        _write_display_names(names)
+    return {"name": plan["name"], "title": plan["name"], "scope": "display",
+            "original_title": plan["original"], "display_alias": plan["name"] != plan["original"]}
 
 
 def identity(aggregate, session):
     # Visible session ids are shortened to eight characters. Never use them as
     # write identities: resolve the full native id from its original metadata.
     if aggregate["source"] == "claude":
-        return Path(aggregate.get("path", "")).stem
+        if aggregate.get("subagent"):
+            child = claude_child_identity(aggregate.get("path", ""))
+            if child: return child
+        stem = PurePosixPath(str(aggregate.get("path", "")).replace("\\", "/")).stem
+        try: return str(uuid.UUID(stem))
+        except ValueError: return stem
     if aggregate["source"] == "codex":
         if aggregate.get("_session_id"): return aggregate["_session_id"]
         tail = Path(aggregate.get("path", "")).stem[-36:]
@@ -233,7 +398,7 @@ def commit(ticket, device, source, path, session_id, confirmed):
     if confirmed is not True:
         raise ValueError("Confirm the original-tool rename warning before saving.")
     plan = _plans.pop(ticket, None) if isinstance(ticket, str) else None
-    if (plan is None or time.monotonic() - plan["at"] > 300 or
+    if (plan is None or plan.get("scope", "native") != "native" or time.monotonic() - plan["at"] > 300 or
             [plan[k] for k in ("device", "source", "path", "id")] != [device, source, path, session_id]):
         raise ValueError("Rename preview expired or the source changed. Review the warning again.")
     name, old = plan["name"], plan["snapshot"]

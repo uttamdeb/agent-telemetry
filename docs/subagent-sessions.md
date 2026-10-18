@@ -69,3 +69,33 @@ files do not change, and no rebuild is needed. Test with invented data only:
 ```bash
 python3 tests/preview_subagents.py --port 8897
 ```
+
+## Local Claude subagent display names
+
+Claude child transcripts use a parent session UUID plus a separate agent ID.
+The supported layouts are `<parent-uuid>/subagents/agent-<id>.jsonl` and
+`<parent-uuid>/subagents/workflows/wf_<id>/agent-<id>.jsonl`. The full identity
+includes the parent and any workflow path, so reused child IDs do not select a
+different parent's transcript. Ambiguous discovered identities are refused.
+
+The pencil and detail action offer **Name in AgentTelemetry** for a recognized
+local child. The same preview and confirmation flow makes clear that only its
+AgentTelemetry display name changes. Claude's transcript, native subagent name,
+and parent session stay unchanged; no model request or native title write runs.
+The source title remains visible in the drawer and searchable. Entering that
+source title again clears the local override.
+
+Display names persist privately in `AgentTelemetryNative/session-display-names.json`,
+separately from the ledger, peer exports, health, and native summaries. Remote,
+missing, unknown-layout, or ambiguous source transcripts cannot be named through
+this action. Writes are locked and atomic; unreadable or corrupt private metadata
+is preserved and blocks a new save. No cache rebuild or version change is needed.
+
+Claude's [subagent documentation](https://code.claude.com/docs/en/sub-agents#subagent-names)
+describes names assigned by the Agent tool when spawning, and its
+[resume documentation](https://code.claude.com/docs/en/sub-agents#resume-subagents)
+describes the parent-scoped transcript layout. These sources do not establish a
+safe native child-title rename operation, so AgentTelemetry does not append a
+parent-style `custom-title` record to a child transcript. Codex continues to use
+its verified native thread-name API; ordinary supported Claude sessions retain
+their existing original-tool rename behavior.

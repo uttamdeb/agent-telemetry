@@ -562,6 +562,68 @@ console.log('Frontend regression checks passed: pricing, precision, scope, model
   console.log('Native Settings retains the toggle across unchanged status polls.');
 })().catch(error=>{console.error(error);process.exitCode=1;});
 
+(async()=>{
+  // Exercise the same two-step form for a private Claude-child display name.
+  // No request contains a transcript path, and native rename copy stays distinct.
+  const nodes=new Map(),requests=[],confirmations=[];
+  const node=id=>{
+    if(id==='drawerBody') return null;
+    if(!nodes.has(id)) nodes.set(id,{textContent:'',value:'',disabled:false,open:false,
+      focus(){},select(){},showModal(){this.open=true},close(){this.open=false},querySelectorAll:()=>[]});
+    return nodes.get(id);
+  };
+  const sid='parent-fixture/subagents/workflows/wf_fixture/agent-child-fixture';
+  const state={device:{id:'fixture'},sessions:[{source:'claude',device:'fixture',id:'agent-ch',rename_id:sid,
+    title:'Source child title',rename_scope:'display',rename_available:true}]};
+  let confirm=false,display=true;
+  const renaming=vm.createContext({RAW:state,esc:run('esc'),SRC:{claude:{label:'Claude Code'}},
+    document:{getElementById:node,querySelectorAll:()=>[]},renderAll(){},
+    askConfirm:async value=>{confirmations.push(value);return confirm},
+    fetch:async(url,options)=>{
+      const body=JSON.parse(options.body);requests.push({url,body});
+      return {ok:true,json:async()=>body.action==='preview'
+        ?{ticket:'fixture-ticket',name:body.name,current_name:'Source child title',scope:display?'display':undefined,target:sid}
+        :{title:'Alias <safe>',name:'Alias <safe>',scope:display?'display':undefined,display_alias:true,original_title:'Source child title'}};
+    }});
+  vm.runInContext(views.slice(views.indexOf('function sessionIdentity('),views.indexOf('function sdkUsageNote(')),renaming);
+  vm.runInContext(views.slice(views.indexOf('function renameButton('),views.indexOf('let SESS_CACHE=')),renaming);
+  vm.runInContext('openSessionRename(sessionIdentity(RAW.sessions[0]))',renaming);
+  assert.equal(node('sessionNameHeading').textContent,'Name in AgentTelemetry');
+  assert.match(node('sessionNameHelp').textContent,/only in AgentTelemetry/);
+  assert.match(node('sessionNameHelp').textContent,/parent session stay unchanged/);
+  const button=vm.runInContext('renameButton(RAW.sessions[0],true)',renaming);
+  assert.match(button,/>Name in AgentTelemetry</);
+  assert.doesNotMatch(button,/disabled/,'Recognized Claude children offer the local display-name action');
+  await vm.runInContext('saveSessionName("Alias <safe>")',renaming);
+  assert.equal(requests.length,1,'Cancelling the preview must not save an alias');
+  assert.equal(state.sessions[0].title,'Source child title');
+  assert.equal(node('sessionNameDialog').open,true);
+  assert.equal(confirmations[0].title,'Name in AgentTelemetry?');
+  assert.equal(confirmations[0].ok,'Save display name');
+  assert.match(confirmations[0].body,/Claude’s transcript, native subagent name, and parent session stay unchanged/);
+  assert.match(confirmations[0].body,/Alias &lt;safe&gt;/);
+  assert.doesNotMatch(confirmations[0].body,/Close this session|backup of the previous/);
+  confirm=true;
+  await vm.runInContext('saveSessionName("Alias <safe>")',renaming);
+  assert.equal(requests.length,3);
+  assert.deepEqual(requests[2],{url:'/api/session-name',body:{device:'fixture',source:'claude',id:sid,
+    action:'rename',ticket:'fixture-ticket',confirmed:true}});
+  assert.equal(state.sessions[0].title,'Alias <safe>');
+  assert.equal(state.sessions[0].original_title,'Source child title');
+  assert.equal(state.sessions[0].display_alias,true);
+  assert.equal(node('sessionNameDialog').open,false);
+  display=false;delete state.sessions[0].rename_scope;
+  vm.runInContext('openSessionRename(sessionIdentity(RAW.sessions[0]))',renaming);
+  assert.equal(node('sessionNameHeading').textContent,'Rename session');
+  assert.match(node('sessionNameHelp').textContent,/original tool/);
+  await vm.runInContext('saveSessionName("Native fixture")',renaming);
+  const native=confirmations[confirmations.length-1];
+  assert.equal(native.title,'Rename in Claude Code?');
+  assert.equal(native.ok,'Rename in tool');
+  assert.match(native.body,/original coding tool/);
+  assert.match(native.body,/Close this session/);
+  console.log('Claude-child display-name form keeps private scope, escaping, cancellation and full-ID confirmation distinct from native renames.');
+})().catch(error=>{console.error(error);process.exitCode=1;});
 {
   // Model labels are display metadata; synthetic vectors still drive accounting.
   const scoped=vm.createContext({console,Date,Set,URLSearchParams,document,

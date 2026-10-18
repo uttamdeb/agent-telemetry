@@ -1269,14 +1269,20 @@ function sdkField(s,key,value){
   return s.copilot_sdk && !(s.copilot_sdk.recorded_fields||[]).includes(key)?"Unavailable":value;
 }
 function renameButton(s,text=false){
-  return `<button type="button" class="${text?'btn':'session-rename'}" data-rename="${esc(sessionIdentity(s))}" ${s.rename_available===false?'disabled':''} title="${esc(s.rename_reason||'Rename session')}" aria-label="Rename session ${esc(s.title||s.project||s.id)}">${text?'Rename':
+  const display=s.rename_scope==='display',label=display?'Name in AgentTelemetry':'Rename';
+  return `<button type="button" class="${text?'btn':'session-rename'}" data-rename="${esc(sessionIdentity(s))}" ${s.rename_available===false?'disabled':''} title="${esc(s.rename_reason||(display?'Name in AgentTelemetry only':'Rename session'))}" aria-label="${display?label:'Rename session'} ${esc(s.title||s.project||s.id)}">${text?label:
     '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m10.5 2.5 3 3-7.5 7.5-4 1 1-4zM9 4l3 3"/></svg>'}</button>`;
 }
 let sessionRenameTarget=null, sessionRenameSaving=false;
 function openSessionRename(identity){
   if(sessionRenameSaving) return;
-  const s=RAW.sessions.find(x=>sessionIdentity(x)===identity); if(!s) return;
+  const s=RAW.sessions.find(x=>sessionIdentity(x)===identity); if(!s||s.rename_available===false) return;
   sessionRenameTarget={identity,device:s.device||RAW.device.id,source:s.source,id:s.rename_id||s.id};
+  const display=s.rename_scope==='display';
+  document.getElementById('sessionNameHeading').textContent=display?'Name in AgentTelemetry':'Rename session';
+  document.getElementById('sessionNameHelp').textContent=display
+    ?'This display name is saved only in AgentTelemetry on this device. Claude and the parent session stay unchanged. You will review the change before saving.'
+    :'Renaming changes the original tool’s saved session name. You’ll review a warning before it is saved.';
   const input=document.getElementById('sessionNameInput');
   input.value=s.title||s.project||s.id;
   document.getElementById('sessionNameError').textContent='';
@@ -1296,8 +1302,13 @@ async function saveSessionName(name){
     const preview=await response.json();
     if(!response.ok) throw Error(preview.error||'Could not prepare the rename.');
     dialog.close();
-    if(!await askConfirm({title:'Rename in '+(SRC[target.source]||{label:target.source}).label+'?',ok:'Rename in tool',
-      body:`<p>This changes the name in the <b>original coding tool</b>, not only AgentTelemetry.</p>
+    const display=preview.scope==='display';
+    if(!await askConfirm({title:display?'Name in AgentTelemetry?':'Rename in '+(SRC[target.source]||{label:target.source}).label+'?',ok:display?'Save display name':'Rename in tool',
+      body:display?`<p>This changes only the local display name in <b>AgentTelemetry</b>.</p>
+        <p><b>${esc(preview.current_name)}</b> → <b>${esc(preview.name)}</b></p>
+        <div class="modal-note">Claude’s transcript, native subagent name, and parent session stay unchanged. The private name is not included in the usage ledger or device sharing.</div>
+        <p>Target: <code>${esc(preview.target)}</code></p>`:
+        `<p>This changes the name in the <b>original coding tool</b>, not only AgentTelemetry.</p>
         <p><b>${esc(preview.current_name)}</b> → <b>${esc(preview.name)}</b></p>
         <div class="modal-note">Close this session in its original tool before continuing. The tool may need a reload. Only title metadata is changed; token, cost and event records are preserved.</div>
         <p>A backup of the previous title metadata is saved first.</p><p>Target: <code>${esc(preview.target)}</code></p>`})){
@@ -1310,6 +1321,11 @@ async function saveSessionName(name){
     if(!saved.ok) throw Error(result.error||'Could not save the session name.');
     for(const s of RAW.sessions) if(sessionIdentity(s)===target.identity){
       s.title=result.title;
+      if(result.scope==='display'){
+        s.display_alias=!!result.display_alias;
+        if(result.display_alias) s.original_title=result.original_title;
+        else delete s.original_title;
+      }
     }
     sessionRenameTarget=null; dialog.close(); renderAll();
     const drawer=document.getElementById('drawerBody');
@@ -1405,10 +1421,12 @@ function openSessionDetails(s,related=false){
   openDrawer(`
     <div class="eyebrow">${s.subagent?"Subagent session":"Main agent session"}</div>
     <h2>${esc(s.title||s.project||s.id)}</h2>
-    <div style="margin-bottom:16px;display:flex;gap:8px;align-items:center">${srcBadge(s.source)} <span class="dim" style="font-size:12px">${esc(s.id)}</span>${renameButton(s,true)}</div>
+    <div style="margin-bottom:16px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;min-width:0">${srcBadge(s.source)} <span class="dim" style="font-size:12px;min-width:0;overflow-wrap:anywhere">${esc(s.id)}</span>${renameButton(s,true)}</div>
     ${related?(relatedLimited?'<p class="hint">Parent session · whole-session figures. This older entry has no daily detail, so its usage cannot be scoped to your date or model filters.</p>':'<p class="hint">Parent session. Figures follow the selected date and model filters; your table filters are unchanged.</p>'):''}
     ${related&&!activeInRange(s,range())?'<div class="warnbar">This parent has no recorded activity matching the selected date and model filters.</div>':''}
     ${sessionTypeDetails(s)}
+    ${row("Name scope",s.rename_scope==='display'?'AgentTelemetry only — Claude and its parent session are unchanged.':null)}
+    ${row("Source title",s.display_alias?esc(s.original_title):null)}
     ${sessionDelegationDetails(s)}
     ${row("Device",multiDevice()?esc(deviceName(s.device||RAW.device.id)):null)}
     ${row("Project",esc(s.project||"—"))}
