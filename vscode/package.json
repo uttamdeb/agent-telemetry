@@ -1,0 +1,163 @@
+{
+  "name": "agenttelemetry",
+  "displayName": "AgentTelemetry",
+  "icon": "media/app-icon.png",
+  "description": "Tokens, estimated API cost and subagent sessions for Claude Code, Codex, Copilot and more. Local by default.",
+  "version": "2.0.0",
+  "publisher": "agenttelemetry-team",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Visualization",
+    "Other"
+  ],
+  "keywords": [
+    "agenttelemetry",
+    "ai",
+    "local",
+    "tokens",
+    "cost",
+    "usage",
+    "analytics",
+    "codex",
+    "claude",
+    "copilot",
+    "cursor"
+  ],
+  "homepage": "https://agenttelemetry-app.vercel.app/",
+  "bugs": {
+    "url": "https://github.com/uttamdeb/agent-telemetry/issues"
+  },
+  "galleryBanner": {
+    "color": "#0b0c0f",
+    "theme": "dark"
+  },
+  "pricing": "Free",
+  "main": "./src/extension.js",
+  "extensionKind": [
+    "ui"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "Read-only local monitoring is available. Starting Python requires a trusted workspace."
+    },
+    "virtualWorkspaces": {
+      "supported": true
+    }
+  },
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "build": "node scripts/build-backend.js",
+    "test:integration": "node scripts/run-editor-tests.js",
+    "package": "npm run build && node -e \"require('node:fs').mkdirSync('../dist', {recursive:true})\" && vsce package --no-dependencies --baseContentUrl https://github.com/uttamdeb/agent-telemetry/blob/HEAD/vscode/ --baseImagesUrl https://github.com/uttamdeb/agent-telemetry/raw/HEAD/vscode/ --out ../dist/agenttelemetry-2.0.0.vsix"
+  },
+  "devDependencies": {
+    "@vscode/test-electron": "3.1.0",
+    "@vscode/vsce": "4.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/uttamdeb/agent-telemetry.git"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "agentTelemetry.open",
+        "title": "AgentTelemetry: Open Agent desk",
+        "icon": "$(dashboard)"
+      },
+      {
+        "command": "agentTelemetry.refresh",
+        "title": "AgentTelemetry: Refresh",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "agentTelemetry.start",
+        "title": "AgentTelemetry: Start monitoring",
+        "icon": "$(play)"
+      },
+      {
+        "command": "agentTelemetry.openBrowser",
+        "title": "AgentTelemetry: Open local dashboard",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "agentTelemetry.resetBaseline",
+        "title": "AgentTelemetry: Reset usage baseline"
+      },
+      {
+        "command": "agentTelemetry.setupPython",
+        "title": "AgentTelemetry: Set up Python"
+      },
+      {
+        "command": "agentTelemetry.settings",
+        "title": "AgentTelemetry: Open settings"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "agentTelemetry",
+          "title": "AgentTelemetry",
+          "icon": "media/activity.svg"
+        }
+      ]
+    },
+    "views": {
+      "agentTelemetry": [
+        {
+          "id": "agentTelemetry.activity",
+          "name": "Local agent activity",
+          "contextualTitle": "AgentTelemetry"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "agentTelemetry.open",
+          "when": "view == agentTelemetry.activity",
+          "group": "navigation@1"
+        },
+        {
+          "command": "agentTelemetry.refresh",
+          "when": "view == agentTelemetry.activity",
+          "group": "navigation@2"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "AgentTelemetry",
+      "properties": {
+        "agentTelemetry.port": {
+          "type": "integer",
+          "default": 7878,
+          "minimum": 1,
+          "maximum": 65535,
+          "scope": "application",
+          "description": "Port of an existing local AgentTelemetry service. Starting the shared service uses port 7878 only."
+        },
+        "agentTelemetry.pythonPath": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "description": "Absolute path to a trusted Python 3.9+ executable. Empty discovers an installed native runtime or Python from the local machine PATH. Never read from workspace settings.",
+          "restricted": true
+        },
+        "agentTelemetry.showStatusBar": {
+          "type": "boolean",
+          "default": true,
+          "scope": "application",
+          "description": "Show selected local usage and estimated cost in the status bar."
+        }
+      }
+    }
+  },
+  "author": "Uttam Deb"
+}

@@ -19,6 +19,11 @@ server.log
 __pycache__/
 *.pyc
 .DS_Store
+node_modules/
+vscode/backend/
+vscode/.vscode-test/
+*.vsix
+output/playwright/
 
 # scratch screenshots
 _*.png

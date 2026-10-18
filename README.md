@@ -90,6 +90,14 @@ Options: `python3 dashboard.py --port 9000` · `--rebuild` (ignore cache, full r
 cache and optional device-sharing files outside the checkout). Without `--data-dir`, current
 checkout behavior is unchanged. Or `./run.sh [flags]`.
 
+## Editor extension
+
+The [AgentTelemetry editor extension](vscode/README.md) brings local usage into
+VS Code compatible desktop editors, including Cursor and Antigravity IDE. Its
+Agent desk uses the app's icon and light/dark theme, with workspace totals,
+recorded main-agent/subagent relationships, and an in-memory usage baseline.
+Install the universal VSIX following the [extension guide](vscode/README.md#install-a-vsix).
+
 ## Recognizing subagent sessions
 
 Sessions shows a full **Subagent** label, a branching icon, and a searchable session

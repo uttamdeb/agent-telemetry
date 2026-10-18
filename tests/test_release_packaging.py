@@ -81,7 +81,7 @@ class PackagingTests(unittest.TestCase):
             self.assertTrue((payload / "windows" / "register_install.py").is_file())
             self.assertEqual((payload / "session_names.py").read_bytes(), (ROOT / "session_names.py").read_bytes())
             self.assertEqual((payload / "accounts.py").read_bytes(), (ROOT / "accounts.py").read_bytes())
-            for name in ("ledger_backups.py", "session_timeline.py", "diagnostics.py"):
+            for name in ("ledger_backups.py", "session_timeline.py", "diagnostics.py", "editor_snapshot.py"):
                 self.assertEqual((payload / name).read_bytes(), (ROOT / name).read_bytes())
             self.assertEqual((payload / "local_servers.py").read_bytes(), (ROOT / "local_servers.py").read_bytes())
             self.assertEqual((payload / "local_servers_windows.py").read_bytes(), (ROOT / "local_servers_windows.py").read_bytes())

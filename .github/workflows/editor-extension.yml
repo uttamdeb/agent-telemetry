@@ -1,0 +1,141 @@
+name: Editor extension
+
+on:
+  push:
+    paths:
+      - 'vscode/**'
+      - '*.py'
+      - 'static/**'
+      - 'index.html'
+      - 'chart.umd.min.js'
+      - 'LICENSE'
+      - 'pyproject.toml'
+      - 'tests/*editor*'
+      - 'docs/editor-extension-contract.md'
+      - '.github/workflows/editor-extension.yml'
+  pull_request:
+    paths:
+      - 'vscode/**'
+      - '*.py'
+      - 'static/**'
+      - 'index.html'
+      - 'chart.umd.min.js'
+      - 'LICENSE'
+      - 'pyproject.toml'
+      - 'tests/*editor*'
+      - 'docs/editor-extension-contract.md'
+      - '.github/workflows/editor-extension.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: editor-extension-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    name: Extension tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    defaults:
+      run:
+        working-directory: vscode
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: vscode/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install locked build tools without lifecycle scripts
+        run: npm ci --ignore-scripts
+      - name: Run extension unit and security tests
+        # Bash expands the unit-only glob on every OS; integration/index.js must
+        # run inside a real editor, rather than Node's automatic test discovery.
+        run: node --test test/*.test.js
+      - name: Verify editor backend projections
+        working-directory: .
+        run: python -m unittest discover -s tests -p 'test_editor_snapshot.py' -v
+
+  integration:
+    name: VS Code ${{ matrix.version }} extension host
+    # Ubuntu 22.04 supports both the minimum editor's Electron and latest stable.
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ['1.85.2', stable]
+    defaults:
+      run:
+        working-directory: vscode
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: vscode/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install locked build tools without lifecycle scripts
+        run: npm ci --ignore-scripts
+      - name: Prepare headless desktop dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y xvfb xauth libgtk-3-0 libnss3 libasound2 libxss1 libgbm1 fonts-liberation
+      - name: Build allowlisted backend
+        run: npm run build
+      - name: Run isolated editor smoke test with invented usage
+        env:
+          AT_EDITOR_TEST_VERSION: ${{ matrix.version }}
+          AT_EDITOR_TEST_PYTHON: python
+        run: xvfb-run -a npm run test:integration
+
+  package:
+    name: Build and verify universal VSIX
+    needs: [unit, integration]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: vscode
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: vscode/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install locked build tools without lifecycle scripts
+        run: npm ci --ignore-scripts
+      - name: Prepare artifact directory
+        run: mkdir -p ../dist
+      - name: Package extension and bundled stdlib backend
+        run: npm run package
+      - name: Verify VSIX contents, privacy exclusions and source digests
+        working-directory: .
+        run: python tests/check_editor_vsix.py dist/agenttelemetry-2.0.0.vsix
+      - name: Upload verified installable extension
+        uses: actions/upload-artifact@v4
+        with:
+          name: agenttelemetry-editor-vsix
+          path: dist/*.vsix
+          if-no-files-found: error
+          retention-days: 14

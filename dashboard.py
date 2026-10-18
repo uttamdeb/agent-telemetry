@@ -26,6 +26,7 @@ if __package__:
     from . import ledger_backups as LB
     from . import diagnostics as DG
     from . import session_timeline as ST
+    from . import editor_snapshot as ES
     from .local_servers import LocalServerInventory
 else:
     # Source checkouts and native app payloads retain their top-level scripts.
@@ -36,6 +37,7 @@ else:
     import ledger_backups as LB
     import diagnostics as DG
     import session_timeline as ST
+    import editor_snapshot as ES
     from local_servers import LocalServerInventory
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -799,6 +801,37 @@ def build_today_summary():
                     tokens += sum(int(priced.get(field) or 0) for field in ("in", "out", "cr", "cc"))
                     spend += float(priced.get("cost") or 0)
     return {"date": today, "tokens": tokens, "spend": round(spend, 2)}
+
+
+def build_editor_snapshot(query):
+    """Read only this machine's retained aggregates under the parser lock."""
+    ES.parse_query(query)
+    with _refresh_lock:
+        with _lock:
+            items = list(_state["files"].items())
+        local, aliases, alias_error = _local_id(), {}, False
+        try:
+            names = SN.display_names()
+        except ValueError:
+            names, alias_error = {}, True
+        for path, agg in items if names else ():
+            if (str(path).startswith("peer:") or agg.get("source") != "claude" or not agg.get("subagent")
+                    or agg.get("_device") not in (None, "", local)):
+                continue
+            for session in agg.get("sessions", []):
+                native_id = SN.identity(agg, session)
+                if not native_id:
+                    continue
+                alias = SN.display_name(names, local, "claude", agg.get("path", ""), native_id)
+                if alias:
+                    aliases[(agg.get("path", ""), native_id)] = alias
+        result = ES.build_snapshot(items, local, query, refresh_sync()["revision"],
+                                   price_usage=_priced_usage, deduplicate=_one_per_conversation,
+                                   identity=SN.identity, claude_parent_key=_claude_parent_key,
+                                   display_aliases=aliases)
+        if alias_error:
+            result["limitations"].append("Saved session display names could not be read; recorded titles are shown.")
+        return result
 
 
 def _sum_usage(target, row):
@@ -2497,6 +2530,18 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, json.dumps(backup_status()))
         elif route == "/api/diagnostics":
             self._send(200, json.dumps(build_diagnostics()))
+        elif route == "/api/editor":
+            if not self._loopback_client():
+                self._send(403, json.dumps({"error": "editor details are available only on this machine"}))
+                return
+            try:
+                result = build_editor_snapshot(urllib.parse.urlsplit(self.path).query)
+                self._send(200, json.dumps(result, allow_nan=False))
+            except ValueError:
+                self._send(400, json.dumps({"error": "Invalid editor scope, range or roots."}))
+            except Exception:
+                import traceback; traceback.print_exc()
+                self._send(500, json.dumps({"error": "Editor usage is temporarily unavailable."}))
         elif route == "/api/session-timeline":
             query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
             try:
