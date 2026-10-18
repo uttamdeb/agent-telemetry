@@ -7,11 +7,13 @@ vs Google** provider comparison, an activity calendar, and breakdowns by **model
 day, hour, weekday, tool, IDE, project and session** — plus how much **disk** all these logs
 eat, and suggestions for spending less, drawn from your own numbers.
 
-**Your data stays on your machine** — unless you turn on [Your devices](#your-devices-optional)
-to combine two of your own computers over your local network. Optional account lookups
-contact the provider only after you choose **Read once**; account metadata is never shared
-with paired devices. No account, no API key, no
-telemetry, no dependencies — just Python's standard library and a vendored copy of Chart.js.
+By default, log inventory, usage and the cache stay on this machine. Separate actions can
+share selected exports with [paired devices](#your-devices-optional), return requested
+analytics to an enabled [local MCP client](docs/mcp.md) (which may forward tool results to
+its model provider), contact a provider after a confirmed **Read once** account lookup, or
+fetch update metadata after you click **Check for updates**. No account or API key is needed
+for the dashboard; it has no runtime dependencies beyond Python's standard library and a
+vendored copy of Chart.js.
 
 Covers **Claude Code · Claude Desktop · Codex · GitHub Copilot · Cursor · OpenCode · Hermes Agent · OpenClaw**.
 
@@ -144,8 +146,8 @@ the sync API retain independent polling until upgraded and restarted.
 Read the [macOS guide](macos/AgentTelemetryMac/README.md) and
 [Windows guide](windows/README.md) for paths, controls and development checks. macOS
 downloads and source builds are ad-hoc signed; a Developer ID signed/notarized installer
-is not supplied. The backend remains stdlib-only and no runtime update checks
-are added. The macOS packaging step downloads a hash-pinned Python runtime explicitly.
+is not supplied. The backend remains stdlib-only and does not check for updates
+automatically. The macOS packaging step downloads a hash-pinned Python runtime explicitly.
 
 Local app integrations can use `GET /api/health` for a small readiness response that contains
 no usage data, and `GET /api/summary` for today's token total and API-equivalent estimated
@@ -156,6 +158,18 @@ retain one serialized snapshot per display tick, in memory only; the ledger is u
 `GET /api/native` reports local app status. `POST /api/native` requires the same CSRF guard
 as all writes. `POST /api/shutdown` additionally requires the owning Windows client's
 per-process control token; a normal standalone dashboard cannot be stopped by that route.
+
+## Local MCP access (optional)
+
+AgentTelemetry provides eight read-only MCP tools for usage, comparisons, supported insights,
+session summaries and timelines, data health, the telemetry catalog and saved subscription
+limits. MCP access is off by default. Enable it in Settings and confirm each scope. The local
+bridge requires an already-running dashboard and returns data only when the configured MCP
+client requests it. A cloud-backed client may send tool results to its provider; review that
+client's data-handling settings before enabling access. Project/device names and usage from
+connected devices require their own opt-in scopes. The MCP bridge never refreshes accounts,
+returns prompt text, or edits client configuration. See [MCP tools, setup and privacy
+limits](docs/mcp.md).
 
 > `--rebuild` deletes the cache, and with it every session whose log has since been deleted
 > from disk (see [Storage](#storage--what-these-logs-cost-you-in-disk)). Copy

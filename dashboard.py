@@ -26,6 +26,8 @@ import ledger_backups as LB
 import diagnostics as DG
 import session_timeline as ST
 from local_servers import LocalServerInventory
+import mcp_access as MA
+import mcp_backend as MCP
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = HERE
@@ -1702,8 +1704,10 @@ def build_storage():
 
 # ---------------------------------------------------------------------------
 # Devices — see your other machines' usage here, and let them see this one's.
-# Strictly opt-in from Settings, over the local network, and the ONLY mode in
-# which anything leaves this machine. Two separate switches:
+# Strictly opt-in from Settings over the local network. Device sharing is one
+# separate path for data to leave this machine; other paths are MCP results sent
+# to an opted-in client, confirmed one-time account lookups, and user-clicked
+# software updates. Two separate switches:
 #   * Share: a SECOND, read-only listener on the network (PEER_PORT) answering one
 #     route, GET /api/peer/export, and only to a caller holding this device's
 #     pairing code. The dashboard itself stays on 127.0.0.1, so its write
@@ -2290,6 +2294,16 @@ def _zero():
 # ---------------------------------------------------------------------------
 # HTTP server
 # ---------------------------------------------------------------------------
+def _mcp_python_executable():
+    """Return a console-capable Python path for the stdio child process."""
+    executable = os.path.abspath(sys.executable)
+    if os.path.basename(executable).lower() == "pythonw.exe":
+        console = os.path.join(os.path.dirname(executable), "python.exe")
+        if os.path.isfile(console):
+            executable = console
+    return executable
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
@@ -2341,6 +2355,18 @@ class Handler(BaseHTTPRequestHandler):
                 "building": bool(_meta.get("building")),
                 "pid": os.getpid(),
             }))
+        elif route == "/api/mcp":
+            if not self._loopback_client():
+                self._send(403, json.dumps({"error": "MCP settings are available only on this machine"}))
+                return
+            try:
+                self._send(200, json.dumps(MCP.settings_response(
+                    self._mcp_backend_url(), DATA_DIR, _mcp_python_executable(),
+                    os.path.join(HERE, "mcp_server.py")), allow_nan=False))
+            except MA.AccessError:
+                self._send(500, json.dumps({"error": "MCP access settings are unavailable. The file was preserved; repair them in Settings."}))
+        elif route == "/api/mcp/query":
+            self._send(405, json.dumps({"error": "use POST with MCP authorization"}))
         elif route == "/api/native":
             self._send(200, json.dumps(N.status()))
         elif route == "/api/sync":
@@ -2415,6 +2441,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def _origin_ok(self):
         """Pin every dashboard request to this listener, including private GETs."""
+        server_address = getattr(self.server, "server_address", None)
+        listen_port = (server_address[1] if isinstance(server_address, tuple) and len(server_address) > 1
+                       else BIND["port"])
         try:
             authority = urllib.parse.urlsplit("//" + (self.headers.get("Host") or ""))
             host, port = authority.hostname, authority.port
@@ -2428,7 +2457,7 @@ class Handler(BaseHTTPRequestHandler):
             allowed_hosts.update(str(x).lower() for x in _lan_addrs())
         if not host or host.lower() not in allowed_hosts:
             return False
-        if port is not None and port != BIND["port"]:
+        if port is not None and port != listen_port:
             return False
         site = (self.headers.get("Sec-Fetch-Site") or "").strip().lower()
         if site and site not in ("same-origin", "none"):
@@ -2441,7 +2470,7 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError:
                 return False
             if (parsed.scheme not in ("http", "https") or parsed.hostname != host
-                    or origin_port != BIND["port"] or parsed.path not in ("", "/")
+                    or origin_port != listen_port or parsed.path not in ("", "/")
                     or parsed.query or parsed.fragment or parsed.username is not None):
                 return False
         return True
@@ -2456,8 +2485,63 @@ class Handler(BaseHTTPRequestHandler):
         except (ValueError, TypeError):
             return False
 
+    def _mcp_backend_url(self):
+        """Use the actual listener port and a literal loopback origin, never Host."""
+        server_address = getattr(self.server, "server_address", None)
+        port = (server_address[1] if isinstance(server_address, tuple) and len(server_address) > 1
+                else BIND["port"])
+        return MA.canonical_backend_url(f"http://127.0.0.1:{int(port)}")
+
+    def _mcp_builders(self):
+        return {
+            "payload": build_payload,
+            "health": build_diagnostics,
+            "accounts": build_account_payload,
+            "timeline": build_session_timeline,
+            "is_building": lambda: bool(_meta.get("building")),
+        }
+
+    def _mcp_query(self):
+        if not self._loopback_client():
+            self._send(403, json.dumps(MCP.error_payload(MCP.MCPBackendError(
+                403, "forbidden", "MCP queries are available only on this machine."))))
+            return
+        if not self._csrf_ok():
+            error = MCP.MCPBackendError(403, "forbidden", "The MCP query requires a same-origin JSON request.")
+            self._send(error.status, json.dumps(MCP.error_payload(error)))
+            return
+        try:
+            raw_length = self.headers.get("Content-Length")
+            if raw_length is None or not raw_length.isascii() or not raw_length.isdecimal():
+                raise ValueError
+            length = int(raw_length)
+            if length <= 0:
+                raise ValueError
+        except (ValueError, OverflowError):
+            error = MCP.MCPBackendError(400, "invalid_request", "The MCP query has an invalid body length.")
+            self._send(error.status, json.dumps(MCP.error_payload(error)))
+            return
+        if length > MCP.MAX_REQUEST_BYTES:
+            error = MCP.MCPBackendError(413, "request_too_large", "The MCP query body exceeds the size limit.")
+            self._send(error.status, json.dumps(MCP.error_payload(error)))
+            return
+        raw = self.rfile.read(length)
+        if len(raw) != length:
+            error = MCP.MCPBackendError(400, "invalid_request", "The MCP query body was incomplete.")
+            self._send(error.status, json.dumps(MCP.error_payload(error)))
+            return
+        try:
+            result = MCP.execute_query(raw, self.headers.get("Authorization"), self._mcp_backend_url(),
+                                       DATA_DIR, self._mcp_builders())
+            self._send(200, json.dumps(result, ensure_ascii=False, allow_nan=False, separators=(",", ":")))
+        except MCP.MCPBackendError as error:
+            self._send(error.status, json.dumps(MCP.error_payload(error), ensure_ascii=False))
+
     def do_POST(self):
         route = self.path.split("?")[0]
+        if route == "/api/mcp/query":
+            self._mcp_query()
+            return
         local_server_routes = {
             "/api/local-servers/stop",
             "/api/local-servers/configure",
@@ -2465,16 +2549,19 @@ class Handler(BaseHTTPRequestHandler):
             "/api/local-servers/start",
             "/api/local-servers/restart",
         }
-        if route in ("/api/settings", "/api/cache", "/api/update", "/api/devices", "/api/refresh", "/api/native", "/api/shutdown", "/api/sync", "/api/session-name", "/api/accounts", "/api/backups") or route in local_server_routes:
+        if route in ("/api/settings", "/api/cache", "/api/update", "/api/devices", "/api/refresh", "/api/native", "/api/shutdown", "/api/sync", "/api/session-name", "/api/accounts", "/api/backups", "/api/mcp") or route in local_server_routes:
             if route in local_server_routes and not self._loopback_client():
                 self._send(403, json.dumps({"error": "local servers can be managed only on this machine"}))
+                return
+            if route == "/api/mcp" and not self._loopback_client():
+                self._send(403, json.dumps({"error": "MCP settings are available only on this machine"}))
                 return
             if not self._csrf_ok():
                 self._send(403, json.dumps({"error": "cross-site request refused"}))
                 return
             try:
                 length = int(self.headers.get("Content-Length", 0) or 0)
-                if length < 0 or (route in local_server_routes and length > 16384):
+                if length < 0 or (route in local_server_routes and length > 16384) or (route == "/api/mcp" and length > 16384):
                     raise ValueError("invalid body length")
             except ValueError:
                 self._send(400, json.dumps({"error": "invalid request body length"}))
@@ -2488,7 +2575,12 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(400, json.dumps({"error": "invalid JSON body"}))
                 return
             try:
-                if route == "/api/accounts":
+                if route == "/api/mcp":
+                    backend_url = self._mcp_backend_url()
+                    MA.configure(backend_url, DATA_DIR, body)
+                    result = MCP.settings_response(backend_url, DATA_DIR, _mcp_python_executable(),
+                                                   os.path.join(HERE, "mcp_server.py"))
+                elif route == "/api/accounts":
                     A.refresh_account(body.get("source"), body.get("confirmed"))
                     result = build_account_payload()
                 elif route == "/api/backups":

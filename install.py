@@ -13,15 +13,19 @@ ROOT = Path(__file__).resolve().parent
 BACKEND_FILES = ("dashboard.py", "parser.py", "native.py", "session_names.py", "accounts.py",
                  "local_servers.py", "local_servers_windows.py", "ledger_backups.py",
                  "session_timeline.py", "diagnostics.py", "index.html", "chart.umd.min.js",
+                 "mcp_access.py", "mcp_backend.py", "mcp_protocol.py", "mcp_server.py",
+                 "mcp_tools.py", "telemetry_insights.py", "telemetry_query.py",
                  "manifest.json", "sw.js", "LICENSE")
 WINDOWS_FILES = ("tray.py", "monitor.py", "win32.py", "popover.py", "presentation.py")
 WINDOWS_ASSETS = ("AgentTelemetry.ico", "TrayIcon.ico")
-PRIVATE_TELEMETRY_NAMES = {".usage-backups", ".usage_cache.json", ".peers.json", ".peers", "server.log"}
+PRIVATE_TELEMETRY_NAMES = {".usage-backups", ".usage_cache.json", ".peers.json", ".peers",
+                          ".local_servers.json", "mcp-access.json", "mcp-access.lock", "server.log"}
 
 
 def _is_private_telemetry(path):
     name = Path(path).name
-    return name in PRIVATE_TELEMETRY_NAMES or name == ".local_servers.json" or name.startswith(".local_servers.")
+    return (name in PRIVATE_TELEMETRY_NAMES or name.startswith(".local_servers.")
+            or name.startswith(".mcp-access-"))
 
 
 def _validate_windows_payload(destination):

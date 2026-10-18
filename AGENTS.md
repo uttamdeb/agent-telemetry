@@ -2,10 +2,21 @@
 
 **AgentTelemetry** — a local, **stdlib-only** dashboard that reads the logs your AI coding tools already write
 to this machine and shows tokens, estimated cost, and breakdowns by model / day / tool /
-project / hour. Inventory and telemetry stay local unless the user turns on sharing (see
-"Your devices") or explicitly requests a one-time account lookup (see "Account snapshots").
+project / hour. Inventory, telemetry and the ledger stay on this machine by default. Separate
+user actions can share selected exports with paired devices, return requested analytics to an
+enabled local MCP client (which may forward tool results to a model provider), contact a provider
+for a confirmed account lookup, or fetch upstream update metadata after a clicked update check.
 An explicitly started saved server command can access the network with the user's permissions.
 Nothing to install.
+
+## Local MCP access
+
+The optional stdio MCP bridge requires a running dashboard and is off until enabled in Settings.
+It exposes eight read-only tools; project/device display names and connected-device data have
+separate opt-in scopes. Results go to the configured local client, whose provider may receive
+tool results. The bridge never starts the dashboard, refreshes accounts, reads the ledger
+directly or edits MCP client configuration. See [docs/mcp.md](docs/mcp.md) for tool contracts,
+protocol versions, privacy limits and examples.
 
 ```bash
 python3 dashboard.py            # http://127.0.0.1:7878
@@ -125,6 +136,9 @@ accurately. Keep the existing public tag intact when adding packaging metadata/a
 | `accounts.py` | Private account observations, optional read-only CLI account queries and Claude status-line capture. |
 | `static/charts.js` | Chart.js theming, `mk()`/`hbar()`/`areaDS()`, calendar + heatmap SVG. |
 | `static/views.js` | The eight views, controls, events, boot. |
+| `mcp_server.py` | Local stdio MCP bridge; read-only, authenticated loopback queries. |
+| `mcp_backend.py`, `telemetry_query.py`, `telemetry_insights.py` | Authenticated MCP dispatch and shared analytics. |
+| `mcp_access.py`, `mcp_protocol.py`, `mcp_tools.py` | Local consent/credentials, protocol compatibility and tool contracts. |
 | `index.html` | Shell only: sidebar (device name, tabs, live/refresh/theme/settings), page header (period, range, metric, filters), card markup, an SVG icon sprite. |
 
 Eight tabs in the sidebar: Overview · Cost · Models · Tools · Projects · Sessions ·
@@ -855,7 +869,7 @@ must not report three days of "active" time. Formatted client-side by `fmtDur()`
   `[cost,in,out,cr,cc,asst,user,tools,prem,active,req,cc5,cc1,reason,ws]`.
   `static/core.js`'s `clipSession()` also reads older ten-slot entries.
 
-## Your devices — the one opt-in exception to "nothing leaves this machine"
+## Your devices — optional local-network sharing
 
 Settings → **Your devices** combines two (or more) of the user's own computers over the
 local network. Both switches are off until the user turns them on, and each asks first
@@ -920,10 +934,11 @@ local network. Both switches are off until the user turns them on, and each asks
 ## Version and self-update
 
 The sidebar footer shows the running version from this checkout's git metadata
-(`VERSION` in `dashboard.py`: `git describe --tags`, commit, branch). **Apart from
-opt-in device sharing and explicit one-time account lookups, checking for an update
-is the only thing that touches the network, and only on a click** — never on a timer, which would break "nothing leaves
-this machine". `POST /api/update` (through
+(`VERSION` in `dashboard.py`: `git describe --tags`, commit, branch). Checking for updates
+contacts the upstream only after the user clicks; there are no periodic update requests.
+This is separate from opt-in device sharing and confirmed account lookups. The local MCP
+bridge returns selected tool results to its configured client when asked; that client may
+forward them to its model provider (see [docs/mcp.md](docs/mcp.md)). `POST /api/update` (through
 `_csrf_ok()`): `check` fetches the upstream and reports how far behind; `apply`
 fast-forwards only — it refuses local edits to tracked files and commits the upstream
 doesn't have — then saves the cache and re-execs the process (`_restart`), and the page
