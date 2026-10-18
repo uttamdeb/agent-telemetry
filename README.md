@@ -71,6 +71,18 @@ Options: `python3 dashboard.py --port 9000` · `--rebuild` (ignore cache, full r
 cache and optional device-sharing files outside the checkout). Without `--data-dir`, current
 checkout behavior is unchanged. Or `./run.sh [flags]`.
 
+## Recognizing subagent sessions
+
+Sessions shows a full **Subagent** label, a branching icon, and a searchable session
+identifier for transcripts that the source identifies as delegated work. Use
+**All sessions / Subagents / Other sessions** to focus the list; the choice survives
+reloads and shared links without changing the other dashboard totals. Session titles
+also open details from the keyboard.
+
+Recorded delegation counts and Claude sidechain usage are explained in the drawer.
+Unmarked or older entries are not assumed to be primary sessions, and parent links
+are not inferred. See [behavior and limitations](docs/subagent-sessions.md).
+
 ## Subscription limits and account details
 
 The bottom of Cost shows subscription limits for Codex and Claude Code when they

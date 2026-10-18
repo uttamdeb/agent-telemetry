@@ -1,0 +1,120 @@
+/* Synthetic Sessions UX checks; never reads tool logs or a user's ledger. */
+const fs=require('fs'),path=require('path'),vm=require('vm'),assert=require('assert/strict');
+const root=path.resolve(__dirname,'..'),nodes=new Map(),buttons=new Map();
+function element(){
+  const classes=new Set(),attributes={};
+  return {innerHTML:'',textContent:'',attributes,
+    classList:{add:k=>classes.add(k),remove:k=>classes.delete(k),
+      toggle:(k,on)=>on?classes.add(k):classes.delete(k)},
+    setAttribute:(k,v)=>{attributes[k]=String(v)},focus(){this.focused=true}};
+}
+const node=id=>{if(!nodes.has(id))nodes.set(id,element());return nodes.get(id)};
+for(const type of ['all','subagents','other'])buttons.set(type,element());
+const location={pathname:'/',search:'',hash:'#sessions'};
+const context=vm.createContext({console,URLSearchParams,Date,Set,location,
+  history:{state:null,replaceState(_state,_title,next){
+    const url=new URL(next,'https://fixture.invalid');
+    Object.assign(location,{pathname:url.pathname,search:url.search,hash:url.hash});
+  }},
+  document:{addEventListener(){},getElementById:node,querySelectorAll:()=>[],
+    querySelector(selector){const m=selector.match(/^\[data-session-type="(all|subagents|other)"\]$/);return m?buttons.get(m[1]):null}},
+  getComputedStyle:()=>({getPropertyValue:()=> '#000'})});
+for(const file of ['static/core.js','static/charts.js','static/insights.js','static/timeline.js'])
+  vm.runInContext(fs.readFileSync(path.join(root,file),'utf8'),context);
+const views=fs.readFileSync(path.join(root,'static/views.js'),'utf8');
+vm.runInContext(views.slice(0,views.indexOf('document.getElementById("tabs").addEventListener')),context);
+const run=code=>vm.runInContext(code,context),json=code=>JSON.parse(run(`JSON.stringify(${code})`));
+
+// Only allowed values survive a URL round trip; unrelated URL state is retained.
+for(const type of ['subagents','other']){
+  location.search='?theme=dark&side=collapsed&session_type='+type;
+  run('filtersFromURL();filtersToURL()');
+  assert.equal(run('S.sessionType'),type);
+  const params=new URLSearchParams(location.search);
+  assert.equal(params.get('session_type'),type);
+  assert.equal(params.get('theme'),'dark');assert.equal(params.get('side'),'collapsed');
+}
+for(const value of ['', 'all','main','<img src=x onerror=alert(1)>']){
+  location.search='?session_type='+encodeURIComponent(value);
+  run('S.sessionType="subagents";filtersFromURL();filtersToURL()');
+  assert.equal(run('S.sessionType'),'all');
+  assert.equal(new URLSearchParams(location.search).has('session_type'),false);
+}
+
+run(`S.preset='custom';S.from='2026-10-01';S.to='2026-10-31';S.search='';
+RAW={device:{id:'local'},devices:[{id:'local',name:'Local'},{id:'remote',name:'Remote'}],
+  records:[{date:'2026-10-18',source:'codex',model:'M',project:'P',device:'local',in:100,cost:1}],hourly:[],
+  sessions:[
+    {id:'child001',rename_id:'child001-full-native-id',source:'codex',title:'Same task',project:'P',model:'M',device:'local',subagent:true,in:40,out:4,cost:.4,end:'2026-10-18T10:00:00',subagents:1},
+    {id:'child002',rename_id:'child002-full-native-id',source:'claude',title:'<img src=x onerror=alert(1)>',project:'P',model:'M',device:'remote',subagent:true,in:20,out:2,cost:.2,end:'2026-10-18T11:00:00',archived:true},
+    {id:'parent01',source:'codex',title:'Same task',project:'P',model:'M',device:'local',subagent:false,in:100,out:10,cost:1,end:'2026-10-18T12:00:00',subagents:2},
+    {id:'legacy01',source:'claude',title:'Legacy row',project:'P',model:'M',device:'local',in:10,out:1,cost:.1,end:'2026-10-18T13:00:00'}],
+  model_vendor:{M:'OpenAI'}};`);
+
+const originalSlice=json('slice()');
+for(const type of ['all','subagents','other']){
+  run(`S.sessionType='${type}'`);
+  assert.deepEqual(json('slice()'),originalSlice,'A Sessions-only type selection must not change shared analytics slices');
+}
+assert.deepEqual(json('sessionTypeCounts(sessionRows(slice()))'),{all:4,subagents:2,other:2});
+assert.deepEqual(json(`sessionRowsForType(sessionRows(slice()),'subagents').map(s=>s.id)`),['child001','child002']);
+assert.deepEqual(json(`sessionRowsForType(sessionRows(slice()),'other').map(s=>s.id)`),['parent01','legacy01']);
+assert.equal(json(`sessionRowsForType(sessionRows(slice()),'all')`).length,4);
+
+// Search recognizes existing IDs as well as titles; global source/date/device
+// filters and search are applied before the type counts are displayed.
+run(`S.search='CHILD001-full-native-id'`);
+assert.deepEqual(json('sessionRows(slice()).map(s=>s.id)'),['child001']);
+run(`S.search='';S.tools=new Set(['codex'])`);
+assert.deepEqual(json('sessionTypeCounts(sessionRows(slice()))'),{all:2,subagents:1,other:1});
+run(`S.tools=new Set(ORDER);S.devs=new Set(['remote'])`);
+assert.deepEqual(json('sessionTypeCounts(sessionRows(slice()))'),{all:1,subagents:1,other:0});
+run(`S.devs.clear();S.from='2026-10-19'`);
+assert.deepEqual(json('sessionTypeCounts(sessionRows(slice()))'),{all:0,subagents:0,other:0});
+run(`S.from='2026-10-01';S.search='Same task'`);
+assert.deepEqual(json('sessionTypeCounts(sessionRows(slice()))'),{all:2,subagents:1,other:1});
+
+run(`S.search='';S.sessionType='subagents';viewSessions(slice())`);
+const html=node('sessTable').innerHTML;
+assert.match(html,/session-subagent/);
+assert.match(html,/>Subagent</);
+assert.match(html,/<button[^>]+class="session-open"/,'A session title is keyboard actionable');
+assert.match(html,/aria-label="Open session details for Subagent:/);
+assert.match(html,/child001-full-native-id/);
+assert.match(html,/&lt;img src=x onerror=alert\(1\)&gt;/);
+assert.doesNotMatch(html,/<img src=x/);
+assert.equal(buttons.get('subagents').attributes['aria-pressed'],'true');
+assert.equal(buttons.get('all').attributes['aria-pressed'],'false');
+assert.equal(node('sessTypeCountAll').textContent,'4');
+assert.equal(node('sessTypeCountSubagents').textContent,'2');
+assert.equal(node('sessTypeCountOther').textContent,'2');
+assert.deepEqual(json('SESS_CACHE.map(s=>s.id)'),['child002','child001'],'Row indices must match only the displayed, sorted sessions');
+
+run(`S.search='child001';S.sessionType='other';viewSessions(slice())`);
+assert.match(node('sessTable').innerHTML,/No other sessions match/);
+assert.match(node('sessTable').innerHTML,/data-session-type-reset/);
+assert.match(node('sessTable').innerHTML,/Show all sessions/);
+assert.equal(json('SESS_CACHE').length,0);
+
+// An older/unmarked row is not asserted to be a primary session. Delegation
+// counts are whole-session evidence, and Claude side tokens remain a subset.
+assert.match(run(`sessionTypeDetails({subagent:true})`),/Subagent session/);
+assert.match(run(`sessionTypeDetails({})`),/not record|unmarked|Not marked/i);
+assert.doesNotMatch(run(`sessionTypeDetails({})`),/confirmed primary|never delegated/i);
+assert.match(run(`sessionDelegationDetails({source:'codex',subagents:2})`),/whole session/);
+assert.match(run(`sessionDelegationDetails({source:'codex',subagents:2})`),/not tied|not limited|regardless|whole.session/i);
+const side=run(`sessionDelegationDetails({source:'claude',subagent:false,side:1000})`);
+assert.match(side,/already included/);assert.match(side,/not additional/);
+assert.equal(run(`sessionDelegationDetails({source:'claude',subagent:true,side:1000})`),'','A child transcript must not label its own side flag as evidence that it delegated');
+assert.doesNotMatch(run(`sessionDelegationBadge({source:'cursor',subagents:2})`),/start marker/,'Cursor retains counts rather than Codex start events');
+assert.doesNotMatch(run(`sessionTypeDetails({subagent:true,parent_thread_id:'inferred-parent'})`),/data-parent|<a\b|inferred-parent/,'No parent relationship is manufactured from unsupported fields');
+
+run(`S.search='';S.sessionType='all';viewSessions(slice());var opened='';openDrawer=html=>{opened=html};loadSessionTimeline=()=>{};openSession(2)`);
+assert.match(run('opened'),/Subagent session/);
+assert.match(run('opened'),/session-type-detail/);
+assert.doesNotMatch(run('opened'),/<img src=x/);
+run(`S.sessionType='subagents';S.search='hidden';resetFilters();filtersToURL()`);
+assert.equal(run('S.sessionType'),'all','Reset and Clear all must also clear the Sessions-only selector');
+assert.equal(run('S.search'),'');
+assert.equal(new URLSearchParams(location.search).has('session_type'),false);
+console.log('Subagent Sessions URL state, scope, counts, ID search, accessible rows, evidence and escaping checks passed.');
