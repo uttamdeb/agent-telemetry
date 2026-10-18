@@ -620,6 +620,11 @@ def _conversation_key(path, agg):
     an imported conversation must not hide another device's usage."""
     src = agg.get("source")
     device = agg.get("_device")              # None is this machine's own ledger
+    if src == "claude" and device is None and os.path.isabs(path):
+        # Local directory aliases can leave an older ledger entry beside the
+        # physical path. Keep both entries on disk, but count their usage once.
+        # Never resolve another device's paths against this machine's filesystem.
+        return (device, "claude", os.path.realpath(path))
     if src == "codex":
         return (device, "codex", P._leaf(path))
     if src == "copilot":
@@ -2070,7 +2075,12 @@ def _export_body():
     try:
         with _lock:
             items = list(_state["files"].items())
-        files = {path: _export_agg(a) for path, a in items}
+        # The receiving device cannot resolve our local directory symlinks.
+        # Deduplicate those aliases here while retaining all raw ledger entries.
+        claude = _one_per_conversation([(p, a) for p, a in items if a.get("source") == "claude"])
+        selected = {id(a) for a in claude}
+        files = {path: _export_agg(a) for path, a in items
+                 if a.get("source") != "claude" or id(a) in selected}
     finally:
         _refresh_lock.release()
     doc = {"proto": PEER_PROTO, "cache_version": CACHE_VERSION, "device_id": _local_id(),
