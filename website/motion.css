@@ -1,0 +1,392 @@
+/* Motion is opt-in after motion.js starts. Without JavaScript, the page stays visible. */
+html.motion-ready body::after {
+  position: fixed;
+  z-index: 1000;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 2px;
+  content: "";
+  pointer-events: none;
+  transform: scaleX(var(--page-progress, 0));
+  transform-origin: left center;
+  background: linear-gradient(90deg, #92d9b2, #b6efd3 60%, #9ecbd3);
+  box-shadow: 0 0 12px rgb(148 220 180 / 35%);
+  opacity: .78;
+}
+
+/* A slightly deeper entrance lets headings and glass panels read as part of the same scene. */
+html.motion-ready [data-reveal] {
+  opacity: 0;
+  filter: blur(6px);
+  transform: translateY(42px) scale(.985);
+  transition: opacity .85s cubic-bezier(.22,1,.36,1),
+    transform 1s cubic-bezier(.22,1,.36,1),
+    filter .9s ease;
+}
+
+html.motion-ready [data-reveal].is-visible,
+html.motion-ready [data-reveal]:focus-within {
+  opacity: 1;
+  filter: none;
+  transform: none;
+}
+
+html.motion-ready .site-header { animation: header-arrive .85s .1s cubic-bezier(.22,1,.36,1) backwards; }
+html.motion-ready .hero-copy.is-visible > :is(.eyebrow, h1, .hero-intro, .hero-actions, .hero-meta) {
+  animation: copy-arrive .9s cubic-bezier(.22,1,.36,1) backwards;
+  animation-delay: calc(var(--copy-index, 0) * 110ms);
+}
+html.motion-ready .hero-copy > h1 { --copy-index: 1; }
+html.motion-ready .hero-copy > .hero-intro { --copy-index: 2; }
+html.motion-ready .hero-copy > .hero-actions { --copy-index: 3; }
+html.motion-ready .hero-copy > .hero-meta { --copy-index: 4; }
+html.motion-ready [data-reveal].is-visible h2 { animation: heading-arrive 1.05s cubic-bezier(.22,1,.36,1) both; }
+html.motion-ready :is(.sample-number, .demo-metric strong) { font-variant-numeric: tabular-nums; }
+
+/* Steps, tools and people arrive in a short editorial rhythm. */
+html.motion-ready .steps > .step,
+html.motion-ready .team-grid > li,
+html.motion-ready .tool-list > li,
+html.motion-ready .download-options > .download-platform {
+  opacity: 0;
+  translate: 0 30px;
+  transition: opacity .8s ease, translate .9s cubic-bezier(.22,1,.36,1);
+  transition-delay: calc(var(--motion-index, 0) * 120ms);
+}
+
+html.motion-ready .steps.motion-staggered > .step,
+html.motion-ready .team-grid.motion-staggered > li,
+html.motion-ready .tool-list.motion-staggered > li,
+html.motion-ready .download-options.motion-staggered > .download-platform,
+html.motion-ready .steps > .step:focus-within,
+html.motion-ready .team-grid > li:focus-within,
+html.motion-ready .download-options > .download-platform:focus-within {
+  opacity: 1;
+  translate: 0 0;
+}
+
+/* A few pixels of parallax keep the illustrations connected to the scroll. */
+html.motion-ready .hero-art,
+html.motion-ready .privacy-art,
+html.motion-ready .companion-visual {
+  translate: 0 var(--motion-scene-y, 0px);
+  transition: translate .3s cubic-bezier(.22,.61,.36,1);
+}
+
+html.motion-ready .hero-art.motion-in-view,
+html.motion-ready .privacy-art.motion-in-view,
+html.motion-ready .companion-visual.motion-in-view {
+  will-change: translate;
+}
+
+html.motion-ready .signal-art {
+  animation: signal-float 7s ease-in-out infinite;
+  animation-play-state: paused;
+}
+
+html.motion-ready .sample-float {
+  animation: sample-float 6s ease-in-out infinite;
+  animation-play-state: paused;
+}
+
+html.motion-ready .sample-spark i {
+  transform: scaleY(.15);
+  transform-origin: center bottom;
+  animation: spark-wake .7s cubic-bezier(.2,.7,.2,1) both;
+  animation-delay: calc(450ms + var(--spark-index, 0) * 45ms);
+}
+
+html.motion-ready .sample-spark i:nth-child(1) { --spark-index: 0; }
+html.motion-ready .sample-spark i:nth-child(2) { --spark-index: 1; }
+html.motion-ready .sample-spark i:nth-child(3) { --spark-index: 2; }
+html.motion-ready .sample-spark i:nth-child(4) { --spark-index: 3; }
+html.motion-ready .sample-spark i:nth-child(5) { --spark-index: 4; }
+html.motion-ready .sample-spark i:nth-child(6) { --spark-index: 5; }
+html.motion-ready .sample-spark i:nth-child(7) { --spark-index: 6; }
+html.motion-ready .sample-spark i:nth-child(8) { --spark-index: 7; }
+html.motion-ready .sample-spark i:nth-child(9) { --spark-index: 8; }
+html.motion-ready .sample-spark i:nth-child(10) { --spark-index: 9; }
+html.motion-ready .sample-spark i:nth-child(11) { --spark-index: 10; }
+html.motion-ready .sample-spark i:nth-child(12) { --spark-index: 11; }
+
+html.motion-ready .art-orbit {
+  animation: orbit-breathe 6s ease-in-out infinite alternate;
+  animation-play-state: paused;
+}
+
+html.motion-ready .hero-art.motion-in-view :is(.signal-art, .sample-float, .art-orbit) { animation-play-state: running; }
+
+html.motion-ready .orbit-two { animation-delay: 180ms; }
+
+html.motion-ready .privacy-art.motion-in-view .ring-a {
+  animation: ring-turn-a 34s linear infinite;
+}
+
+html.motion-ready .privacy-art.motion-in-view .ring-b {
+  animation: ring-turn-b 42s linear infinite;
+}
+
+html.motion-ready .privacy-art.motion-in-view .ring-c {
+  animation: ring-turn-c 37s linear infinite;
+}
+
+html.motion-ready .privacy-art.motion-in-view .privacy-core {
+  animation: core-glow 5s ease-in-out infinite;
+}
+
+html.motion-ready .companion-visual.motion-in-view .companion-glow {
+  animation: companion-glow 7s ease-in-out infinite;
+}
+
+html.motion-ready .companion-visual.motion-in-view .companion-signal path {
+  stroke-dasharray: 3 5;
+  animation: signal-trace 5s linear infinite;
+}
+
+/* Chart paths are measured once by JS, then drawn when their panel enters view. */
+html.motion-ready .demo-chart .chart-line {
+  stroke-dasharray: var(--motion-chart-length, 1200);
+  stroke-dashoffset: var(--motion-chart-length, 1200);
+}
+
+html.motion-ready .demo-chart.motion-chart-run .chart-line {
+  animation: chart-draw 1.08s cubic-bezier(.2,.7,.2,1) both;
+}
+
+html.motion-ready .demo-chart.motion-chart-run .chart-line-blue {
+  animation-delay: 110ms;
+}
+
+html.motion-ready .demo-panel.motion-arriving {
+  animation: panel-arrive .55s cubic-bezier(.22,1,.36,1) both;
+}
+
+html.motion-ready .demo-panel.motion-arriving :is(.demo-metric, .session-row, .device-card, .model-view-row, .tool-view-card, .project-view-card, .optimize-view-row) {
+  animation: panel-row-arrive .6s cubic-bezier(.22,1,.36,1) both;
+  animation-delay: calc(var(--row-index, 0) * 55ms);
+}
+
+html.motion-ready .demo-tabs { position: relative; isolation: isolate; }
+html.motion-ready .demo-tabs::before {
+  position: absolute;
+  z-index: -1;
+  top: 3px;
+  bottom: 3px;
+  left: var(--active-tab-left, 3px);
+  width: var(--active-tab-width, 0px);
+  border: 1px solid rgb(182 239 211 / 22%);
+  border-radius: 6px;
+  background: rgb(182 239 211 / 13%);
+  content: "";
+  opacity: 0;
+  transition: left .4s cubic-bezier(.22,1,.36,1), width .4s cubic-bezier(.22,1,.36,1), opacity .2s;
+}
+html.motion-ready .demo-tabs.has-active-tab::before { opacity: 1; }
+html.motion-ready .demo-tabs button[aria-selected="true"] { border-color: transparent; background: transparent; }
+
+/* The main actions have a bright surface, a passing highlight and a clear press. */
+html.motion-ready :is(button, .button, .download-link, .install-option, .nav-cta, .text-link, .site-nav a, .hero-foot a) { position: relative; overflow: hidden; }
+.download-link::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 45%;
+  background: linear-gradient(100deg, transparent, rgb(255 255 255 / 35%), transparent);
+  content: "";
+  pointer-events: none;
+  transform: translateX(-150%) skewX(-20deg);
+}
+html.motion-ready .download-link:is(:hover, :focus-visible)::before { animation: download-sheen .8s cubic-bezier(.22,.61,.36,1); }
+html.motion-ready .download-link:is(:hover, :focus-visible) .download-arrow svg { animation: download-arrow .65s cubic-bezier(.22,1,.36,1); }
+html.motion-ready .download-orbit.motion-in-view > div { animation: download-orbit-turn 45s linear infinite; }
+html.motion-ready .download-orbit.motion-in-view > div:nth-child(2) { animation-direction: reverse; animation-duration: 55s; }
+html.motion-ready .command-primary { transition: border-color .35s, box-shadow .35s; }
+html.motion-ready .command-primary:hover { border-color: rgb(182 239 211 / 60%); box-shadow: 0 12px 40px rgb(0 0 0 / 22%), 0 0 28px rgb(154 228 183 / 5%); }
+html.motion-ready .install-menu[open] .install-popover { animation: popover-arrive .35s cubic-bezier(.22,1,.36,1) backwards; }
+
+/* The mobile menu keeps its layout while opacity, lift and blur animate. */
+@media (max-width: 760px) {
+  html.motion-ready .site-header { animation-name: mobile-header-arrive; }
+
+  html.motion-ready .site-nav {
+    display: flex;
+    visibility: visible;
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    transform-origin: top right;
+    transition: opacity .2s ease, transform .25s cubic-bezier(.2,.7,.2,1), visibility .25s;
+  }
+
+  html.motion-ready.is-menu-closed .site-nav {
+    visibility: hidden;
+    opacity: 0;
+    transform: translateY(-8px) scale(.985);
+    pointer-events: none;
+  }
+}
+
+/* Buttons give a small press response. The separate ripple never blocks the action. */
+html.motion-ready :is(button, .button, .download-link, .nav-cta, .text-link, .hero-foot a):active:not(:disabled) {
+  transform: translateY(1px) scale(.985);
+  transition-duration: 90ms;
+}
+
+.motion-ripple {
+  position: absolute;
+  z-index: 3;
+  display: block;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgb(209 255 226 / 35%), rgb(182 239 211 / 16%) 44%, transparent 72%);
+  pointer-events: none;
+  transform: translate(-50%, -50%) scale(.08);
+  animation: click-ripple .48s cubic-bezier(.2,.7,.2,1) forwards;
+}
+
+html.motion-ready .faq-list > details > summary::after {
+  transition: transform .25s cubic-bezier(.2,.7,.2,1), color .2s ease;
+}
+
+html.motion-ready .faq-list > details[open] > summary::after {
+  transform: translateY(-50%) rotate(90deg);
+}
+
+html.motion-ready .faq-list > details[open] > .faq-answer {
+  animation: faq-answer-in .32s cubic-bezier(.2,.7,.2,1) both;
+}
+
+html.motion-ready .faq-list > details[open] > .faq-answer > p {
+  animation: faq-copy-in .42s .06s cubic-bezier(.2,.7,.2,1) both;
+}
+
+@keyframes signal-float {
+  0%, 100% { translate: 0 0; }
+  50% { translate: 0 -14px; }
+}
+
+@keyframes sample-float {
+  0%, 100% { translate: 0 0; }
+  50% { translate: 0 11px; }
+}
+
+@keyframes spark-wake {
+  to { transform: scaleY(1); }
+}
+
+@keyframes orbit-breathe {
+  0% { opacity: .25; scale: .96; }
+  100% { opacity: 1; scale: 1; }
+}
+
+@keyframes ring-turn-a { to { rotate: 360deg; } }
+@keyframes ring-turn-b { to { rotate: -360deg; } }
+@keyframes ring-turn-c { to { rotate: 360deg; } }
+
+@keyframes core-glow {
+  0%, 100% { box-shadow: 0 0 38px rgb(138 222 172 / 12%), inset 0 1px 0 rgb(255 255 255 / 16%); }
+  50% { box-shadow: 0 0 54px rgb(138 222 172 / 21%), inset 0 1px 0 rgb(255 255 255 / 18%); }
+}
+
+@keyframes companion-glow {
+  0%, 100% { opacity: .76; scale: .97; }
+  50% { opacity: 1; scale: 1.025; }
+}
+
+@keyframes signal-trace {
+  to { stroke-dashoffset: -40; }
+}
+
+@keyframes chart-draw { to { stroke-dashoffset: 0; } }
+
+@keyframes panel-arrive {
+  from { opacity: 0; transform: translateY(9px); filter: blur(2px); }
+  to { opacity: 1; transform: none; filter: none; }
+}
+
+@keyframes header-arrive { from { opacity: 0; translate: 0 -14px; } to { opacity: 1; translate: 0 0; } }
+@keyframes mobile-header-arrive { from { top: 1px; } to { top: 15px; } }
+@keyframes copy-arrive { from { opacity: 0; translate: 0 24px; } to { opacity: 1; translate: 0 0; } }
+@keyframes heading-arrive { from { translate: 0 18px; } to { translate: 0 0; } }
+@keyframes panel-row-arrive { from { opacity: 0; translate: 0 16px; } to { opacity: 1; translate: 0 0; } }
+@keyframes popover-arrive { from { opacity: 0; translate: 0 -10px; scale: .97; } to { opacity: 1; translate: 0 0; scale: 1; } }
+@keyframes download-sheen { to { transform: translateX(360%) skewX(-20deg); } }
+@keyframes download-arrow { 35% { translate: 0 5px; } 65% { translate: 0 -2px; } to { translate: 0 0; } }
+@keyframes download-orbit-turn { to { rotate: 360deg; } }
+
+@keyframes click-ripple {
+  to { opacity: 0; transform: translate(-50%, -50%) scale(1); }
+}
+
+@keyframes faq-answer-in {
+  from { opacity: 0; transform: translateY(-5px); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes faq-copy-in {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: none; }
+}
+
+html.motion-reduced body::after { display: none; }
+html.motion-reduced *,
+html.motion-reduced *::before,
+html.motion-reduced *::after {
+  animation: none !important;
+  transition: none !important;
+  scroll-behavior: auto !important;
+}
+
+html.motion-reduced [data-reveal],
+html.motion-reduced .steps > .step,
+html.motion-reduced .team-grid > li,
+html.motion-reduced .tool-list > li {
+  opacity: 1 !important;
+  transform: none !important;
+  translate: none !important;
+  filter: none !important;
+}
+html.motion-reduced .download-options > .download-platform { opacity: 1 !important; translate: none !important; }
+html.motion-reduced .download-link:hover { transform: none; }
+html.motion-suspended *, html.motion-suspended *::before, html.motion-suspended *::after { animation-play-state: paused !important; }
+
+html.motion-reduced .hero-art,
+html.motion-reduced .privacy-art,
+html.motion-reduced .companion-visual {
+  translate: none !important;
+  will-change: auto !important;
+}
+
+html.motion-reduced .signal-art,
+html.motion-reduced .sample-float { translate: none !important; }
+html.motion-reduced .sample-spark i { transform: none !important; }
+html.motion-reduced .motion-ripple { display: none !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  html.motion-ready body::after { display: none; }
+  html.motion-ready *,
+  html.motion-ready *::before,
+  html.motion-ready *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+  html.motion-ready [data-reveal],
+  html.motion-ready .steps > .step,
+  html.motion-ready .team-grid > li,
+  html.motion-ready .tool-list > li,
+  html.motion-ready .download-options > .download-platform {
+    opacity: 1 !important;
+    transform: none !important;
+    translate: none !important;
+    filter: none !important;
+  }
+  html.motion-ready .hero-art,
+  html.motion-ready .privacy-art,
+  html.motion-ready .companion-visual {
+    translate: none !important;
+    will-change: auto !important;
+  }
+  html.motion-ready .signal-art,
+  html.motion-ready .sample-float { translate: none !important; }
+  html.motion-ready .sample-spark i { transform: none !important; }
+  html.motion-ready .motion-ripple { display: none !important; }
+}
