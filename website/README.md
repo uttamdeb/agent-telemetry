@@ -118,6 +118,8 @@ its full design.
   file-type labels, the editor link, and the Linux/source link. Follow the editor link;
   check the Marketplace target, universal VSIX download, desktop editor guide, and the
   separate app/extension version labels.
+- On a fresh page load, follow both hero links to the editor and MCP cards; their
+  headings must settle below the fixed navigation at desktop and mobile widths.
 - Check the MCP setup card and guide link. Confirm the off-by-default state, running
   dashboard requirement, consent path, separate name/device opt-ins, and cloud-client
   forwarding warning appear near the setup entry point and in the privacy section/FAQ.

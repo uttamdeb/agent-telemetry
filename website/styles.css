@@ -405,6 +405,8 @@ h1 em, h2 em, h3 em { color: var(--mint); font-family: var(--serif); font-weight
 .download-heading > p:last-child { margin: 18px 0 0; color: #aab9af; font-size: 12px; }
 .download-options { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 39px; }
 .integration-options { margin-top: 17px; }
+/* Keep fragment destinations stationary while the cards fade into view. */
+html.motion-ready .download-options.integration-options > .download-platform { translate: none; }
 .download-platform { display: flex; min-width: 0; flex-direction: column; padding: 24px; border: 1px solid rgb(225 245 233 / 16%); border-radius: 18px; background: linear-gradient(145deg, rgb(246 255 248 / 5%), rgb(5 11 10 / 28%)); }
 .integration-platform .platform-heading { margin-bottom: 12px; }
 .integration-copy { margin: 0 0 14px; color: #aebbb2; font-size: 13px; line-height: 1.65; }
