@@ -16,7 +16,7 @@ async function until(predicate, message, timeout = 30000) {
 
 async function run() {
   console.log(`AT_EXTENSION_SMOKE_START ${vscode.env.appName} ${vscode.version}`);
-  const extension = vscode.extensions.getExtension('uttamdeb.agenttelemetry');
+  const extension = vscode.extensions.getExtension('agenttelemetry-team.agenttelemetry');
   assert.ok(extension, 'The packaged extension must be registered in the real host');
   const config = vscode.workspace.getConfiguration('agentTelemetry');
   await config.update('port', Number(process.env.AT_EDITOR_TEST_PORT), vscode.ConfigurationTarget.Global);

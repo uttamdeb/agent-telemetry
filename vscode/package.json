@@ -4,7 +4,7 @@
   "icon": "media/app-icon.png",
   "description": "Tokens, estimated API cost and subagent sessions for Claude Code, Codex, Copilot and more. Local by default.",
   "version": "2.0.0",
-  "publisher": "uttamdeb",
+  "publisher": "agenttelemetry-team",
   "license": "MIT",
   "engines": {
     "vscode": "^1.85.0"

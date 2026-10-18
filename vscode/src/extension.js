@@ -99,7 +99,7 @@ function activate(context) {
     if (typeof key === 'string') monitor.select(key);
     monitor.emit();
   };
-  const settings = () => vscode.commands.executeCommand('workbench.action.openSettings', '@ext:uttamdeb.agenttelemetry');
+  const settings = () => vscode.commands.executeCommand('workbench.action.openSettings', '@ext:agenttelemetry-team.agenttelemetry');
   const setupPython = async () => {
     const choice = await vscode.window.showInformationMessage('AgentTelemetry needs a local Python 3.9+ interpreter. Choose an existing executable in settings, or open Python’s download page. No packages are installed automatically.', 'Choose executable', 'Python downloads');
     if (choice === 'Choose executable') await vscode.commands.executeCommand('workbench.action.openSettings', 'agentTelemetry.pythonPath');

@@ -19,12 +19,12 @@ The Agent desk uses AgentTelemetry's app icon and light/dark design, with editor
 
 ## Install
 
-In desktop Visual Studio Code, open **Extensions**, search for **AgentTelemetry**, and choose the extension with ID **`uttamdeb.agenttelemetry`**. Click **Install**, then open its waveform icon in the activity bar or run **AgentTelemetry: Open Agent desk** from the Command Palette.
+In desktop Visual Studio Code, open **Extensions**, search for **AgentTelemetry** by **AgentTelemetry Team** (extension ID **`agenttelemetry-team.agenttelemetry`**). Click **Install**, then open its waveform icon in the activity bar or run **AgentTelemetry: Open Agent desk** from the Command Palette.
 
 You can also install from the terminal:
 
 ```bash
-code --install-extension uttamdeb.agenttelemetry
+code --install-extension agenttelemetry-team.agenttelemetry
 ```
 
 ### Install a VSIX in another desktop editor
