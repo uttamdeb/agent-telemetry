@@ -304,21 +304,27 @@ def build_snapshot(items, local, query, revision, *, price_usage, deduplicate,
                     seen_agents.add(aid)
                     child_rows = _records(agent.get("records"), source, False, price_usage, first, last)
                     child_usage = _empty()
-                    for _, _, values, _ in child_rows:
+                    child_models = {}
+                    for _, mdl, values, _ in child_rows:
                         _add(child_usage, values)
+                        child_models[mdl] = child_models.get(mdl, 0) + values["tokens"]
                     child_key = hashlib.sha256(json.dumps([key, aid]).encode()).hexdigest()
                     child_status = agent.get("usage_status")
                     if child_status not in ("recorded", "partial", "unavailable"):
                         child_status = "unavailable"
                     child = {**row, **child_usage, "key": child_key,
                         "id": native_id + "/agent/" + aid, "title": _text(agent.get("title")) or "Copilot subagent",
-                        "subagent": True, "parent_status": "unavailable", "model": _text(agent.get("model"), 160),
+                        "subagent": True, "parent_status": "unavailable",
+                        "model": _text(max(child_models, key=child_models.get) if child_models else agent.get("model"), 160),
                         "efforts": [], "compactions": _compactions(agent, first, last),
                         "start": _timestamp(agent.get("start")), "end": _timestamp(agent.get("end")),
                         "usage_in_parent": True, "usage_status": child_status,
                         "detail_limited": child_status != "recorded"}
                     all_sessions.append((child, parent, native_id))
-                    child_active = bool(child_rows) or bool(child["compactions"]) or _overlaps(agent, first, last)
+                    activity_dates = agent.get("activity_dates")
+                    activity = (any(isinstance(date, str) and first <= date <= last for date in activity_dates)
+                                if isinstance(activity_dates, list) else _overlaps(agent, first, last))
+                    child_active = bool(child_rows) or bool(child["compactions"]) or activity
                     if child_active and cwd is None:
                         unassigned += 1
                     if child_active and matched:

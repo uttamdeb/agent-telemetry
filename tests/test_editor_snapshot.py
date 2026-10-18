@@ -87,6 +87,15 @@ class EditorSnapshotTests(unittest.TestCase):
         self.assertEqual(limited["sessions_total"], 4)
         self.assertTrue(limited["truncated"])
 
+    def test_copilot_child_idle_days_are_not_inferred_as_activity(self):
+        agg = aggregate(source="copilot")
+        tomorrow = (datetime.date.today() + datetime.timedelta(days=1)).isoformat()
+        yesterday = (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
+        agg["sessions"][0]["copilot_sdk"] = {"agents": [{"id": "child", "title": "Review",
+            "start": yesterday + "T10:00:00Z", "end": tomorrow + "T10:00:00Z",
+            "activity_dates": [yesterday, tomorrow], "records": {}, "usage_status": "unavailable"}]}
+        self.assertEqual(self.snapshot([agg])["summary"]["subagents"], 0)
+
     def test_absolute_cwd_containment_never_matches_project_basename(self):
         files = [aggregate(), aggregate(CHILD, cwd="/elsewhere/project"),
                  aggregate(OTHER, cwd="/fixtures/project-neighbor")]

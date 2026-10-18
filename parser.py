@@ -2348,7 +2348,7 @@ def _sdk_subagents(events, started):
             children.setdefault(aid, {"id": aid, "title": text(d.get("agentDisplayName")) or
                 text(d.get("agentName")) or "Copilot subagent", "model": _sdk_model(d.get("model")),
                 "start": dt.isoformat(), "end": dt.isoformat(), "status": "started",
-                "records": {}, "compactions": [], "usage_status": "unavailable"})
+                "records": {}, "compactions": [], "activity_dates": [], "usage_status": "unavailable"})
     for e in events:
         aid, d, kind = e.get("agentId"), e["data"], e.get("type")
         child = children.get(aid) if isinstance(aid, str) else None
@@ -2356,6 +2356,8 @@ def _sdk_subagents(events, started):
         if child is None or dt is None or dt.isoformat() < child["start"]:
             continue
         child["end"] = max(child["end"], dt.isoformat())
+        date = _buckets(dt)[0]
+        if date not in child["activity_dates"]: child["activity_dates"].append(date)
         if kind in ("subagent.completed", "subagent.failed"):
             child["status"] = "completed" if kind.endswith("completed") else "failed"
         if kind in ("subagent.configured", "session.model_change"):
