@@ -187,6 +187,19 @@ function passModel(m){
   return true;
 }
 function passProj(p){ return !S.projs.size || S.projs.has(p||"(unknown)"); }
+function canonicalProjectFilters(){
+  const aliases=RAW?.project_aliases;
+  if(!aliases || typeof aliases!=="object" || Array.isArray(aliases)) return;
+  S.projs=new Set([...S.projs].map(original=>{
+    let value=original;
+    const seen=new Set();
+    while(Object.prototype.hasOwnProperty.call(aliases,value) && typeof aliases[value]==="string"){
+      if(seen.has(value) || seen.size>=100) return original;
+      seen.add(value); value=aliases[value];
+    }
+    return value;
+  }));
+}
 function passIde(i){ return !S.ides.size || S.ides.has(i||"(unknown)"); }
 /* Rows without a device are this one's (an older payload, or a single-device install). */
 function passDev(d){ return !S.devs.size || S.devs.has(d || (RAW && RAW.device && RAW.device.id)); }

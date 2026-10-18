@@ -19,7 +19,8 @@ BACKEND_FILES = ("dashboard.py", "editor_snapshot.py", "parser.py", "native.py",
 WINDOWS_FILES = ("tray.py", "monitor.py", "win32.py", "popover.py", "presentation.py")
 WINDOWS_ASSETS = ("AgentTelemetry.ico", "TrayIcon.ico")
 PRIVATE_TELEMETRY_NAMES = {".usage-backups", ".usage_cache.json", ".peers.json", ".peers",
-                          ".local_servers.json", "mcp-access.json", "mcp-access.lock", "server.log"}
+                          ".local_servers.json", "mcp-access.json", "mcp-access.lock", "server.log",
+                          "project-names.json"}
 
 
 def _is_private_telemetry(path):

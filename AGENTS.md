@@ -315,6 +315,12 @@ so that file stops being a cache and becomes the sole record. Two consequences:
 
 ## Usage explanations, history recovery and source health
 
+Private `AgentTelemetryNative/project-names.json` preferences map historical project
+labels and explicitly relocated local roots at presentation time. Use
+`native.set_project_preferences()` to validate/save them. Never rewrite transcripts,
+ledger entries or peer exports for a folder rename; no cache bump/rebuild is needed.
+See `docs/project-relocations.md` for migration and compatibility-link guidance.
+
 `static/insights.js` compares the same `filteredRecords()` as Overview/Cost with
 `prevRange()`. Within each independent project/model/tool/token-type grouping,
 current minus previous must reconcile to the hero delta. Keep decreases, departed

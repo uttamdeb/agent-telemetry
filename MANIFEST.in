@@ -62,4 +62,4 @@ prune dist
 prune .usage_cache.json
 prune .usage-backups
 prune .peers
-global-exclude .usage_cache.json .usage_cache.json.tmp .peers.json server.log *.py[cod]
+global-exclude .usage_cache.json .usage_cache.json.tmp .peers.json server.log project-names.json *.py[cod]
