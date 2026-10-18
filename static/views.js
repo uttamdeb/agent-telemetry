@@ -1244,13 +1244,13 @@ function sdkUsageNote(s){
   const notes=[];
   if(sdk.usage_status==="unavailable") notes.push("Copilot SDK has not saved token usage for this session. Tokens and estimated cost are unavailable, not zero. Recorded prompts, replies and tools are still included.");
   else if(sdk.usage_status==="partial") notes.push("Copilot SDK usage is partial. Only recorded token counts are included; totals and estimated cost can undercount.");
-  if(sdk.missing_turns) notes.push(`${sdk.missing_turns} session turn${sdk.missing_turns===1?"":"s"} without complete saved usage.`);
-  if((sdk.limitations||[]).includes("undated_usage")) notes.push("Some saved totals span multiple dates and cannot safely be assigned to a day; they are excluded from daily figures.");
+  if(sdk.missing_turns) notes.push(`${sdk.missing_turns} session turn${sdk.missing_turns===1?"":"s"} without fully reconciled usage.`);
+  if((sdk.limitations||[]).includes("undated_usage")) notes.push("Some saved totals cannot safely be assigned to a single day; they are excluded from daily figures.");
   if((sdk.limitations||[]).includes("hourly_usage")) notes.push("Some totals lack per-call timestamps, so hourly token distribution is incomplete.");
   if((sdk.limitations||[]).includes("ambiguous_editor")) notes.push("Multiple editors contain this SDK session; editor attribution is unavailable.");
   if(sdk.errors) notes.push(`${sdk.errors} SDK error${sdk.errors===1?"":"s"} recorded. Failed attempts are not assistant replies.`);
   if(sdk.aborts) notes.push(`${sdk.aborts} interrupted attempt${sdk.aborts===1?"":"s"} recorded.`);
-  if(notes.length) notes.push("Recording status covers the whole session. Live SDK usage events are ephemeral; saved VS Code turn totals or SDK shutdown summaries can provide usage later.");
+  if(notes.length) notes.push("Recording status covers the whole session. Saved per-call receipts, VS Code turn totals or SDK shutdown summaries can provide usage later.");
   return notes.join(" ");
 }
 function sdkUsageBadge(s){
@@ -1260,7 +1260,7 @@ function sdkUsageBadge(s){
 function sdkUsageDetails(s){
   const sdk=s.copilot_sdk; if(!sdk) return "";
   const note=sdkUsageNote(s);
-  const sources={vscode_turn_usage:"VS Code saved turn totals",usage_events:"Saved SDK usage events",shutdown:"SDK shutdown totals",message_output:"Saved output tokens only"};
+  const sources={vscode_turn_usage:"VS Code saved turn totals",usage_receipts:"Saved SDK per-call receipts",usage_events:"Saved SDK usage events",shutdown:"SDK shutdown totals",message_output:"Saved output tokens only"};
   const totals=(sdk.limitations||[]).includes("undated_usage") && (sdk.shutdown_totals||[]).length
     ? `<p class="hint">Additional session-wide SDK totals (no daily attribution): ${sdk.shutdown_totals.map(m=>`${esc(m.model)}: ${fmtNum((m.in||0)+(m.out||0)+(m.cr||0)+(m.cc||0))} tokens`).join("; ")}. These are not added to the selected range.</p>`:"";
   return `<div class="kv"><span class="k">Usage records</span><span class="v">${esc((sdk.usage_sources||[]).map(x=>sources[x]||"Saved SDK records").join(" · ")||"Not available")}</span></div>
@@ -1475,9 +1475,12 @@ function compactionDetails(s){
   if(s.source!=="claude" && s.source!=="claude-desktop" && s.source!=="codex" && !s.copilot_sdk) return "";
   if(!Array.isArray(s.compactions)) return '<div class="kv"><span class="k">Compactions</span><span class="v">Not recorded in this ledger entry</span></div>';
   const events=s.compactions;
-  const counts={manual:0,auto:0,unknown:0};
-  for(const e of events) counts[e.trigger==="manual"||e.trigger==="auto"?e.trigger:"unknown"]++;
+  const triggers={manual:"Manual",auto:"Auto",threshold:"Auto · context threshold",
+    context_limit_retry:"Auto · context limit",memory_pressure:"Auto · memory pressure",model_switch:"Model switch"};
+  const counts={manual:0,auto:0,model_switch:0,unknown:0};
+  for(const e of events) counts[e.trigger==="manual"||e.trigger==="model_switch"?e.trigger:["auto","threshold","context_limit_retry","memory_pressure"].includes(e.trigger)?"auto":"unknown"]++;
   const types=[counts.manual?`${counts.manual} manual`:"",counts.auto?`${counts.auto} auto`:"",
+    counts.model_switch?`${counts.model_switch} model switch`:"",
     counts.unknown?`${counts.unknown} without a recorded trigger`:""].filter(Boolean).join(" · ");
   const value=n=>Number.isFinite(n)?fmtTok(n):"Not recorded";
   const duration=n=>Number.isFinite(n)?`${Math.round(n/1000)}s`:"Unavailable";
@@ -1489,7 +1492,7 @@ function compactionDetails(s){
     <p class="hint">${types?esc(types)+" · ":""}Selected date range. Events belong to this session; model filters do not apply.</p>
     ${events.length?`<div class="compaction-table"><table aria-label="Completed compactions in selected date range"><thead><tr><th class="nosort">When</th><th class="nosort">Trigger</th><th class="nosort">Context</th><th class="nosort">Duration</th></tr></thead><tbody>${events.map(e=>`<tr>
       <td title="${esc(e.timestamp||"")}">${esc((e.timestamp||"").slice(0,16).replace("T"," "))}</td>
-      <td>${e.trigger==="manual"?"Manual":e.trigger==="auto"?"Auto":"Not recorded"}</td>
+      <td>${Object.hasOwn(triggers,e.trigger)?triggers[e.trigger]:"Not recorded"}</td>
       <td title="Before: ${Number.isFinite(e.before)?fmtNum(e.before):"Not recorded"}; after: ${Number.isFinite(e.after)?fmtNum(e.after):"Not recorded"}">${Number.isFinite(e.before)||Number.isFinite(e.after)?`${value(e.before)} → ${value(e.after)}`:"Not recorded"}</td>
       <td${Number.isFinite(e.duration_ms)?"":' title="Recorded timing is missing or cannot be matched uniquely."'}>${duration(e.duration_ms)}</td></tr>`).join("")}</tbody></table></div>
     <p class="hint">${note}</p>`:""}</section>`;

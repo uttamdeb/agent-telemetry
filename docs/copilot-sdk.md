@@ -1,7 +1,7 @@
 # Copilot SDK data coverage
 
 Verified against GitHub/Microsoft documentation, source and local records on
-2026-10-15. The newer Copilot harness in VS Code uses the SDK/CLI runtime; its
+2026-10-18. The newer Copilot harness in VS Code uses the SDK/CLI runtime; its
 records are separate from older extension-host Copilot Chat files. All usage is
 attributed to Copilot, including custom endpoint models.
 
@@ -16,8 +16,10 @@ attributed to Copilot, including custom endpoint models.
    `turn_usage`. `turns.event_id` links each usage row to its actual SDK user event.
    SQLite and WAL are read consistently in a read-only transaction. Database-only
    changes trigger an update even when `events.jsonl` has not grown.
-3. Saved `assistant.usage` and `session.shutdown` events, when present. Live usage
-   events normally are ephemeral and absent from the transcript.
+3. Persisted `session.usage_record.data.usage` receipts in newer runtimes, and
+   saved `assistant.usage` / `session.shutdown` events when present. Live usage
+   events normally are ephemeral. Cumulative `session.usage_checkpoint` snapshots
+   are not additional usage and are not summed with receipts.
 
 Only explicit ids connect records. Session titles, prompt text and nearby times
 are never used to guess a match. Nested tool-output/peer-chat database copies are
@@ -25,12 +27,32 @@ excluded. Other editors/platforms use the same portable editor-root discovery.
 
 ## Accounting
 
+Per-call receipts use their recorded model, token counts and timestamp. API call
+identities deduplicate receipt replays and live-event twins, even when a receipt
+precedes its assistant message. Direct user/assistant `turnId` matches re-anchor
+stale `originatingMessageId` values; reused user turn counters reset that mapping
+on resume. Queued prompts retain explicit native associations.
+
 VS Code's `_meta.turnTokenTotals` is the whole turn's per-model usage, including
 subagents. Top-level `inputTokens`/`outputTokens` can describe only its last call.
 `directTurnTokenTotals`, context-window sizes and subagent totals must not be
 added to the inclusive totals. Cached input is separated from ordinary input;
 reasoning remains a subset of output. Missing breakdown fields stay unavailable
 in the session detail. Exact-only figures include activity from covered turns.
+Complete dated receipts take precedence only when they cover the observed calls
+and every model/token category in the saved host snapshot. Otherwise the host
+snapshot is used once; receipts are not added on top. A turn with no associated
+reply can still use its explicit DB/user-event join when the entire stream is on
+one local day. Undated multi-day totals remain excluded.
+
+Successful compactions retain timestamps, recorded context sizes and matched
+duration. Trigger labels include automatic context threshold, context-limit retry,
+memory pressure, model switch and manual. In-progress/failed compactions do not
+increase the completed count. `compactionTokensUsed` supplies actual request
+usage, separate from context sizes; inclusive host totals already contain it.
+Between-turn compaction usage is added separately. Compaction usage-event twins
+are excluded in favor of completion usage, and compaction tokens alone never
+prove that a conversation turn has complete usage.
 
 SDK shutdown metrics are cumulative: they replace/enrich recorded usage, rather
 than being added to it. Stale snapshots cannot overwrite later recorded turns;
@@ -55,6 +77,9 @@ precedence in its existing parser.
 SDK snapshots contain only normalized numeric/model metadata. If an auxiliary
 database disappears, already recovered turn usage survives in the durable ledger.
 Version 58 retains all existing version 53–57 entries and older archived history.
+SDK parser revision 2 reparses available SDK logs even when their file signatures
+are unchanged. It changes no aggregate fields or global cache version; archived
+history stays intact and failed reparses preserve the previous entry for retry.
 No rebuild is needed. Parsing never resumes a session, starts a model turn, reads
 credential stores or changes a user's telemetry settings.
 

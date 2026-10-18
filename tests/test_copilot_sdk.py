@@ -378,6 +378,180 @@ class CopilotSDKTests(unittest.TestCase):
         self.assertEqual(agg["totals"]["user"], 0)
         self.assertNotIn("PRIVATE SUMMARY", json.dumps(agg))
 
+    def receipt(self, call, minute, inp=100, out=20, **extra):
+        usage = dict(model=self.MODEL, apiCallId=call, inputTokens=inp, outputTokens=out,
+                     interactionType="conversation-agent", accounting={"sourceSessionId": self.SID,
+                     "usageId": call, "sequence": len(self.events)})
+        usage.update(extra)
+        return self.event("session.usage_record", f"receipt-{len(self.events)}", minute, {"usage": usage})
+
+    def test_receipt_before_message_replay_and_live_twin_count_once(self):
+        self.turn(1)
+        receipt = self.receipt("call1", 2, cacheReadTokens=10, reasoningTokens=5)
+        self.events.insert(2, receipt)
+        self.events.append(dict(receipt, id="replayed-receipt", timestamp="2026-10-16T10:02:00Z"))
+        self.events.append(self.event("assistant.usage", "live-twin", 2, receipt["data"]["usage"]))
+        # An old anonymous live event is not added on top of complete receipts.
+        self.events.append(self.event("assistant.usage", "anonymous-twin", 2,
+                           dict(model=self.MODEL, inputTokens=100, outputTokens=20)))
+        self.events.append(self.event("session.usage_checkpoint", "checkpoint", 3,
+                           {"accountingSnapshot": {"modelMetrics": {self.MODEL: {
+                               "usage": {"inputTokens": 100, "outputTokens": 20}}}}}))
+        agg = self.parse()
+        self.assertEqual([agg["totals"][k] for k in ("in", "out", "cr", "reason", "req")], [90, 20, 10, 5, 1])
+        self.assertEqual(agg["copilot_sdk"]["usage_sources"], ["usage_receipts"])
+        self.assertEqual(agg["copilot_sdk"]["usage_status"], "recorded")
+        self.assertEqual(agg["records"]["2026-10-15\tGLM 5.3"]["in"], 90)
+        self.assertNotIn("2026-10-16\tGLM 5.3", agg["records"])
+
+    def test_stale_origin_followups_and_reused_turn_counter_after_resume(self):
+        con = self.store()
+        for n, turn_id in ((1, "0"), (2, "2"), (3, "0")):
+            minute = n * 5
+            self.events.append(self.event("user.message", f"u{n}", minute,
+                               {"content": f"Prompt {n}", "messageId": f"um{n}", "turnId": turn_id}))
+            for call_n, runtime_id in enumerate((turn_id, str(int(turn_id) + 1)), 1):
+                call = f"call{n}-{call_n}"
+                self.events.append(self.receipt(call, minute + call_n, inp=50, out=10))
+                self.events.append(self.event("assistant.message", call, minute + call_n,
+                    {"content": "Reply", "model": self.MODEL, "apiCallId": call,
+                     "turnId": runtime_id, "originatingMessageId": "um1" if n < 3 else "um3"}))
+            self.usage(con, n, inp=100, out=20, cachedTokens=0)
+        # Resumed continuation id 2 must not select the old second prompt.
+        self.events.append(self.receipt("resumed-extra", 18, inp=50, out=10))
+        self.events.append(self.event("assistant.message", "resumed-extra", 18,
+            {"content": "Reply", "model": self.MODEL, "apiCallId": "resumed-extra",
+             "turnId": "2", "originatingMessageId": "um3"}))
+        self.usage(con, 3, inp=150, out=30, cachedTokens=0)
+        agg = self.parse()
+        self.assertEqual([agg["totals"][k] for k in ("in", "out", "req", "user")], [350, 70, 7, 3])
+        self.assertEqual(agg["copilot_sdk"]["usage_sources"], ["usage_receipts"])
+        self.assertEqual(agg["copilot_sdk"]["missing_turns"], 0)
+
+    def test_receipts_without_host_and_compactions_inside_and_between_turns(self):
+        self.turn(1)
+        self.events.append(self.receipt("call1", 2))
+        tokens = dict(model=self.MODEL, inputTokens=20, outputTokens=5)
+        self.events.append(self.event("session.compaction_complete", "inside", 3,
+                           dict(success=True, trigger="threshold", compactionTokensUsed=tokens)))
+        self.events.append(self.receipt("compaction", 3, inp=20, out=5,
+                                       interactionType="conversation-compaction"))
+        self.events.append(self.event("assistant.turn_end", "end", 4, {}))
+        self.events.append(self.event("session.compaction_complete", "between", 5,
+                           dict(success=True, trigger="manual", compactionTokensUsed=tokens)))
+        agg = self.parse()
+        self.assertEqual((agg["totals"]["in"], agg["totals"]["out"]), (140, 30))
+        self.assertEqual(len(agg["compactions"]), 2)
+        con = self.store()
+        self.usage(con, 1, inp=120, out=25, cachedTokens=0)
+        P._SDK_HOSTS["at"] = 0
+        newer = self.parse(agg, write=False)
+        self.assertEqual((newer["totals"]["in"], newer["totals"]["out"]), (140, 30))
+
+    def test_partial_receipts_do_not_replace_full_host_totals(self):
+        self.turn(1)
+        self.events.append(self.receipt("call1", 2))
+        con = self.store()
+        # The host includes additional child usage not present in the stream.
+        self.usage(con, 1, inp=300, out=60, cachedTokens=0)
+        agg = self.parse()
+        self.assertEqual((agg["totals"]["in"], agg["totals"]["out"]), (300, 60))
+        self.assertEqual(agg["copilot_sdk"]["usage_sources"], ["vscode_turn_usage"])
+
+    def test_receipt_child_call_ids_are_scoped_and_twins_deduplicated(self):
+        self.turn(1)
+        self.events.append(self.receipt("call1", 2))
+        child_receipt = self.receipt("call1", 3, inp=50, out=10)
+        child_receipt["agentId"] = "child"
+        child_receipt["data"]["usage"]["accounting"]["sourceSessionId"] = "child-session"
+        self.events.append(child_receipt)
+        self.events.append(self.event("assistant.message", "child-message", 3,
+                           dict(model=self.MODEL, apiCallId="call1"), agentId="child"))
+        self.events.append(self.event("assistant.usage", "child-twin", 3,
+                           dict(model=self.MODEL, apiCallId="call1", inputTokens=50, outputTokens=10), agentId="child"))
+        foreign = self.receipt("foreign", 4, inp=999999)
+        foreign["data"]["usage"]["accounting"]["sourceSessionId"] = "another-session"
+        self.events.append(foreign)
+        agg = self.parse()
+        self.assertEqual([agg["totals"][k] for k in ("in", "out", "req", "asst")], [150, 30, 2, 1])
+
+    def test_receipt_without_assistant_message_still_records_call(self):
+        self.events.append(self.event("user.message", "u1", 1, {"content": "Prompt"}))
+        self.events.append(self.receipt("call1", 2))
+        agg = self.parse()
+        self.assertEqual([agg["totals"][k] for k in ("in", "out", "req", "asst")], [100, 20, 1, 0])
+
+    def test_missing_call_receipt_keeps_partial_status(self):
+        self.turn(1)
+        self.events.append(self.receipt("call1", 2))
+        self.events.append(self.event("assistant.message", "a2", 3,
+                           dict(model=self.MODEL, apiCallId="call2", content="Reply")))
+        self.events.append(self.event("assistant.usage", "anonymous", 2,
+                           dict(model=self.MODEL, inputTokens=100, outputTokens=20)))
+        agg = self.parse()
+        self.assertEqual(agg["totals"]["in"], 100)
+        self.assertEqual(agg["copilot_sdk"]["usage_status"], "partial")
+        self.assertEqual(agg["copilot_sdk"]["missing_turns"], 1)
+
+    def test_host_turn_without_reply_recovers_only_on_unambiguous_date(self):
+        self.turn(1)
+        self.events.append(self.event("user.message", "u2", 3, {"content": "Prompt"}))
+        con = self.store()
+        self.usage(con, 1)
+        self.usage(con, 2)
+        agg = self.parse()
+        self.assertEqual(agg["totals"]["in"], 180)
+        self.assertEqual(agg["copilot_sdk"]["missing_turns"], 0)
+        self.events[-1]["timestamp"] = self.events[-1]["timestamp"].replace("2026-10-15", "2026-10-16")
+        newer = self.parse(agg)
+        self.assertEqual(newer["totals"]["in"], 90)
+        self.assertEqual(newer["copilot_sdk"]["missing_turns"], 1)
+        self.assertIn("undated_usage", newer["copilot_sdk"]["limitations"])
+
+    def test_receipts_keep_multi_day_usage_on_its_recorded_date(self):
+        self.turn(1)
+        self.events.append(self.receipt("call1", 2))
+        self.events.append(self.event("assistant.message", "a2", 3,
+                           {"content": "Reply", "model": self.MODEL, "apiCallId": "call2"}))
+        self.events.append(self.receipt("call2", 3, inp=200, out=40))
+        for e in self.events[-2:]:
+            e["timestamp"] = e["timestamp"].replace("2026-10-15", "2026-10-16")
+        con = self.store()
+        self.usage(con, 1, inp=300, out=60, cachedTokens=0)
+        agg = self.parse()
+        self.assertEqual(agg["records"]["2026-10-15\tGLM 5.3"]["in"], 100)
+        self.assertEqual(agg["records"]["2026-10-16\tGLM 5.3"]["in"], 200)
+        self.assertEqual(agg["copilot_sdk"]["usage_status"], "recorded")
+
+    def test_receipt_reparse_version_and_malformed_receipt_preserve_previous(self):
+        self.turn(1)
+        self.events.append(self.receipt("call1", 2))
+        agg = self.parse()
+        agg["copilot_sdk"]["version"] = 1
+        newer = self.parse(agg, write=False)
+        self.assertIsNot(newer, agg)
+        self.assertEqual(newer["copilot_sdk"]["version"], 2)
+        saved = copy.deepcopy(newer)
+        self.events.append(self.receipt("broken", 3, inp=-1))
+        with self.assertRaises(ValueError): self.parse(newer)
+        self.assertEqual(newer, saved)
+
+    def test_known_compaction_triggers_preserved_unknown_not_invented(self):
+        triggers = ["threshold", "context_limit_retry", "memory_pressure", "model_switch", "manual", "new-trigger"]
+        for i, trigger in enumerate(triggers, 1):
+            self.events.append(self.event("session.compaction_complete", f"c{i}", i,
+                               dict(success=True, trigger=trigger)))
+        agg = self.parse()
+        self.assertEqual([c["trigger"] for c in agg["compactions"].values()], triggers[:-1] + ["unknown"])
+
+    def test_compaction_tokens_do_not_hide_missing_conversation_usage(self):
+        self.turn(1)
+        self.events.append(self.event("session.compaction_complete", "c1", 3, dict(success=True,
+            compactionTokensUsed=dict(model=self.MODEL, inputTokens=20, outputTokens=5))))
+        agg = self.parse()
+        self.assertEqual(agg["copilot_sdk"]["usage_status"], "partial")
+        self.assertEqual(agg["copilot_sdk"]["missing_turns"], 1)
+
     def test_optional_migration_preserves_live_and_archived(self):
         cache = self.root / "cache.json"
         files = {"live": {"source": "copilot", "totals": {"in": 500}},

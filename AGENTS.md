@@ -637,8 +637,15 @@ Use tests/preview_accounts.py for web checks with mock data only.
   estimated from text. Read-only DB snapshots track WAL changes even without an
   appended SDK event. Preserve recovered numeric-only turn snapshots if the
   auxiliary DB disappears. Malformed records leave the old aggregate retryable.
-  `assistant.usage` is normally ephemeral; persisted copies are usable. Shutdown
-  totals are cumulative, not additional calls. Multi-day shutdown totals have no
+  `assistant.usage` is normally ephemeral; persisted copies are usable. Cumulative
+  snapshots must never be summed with persisted `session.usage_record`
+  receipts. SDK parser revision 2 deduplicates per-call receipts and live twins,
+  uses complete dated receipts only when they cover host totals, and re-anchors
+  stale origin ids from explicit user/assistant turn ids (reset on reused counters).
+  Compaction `threshold` / context-limit / memory-pressure / model-switch triggers
+  retain their meaning; completion tokens count once, including between turns.
+  Available SDK logs reparse on revision changes; archived entries stay untouched.
+  Shutdown totals are cumulative, not additional calls. Multi-day shutdown totals have no
   per-day attribution and stay supplemental metadata. No SDK attachment/resume,
   model request, credential read or automatic OTel setting change. Source ids and
   palette stay `copilot`; unavailable/partial/error sessions carry a tooltip.
