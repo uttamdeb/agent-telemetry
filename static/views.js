@@ -1648,9 +1648,32 @@ function viewStorage(){
 function shortPath(p){ return String(p||"").split(/[\\/]/).filter(Boolean).slice(-2).join("/"); }
 /* ---------------- SETTINGS ---------------- */
 async function openSettings(){
+  const mcpGeneration=typeof beginMcpSettings==="function"?beginMcpSettings():null;
   openDrawer('<div class="empty">Loading…</div>');
-  let cfg; try{ cfg=await (await fetch("/api/settings")).json(); }
-  catch(e){ openDrawer('<div class="empty">Could not read settings.</div>'); return; }
+  const settingsDrawer=document.getElementById("drawerBody");
+  const settingsPlaceholder=settingsDrawer?.firstElementChild;
+  const settingsLoadCurrent=()=>settingsDrawer?.isConnected!==false
+    && settingsDrawer?.firstElementChild===settingsPlaceholder
+    && settingsPlaceholder?.isConnected!==false;
+  let cfg; try{
+    const response=await fetch("/api/settings");
+    if(!response.ok) throw new Error("Could not read settings.");
+    cfg=await response.json();
+  }
+  catch(e){
+    if(mcpGeneration!==null&&typeof mcpSettingsGenerationCurrent==="function"
+        &&(!mcpSettingsGenerationCurrent(mcpGeneration)||!settingsLoadCurrent())){
+      if(mcpSettingsGenerationCurrent(mcpGeneration)&&typeof closeMcpSettings==="function") closeMcpSettings();
+      return;
+    }
+    if(typeof closeMcpSettings==="function") closeMcpSettings();
+    openDrawer('<div class="empty">Could not read settings.</div>'); return;
+  }
+  if(mcpGeneration!==null&&typeof mcpSettingsGenerationCurrent==="function"
+      &&(!mcpSettingsGenerationCurrent(mcpGeneration)||!settingsLoadCurrent())){
+    if(mcpSettingsGenerationCurrent(mcpGeneration)&&typeof closeMcpSettings==="function") closeMcpSettings();
+    return;
+  }
   renderSettings(cfg);
 }
 /* Offline app (PWA) — strictly opt-in. A service worker keeps controlling this
@@ -1817,6 +1840,8 @@ function renderSettings(cfg){
     <h2 class="stg-h stg-sec">Your devices</h2>
     <div id="devBox"><div class="stg-hint">Loading…</div></div>
 
+    ${typeof mcpSettingsPanelHTML==="function"?mcpSettingsPanelHTML():""}
+
     <div id="maintenanceSettings"></div>
 
     <h2 class="stg-h stg-sec">Analytics cache</h2>
@@ -1838,6 +1863,7 @@ function renderSettings(cfg){
     <div class="stg-path"><b>Cache file</b><span>${esc(cfg.cache_path||"")}</span></div>
   `);
   loadNativeSettings();
+  if(typeof loadMcpSettings==="function") loadMcpSettings();
   renderMaintenance();
   nativeSettingsTimer=setInterval(()=>{
     if(!document.getElementById("nativeAppBox")){ clearInterval(nativeSettingsTimer); return; }
@@ -3201,14 +3227,21 @@ document.addEventListener("click",e=>{
     if(S.modelExpanded.has(m)) S.modelExpanded.delete(m); else S.modelExpanded.add(m);
     renderAll(); return; }
 });
-document.getElementById("drawerX").addEventListener("click",closeDrawer);
+function closeSettingsDrawer(){
+  if(typeof closeMcpSettings==="function") closeMcpSettings();
+  closeDrawer();
+}
+document.getElementById("drawerX").addEventListener("click",closeSettingsDrawer);
 document.getElementById('sessionNameForm').addEventListener('submit',e=>{
   e.preventDefault(); saveSessionName(document.getElementById('sessionNameInput').value.trim());
 });
 document.getElementById('sessionNameCancel').addEventListener('click',()=>document.getElementById('sessionNameDialog').close());
 document.getElementById('sessionNameDialog').addEventListener('cancel',e=>{if(sessionRenameSaving)e.preventDefault();});
 document.getElementById('sessionNameDialog').addEventListener('close',()=>{if(!sessionRenameSaving&&!document.getElementById('sessionNameDialog').open)sessionRenameTarget=null;});
-document.getElementById("scrim").addEventListener("click",closeDrawer);
+document.getElementById("scrim").addEventListener("click",closeSettingsDrawer);
+document.addEventListener("keydown",e=>{
+  if(e.key==="Escape"&&!document.querySelector("dialog.modal[open]")&&typeof closeMcpSettings==="function") closeMcpSettings();
+});
 addEventListener("scroll",()=>{ document.getElementById("filters").classList.toggle("stuck", scrollY>8); },{passive:true});
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change",()=>{
   let m="auto"; try{ m=localStorage.getItem("aiu.theme")||"auto"; }catch(e){}

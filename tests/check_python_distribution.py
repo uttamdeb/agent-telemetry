@@ -16,11 +16,14 @@ MODULES = {
     "native.py", "accounts.py", "session_names.py",
     "local_servers.py", "local_servers_windows.py",
     "ledger_backups.py", "diagnostics.py", "session_timeline.py",
+    "mcp_access.py", "mcp_backend.py", "mcp_protocol.py", "mcp_server.py",
+    "mcp_tools.py", "telemetry_query.py", "telemetry_insights.py",
 }
 ASSETS = {
     "index.html", "chart.umd.min.js", "manifest.json", "sw.js",
     "static/app.css", "static/core.js", "static/charts.js", "static/views.js",
     "static/insights.js", "static/maintenance.js", "static/timeline.js",
+    "static/mcp.js",
     "static/apple-touch-icon.png", "static/icon-192.png", "static/icon-512.png",
     "static/tool-icons/claude.svg", "static/tool-icons/copilot.svg",
     "static/tool-icons/cursor.svg", "static/tool-icons/hermes.svg",
@@ -54,6 +57,7 @@ def check_archives(wheel, sdist):
         expected = MODULES | ASSETS | {
             "pyproject.toml", "setup.py", "setup.cfg", "MANIFEST.in", "README.md",
             "LICENSE", "PKG-INFO", "docs/python-package.md",
+            "docs/mcp.md",
         }
         extras = paths - expected
         assert all(path.startswith("agenttelemetry_app.egg-info/")
@@ -146,6 +150,13 @@ def check_install(wheel, version):
         subprocess.run([str(python), "-m", "agent_telemetry", "--help"], check=True,
                        cwd=root, env=environment, capture_output=True, text=True)
         assert_home_empty("python -m agent_telemetry --help")
+        for arguments in (("--help",), ("--version",)):
+            result = subprocess.run([str(python), "-m", "agent_telemetry.mcp_server", *arguments],
+                                    cwd=root, env=environment, capture_output=True, text=True)
+            assert result.returncode == 0, (arguments, result.stderr)
+            assert ("AgentTelemetry MCP server" in result.stdout if arguments == ("--version",)
+                    else "--backend" in result.stdout)
+            assert_home_empty("python -m agent_telemetry.mcp_server " + " ".join(arguments))
         paths = ["/", "/chart.js", "/manifest.json", "/sw.js", "/api/health"]
         paths += ["/" + asset for asset in sorted(ASSETS) if asset.startswith("static/")]
         code = "EXPECTED_VERSION = " + repr(version) + "\nRESOURCE_PATHS = " + repr(paths) + "\n" + SMOKE

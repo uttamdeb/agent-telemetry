@@ -9,6 +9,13 @@ const {execFileSync} = require('node:child_process');
 const files = require('../scripts/backend-files');
 const {buildBackend} = require('../scripts/build-backend');
 
+const dashboardRuntimeFiles = [
+  'editor_snapshot.py',
+  'mcp_access.py', 'mcp_backend.py', 'mcp_protocol.py', 'mcp_server.py',
+  'mcp_tools.py', 'telemetry_query.py', 'telemetry_insights.py',
+  'static/mcp.js'
+];
+
 function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'at-editor-package-'));
   fs.mkdirSync(path.join(root, 'vscode'));
@@ -30,6 +37,12 @@ function walk(root, prefix = '') {
     return entry.isDirectory() ? walk(path.join(root, entry.name), relative) : [relative];
   }).sort();
 }
+
+test('backend allowlist includes dashboard editor and MCP runtime dependencies', () => {
+  for (const relative of dashboardRuntimeFiles) {
+    assert.ok(files.includes(relative), `backend allowlist is missing ${relative}`);
+  }
+});
 
 test('backend packaging copies only the explicit allowlist, with byte digests', () => {
   const root = fixture();

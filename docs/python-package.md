@@ -5,6 +5,8 @@ The Python package requires Python 3.9+ and runs the same local browser dashboar
 It has no third-party runtime dependencies. The release wheels bundle the dashboard's
 HTML, JavaScript, styles, icons, and vendored Chart.js. Usage stays local by default;
 optional sharing and account lookups retain their existing explicit consent controls.
+The package also includes the optional stdlib-only MCP bridge and Settings assets; MCP
+access remains disabled until enabled and scoped in the dashboard.
 
 The PyPI distribution is named `agenttelemetry-app`. Its installed commands are
 `agenttelemetry-app`, `agenttelemetry`, and `agent-telemetry`;

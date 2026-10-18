@@ -16,11 +16,19 @@ include parser.py
 include native.py
 include accounts.py
 include session_names.py
+include mcp_access.py
+include mcp_backend.py
+include mcp_protocol.py
+include mcp_server.py
+include mcp_tools.py
+include telemetry_query.py
+include telemetry_insights.py
 include index.html
 include chart.umd.min.js
 include manifest.json
 include sw.js
 include docs/python-package.md
+include docs/mcp.md
 include static/app.css
 include static/apple-touch-icon.png
 include static/charts.js
@@ -29,6 +37,7 @@ include static/icon-192.png
 include static/icon-512.png
 include static/insights.js
 include static/maintenance.js
+include static/mcp.js
 include static/timeline.js
 include static/tool-icons/LICENSE.hermes.txt
 include static/tool-icons/LICENSE.openclaw.txt

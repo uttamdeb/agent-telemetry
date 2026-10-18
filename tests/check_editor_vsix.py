@@ -52,8 +52,10 @@ def check_archive(path):
             assert data == (ROOT / relative).read_bytes(), relative
         for name in names:
             assert not any(part in {".usage_cache.json", ".peers.json", ".peers", ".usage-backups",
-                                    ".local_servers.json", "server.log", "node_modules", ".git",
-                                    "test", "tests", "__pycache__"} for part in name.split("/")), name
+                                    ".local_servers.json", "mcp-access.json", "mcp-access.lock",
+                                    "server.log", "node_modules", ".git", "test", "tests",
+                                    "__pycache__"} or part.startswith(".mcp-access-")
+                               for part in name.split("/")), name
             assert archive.getinfo(name).file_size < 10_000_000, name
         assert sum(archive.getinfo(name).file_size for name in names) < 20_000_000
     print(f"Editor VSIX validated: {manifest['publisher']}.{manifest['name']} {manifest['version']}")

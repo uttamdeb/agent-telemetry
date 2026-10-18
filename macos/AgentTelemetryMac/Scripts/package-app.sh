@@ -75,6 +75,10 @@ AT_BACKEND_DIR="$AT_APP_PATH/Contents/Resources/AgentTelemetry"
 mkdir -p "$AT_BACKEND_DIR"
 cp "$AT_REPO_ROOT/dashboard.py" "$AT_REPO_ROOT/parser.py" "$AT_REPO_ROOT/native.py" \
    "$AT_REPO_ROOT/local_servers.py" "$AT_REPO_ROOT/local_servers_windows.py" \
+   "$AT_REPO_ROOT/mcp_access.py" "$AT_REPO_ROOT/mcp_backend.py" \
+   "$AT_REPO_ROOT/mcp_protocol.py" "$AT_REPO_ROOT/mcp_server.py" \
+   "$AT_REPO_ROOT/mcp_tools.py" "$AT_REPO_ROOT/telemetry_insights.py" \
+   "$AT_REPO_ROOT/telemetry_query.py" \
    "$AT_REPO_ROOT/index.html" "$AT_REPO_ROOT/chart.umd.min.js" \
    "$AT_REPO_ROOT/manifest.json" "$AT_REPO_ROOT/sw.js" \
    "$AT_REPO_ROOT/LICENSE" "$AT_BACKEND_DIR/"
@@ -121,7 +125,8 @@ EOF
 
 if find "$AT_APP_PATH/Contents/Resources" \( -name .usage_cache.json -o -name .usage-backups -o -name server.log \
      -o -name .peers.json -o -name .peers -o -name .local_servers.json \
-     -o -name '.local_servers.*' \) -print -quit | grep -q .; then
+     -o -name '.local_servers.*' -o -name mcp-access.json -o -name mcp-access.lock \
+     -o -name '.mcp-access-*' \) -print -quit | grep -q .; then
   echo "Refusing to package user telemetry data." >&2
   exit 1
 fi
