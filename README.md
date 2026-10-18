@@ -54,13 +54,32 @@ Security → Open Anyway**; Windows SmartScreen may require **More info → Run 
 
 ## Quick start
 
+Install with Python 3.9+:
+
+```bash
+python -m pip install agenttelemetry-app
+agenttelemetry
+```
+
+Or, with [uv](https://docs.astral.sh/uv/getting-started/installation/) installed:
+
+```bash
+uvx agenttelemetry-app
+```
+
+Then open **http://127.0.0.1:7878**. The Python package starts the local browser dashboard;
+use the [app downloads](#download-the-app) for the menu bar or system tray companion.
+See [Python package details](docs/python-package.md) for its per-user data location.
+
+To run from a source checkout with Python 3.8+:
+
 ```bash
 git clone https://github.com/uttamdeb/agent-telemetry.git
 cd agent-telemetry
 python3 dashboard.py
 ```
 
-Then open **http://127.0.0.1:7878**. That's it — no `pip install`, no setup.
+Then open **http://127.0.0.1:7878**. The source checkout needs no package installation.
 
 > First run parses your local logs (can take ~30–60s if you have large Codex logs), writes
 > a cache, and is instant thereafter. The page auto-refreshes every ~15s, so a session
@@ -75,13 +94,14 @@ checkout behavior is unchanged. Or `./run.sh [flags]`.
 
 Sessions shows a full **Subagent** label, a branching icon, and a searchable session
 identifier for transcripts that the source identifies as delegated work. Use
-**All sessions / Subagents / Other sessions** to focus the list; the choice survives
+**All sessions / Main agents / Subagents** to focus the list; the choice survives
 reloads and shared links without changing the other dashboard totals. Session titles
 also open details from the keyboard.
 
 Recorded delegation counts and Claude sidechain usage are explained in the drawer.
-Unmarked or older entries are not assumed to be primary sessions, and parent links
-are not inferred. See [behavior and limitations](docs/subagent-sessions.md).
+Main agents shows sessions not marked as subagents; some tools and older logs
+do not record this marker. Parent links are not inferred. See
+[behavior and limitations](docs/subagent-sessions.md).
 
 ## Recorded reasoning effort
 

@@ -105,9 +105,9 @@ class ReasoningEffortMigrationTests(unittest.TestCase):
             sessions = D.build_payload()["sessions"]
         self.assertEqual({s["device"] for s in sessions}, {"fixture-device", "other-device"})
         self.assertTrue(all(s["reasoning_effort"] == current["reasoning_effort"] for s in sessions))
-        for version in range(52, 60):
+        for version in range(52, D.CACHE_VERSION + 1):
             self.assertTrue(D._peer_cache_ok(version), version)
-        for version in (True, "58", 51, 60):
+        for version in (True, "58", 51, D.CACHE_VERSION + 1):
             self.assertFalse(D._peer_cache_ok(version), version)
 
 

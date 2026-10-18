@@ -13,7 +13,10 @@ Mac/Linux install of the same tools.
 No third-party dependencies — stdlib only.
 """
 import os, sys, json, glob, re, time, shutil, subprocess, copy, hashlib
-import accounts as A
+if __package__:
+    from . import accounts as A
+else:
+    import accounts as A
 from datetime import datetime, timezone
 
 HOME = os.path.expanduser("~")
@@ -553,6 +556,7 @@ def _blank_agg(source, path):
         _reasoning_effort_init(agg)
     if source == "codex":
         _codex_timing_state(agg)  # empty logs need no repeated timing backfill
+        agg["parent_metadata_version"] = 1
     return agg
 
 
@@ -1825,6 +1829,7 @@ def _codex_compaction(agg, payload, dt):
 
 def parse_codex(agg, lines):
     agg["account_metadata_version"] = A.METADATA_VERSION
+    agg["parent_metadata_version"] = 1
     _reasoning_effort_init(agg)
     cur_model = agg["state"].get("cur_model")
     project = agg["project"]
@@ -1894,8 +1899,23 @@ def parse_codex(agg, lines):
             # full thread id — the filename is truncated to 8 chars in the session
             # dict, but the editor-state lookup needs the whole UUID
             agg["_session_id"] = pl.get("id") or pl.get("session_id") or agg.get("_session_id")
-            if pl.get("thread_source") == "subagent":
+            source_meta = pl.get("source")
+            sub_source = source_meta.get("subagent") if isinstance(source_meta, dict) else None
+            spawn = sub_source.get("thread_spawn") if isinstance(sub_source, dict) else None
+            if pl.get("thread_source") == "subagent" or isinstance(spawn, dict):
                 agg["subagent"] = True
+                # A control/spawn parent is distinct from forked_from_id, which
+                # only identifies copied history and is not a delegation link.
+                parents = [pl.get("parent_thread_id")]
+                agg.pop("_parent_session_id", None)
+                if isinstance(spawn, dict):
+                    parents.append(spawn.get("parent_thread_id"))
+                ids = {v.lower() for v in parents if isinstance(v, str) and re.fullmatch(
+                    r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", v)}
+                if len(ids) == 1:
+                    parent = next(iter(ids))
+                    if parent != str(agg.get("_session_id") or "").lower():
+                        agg["_parent_session_id"] = parent
                 # Stashed, not titled yet: many subagent transcripts carry no
                 # UserMessage of their own (the task was handed to them at spawn
                 # time, not as an in-band turn), so this is a last-resort label —
@@ -4063,6 +4083,10 @@ def update_file(agg, source, path, editor_hint, proj_map):
         return fresh
 
     # jsonl (claude / codex) — incremental append
+    if source == "codex" and agg and agg.get("parent_metadata_version") != 1:
+        # Optional source identity backfill: preserve the old entry if parsing
+        # fails, and never rebuild or drop archived conversations.
+        agg = None
     if (source in ("claude", "claude-desktop", "codex") and agg
             and agg.get("reasoning_effort_version") != _REASONING_EFFORT_VERSION):
         # Available sources can backfill optional metadata without rebuilding the
@@ -4320,6 +4344,8 @@ def _finalize_session(agg, source, path):
         # Only bounded level/count/date/model metadata is public; correlation
         # state remains private and never appears in a session payload.
         agg["sessions"][0]["reasoning_effort"] = copy.deepcopy(agg["reasoning_effort"])
+    if source == "codex" and agg.get("subagent") and agg.get("_parent_session_id"):
+        agg["sessions"][0]["parent_id"] = agg["_parent_session_id"]
     if "compactions" in agg:
         events = sorted(agg["compactions"].values(), key=lambda e: (e["timestamp"], e["id"]))
         session = agg["sessions"][0]

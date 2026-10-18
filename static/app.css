@@ -144,6 +144,9 @@ a{color:inherit}
   background:none;border:1px solid transparent;color:var(--text-2)}
 .icon-btn:hover{background:var(--surface-2);color:var(--text);border-color:var(--border)}
 .side-note{font-size:11px;color:var(--text-3);line-height:1.5;padding:0 6px}
+.coverage-meta{display:flex;flex-wrap:wrap;gap:2px 8px}
+.coverage-dates{white-space:nowrap}
+.coverage-detail{flex-basis:100%;overflow-wrap:anywhere}
 .side-ver{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;margin-top:4px}
 .side-ver .ver{font-family:var(--mono,ui-monospace,SFMono-Regular,Menlo,monospace);color:var(--text-2)}
 .side-ver .ver-err{color:var(--text-2)}
@@ -458,6 +461,9 @@ tbody tr.session-subagent td:first-child{box-shadow:inset 2px 0 var(--border-2)}
 .session-type-detail .ic,.session-delegation-note .ic{width:16px;height:16px;flex:none;margin-top:1px;color:var(--text-3)}
 .session-type-detail b,.session-delegation-note b{display:block;color:var(--text);font-weight:640}
 .session-type-detail p,.session-delegation-note p{margin:2px 0 0}
+.session-parent-link{appearance:none;background:none;border:0;padding:2px 0;color:var(--text);font:inherit;text-decoration:underline;text-underline-offset:3px;cursor:pointer;overflow-wrap:anywhere;text-align:left}
+.session-parent-link:hover{color:var(--text-2)}
+.session-parent-link:focus-visible{outline:2px solid var(--text);outline-offset:3px;border-radius:2px}
 .session-empty{padding:16px 10px;text-align:center;color:var(--text-3);white-space:normal}
 .session-empty p{margin:0 0 10px}
 .session-empty-action{min-height:30px;padding:5px 10px;border:1px solid var(--border-2);border-radius:6px;background:var(--surface);color:var(--text-2);font-size:11px;font-weight:600}

@@ -1146,14 +1146,17 @@ function sessionWhen(s){
     return s.compactions[s.compactions.length-1].timestamp||"";
   return s.end||s.start||"";
 }
-function sessionRows(d){
-  const q=S.search.toLowerCase();
-  return d.sessions.map(s=>({...s,
+function sessionRow(s){
+  return {...s,
     tok:(s.in||0)+(s.out||0)+(s.cr||0)+(s.cc||0),
     when:sessionWhen(s),
     cache:((s.in||0)+(s.cr||0)+(s.cc||0))?(s.cr||0)/((s.in||0)+(s.cr||0)+(s.cc||0)):0,
     name:s.title||s.project||s.id,
-  })).filter(s=>!q || (s.name+" "+(s.original_title||"")+" "+(s.project||"")+" "+(s.model||"")+" "+(s.branch||"")+" "+(s.id||"")+" "+(s.rename_id||"")).toLowerCase().includes(q));
+  };
+}
+function sessionRows(d){
+  const q=S.search.toLowerCase();
+  return d.sessions.map(sessionRow).filter(s=>!q || (s.name+" "+(s.original_title||"")+" "+(s.project||"")+" "+(s.model||"")+" "+(s.branch||"")+" "+(s.id||"")+" "+(s.rename_id||"")).toLowerCase().includes(q));
 }
 function sessionTypeCounts(rows){
   const subagents=rows.filter(s=>s.subagent).length;
@@ -1167,8 +1170,8 @@ function sessionRowsForType(rows,type=S.sessionType){
 function syncSessionTypeControls(counts){
   const options=[
     ["all","All sessions","sessTypeCountAll"],
+    ["other","Main agents","sessTypeCountOther"],
     ["subagents","Subagents","sessTypeCountSubagents"],
-    ["other","Other sessions","sessTypeCountOther"],
   ];
   for(const [type,label,countId] of options){
     const button=document.querySelector(`[data-session-type="${type}"]`), count=document.getElementById(countId);
@@ -1181,6 +1184,10 @@ function syncSessionTypeControls(counts){
   }
 }
 function sessionDelegationBadge(s){
+  if(Number.isSafeInteger(s.subagent_children) && s.subagent_children>0){
+    const n=s.subagent_children;
+    return ` <span class="delegation-badge" title="At least ${fmtNum(n)} recorded child transcript${n===1?"":"s"} associated by Claude's session directory. Whole session; date and model filters do not change this count.">${fmtNum(n)} subagent${n===1?"":"s"} recorded</span>`;
+  }
   if((s.subagents||0)>0){
     const n=s.subagents;
     return ` <span class="delegation-badge" title="Subagents recorded across the whole session.">${fmtNum(n)} subagent${n===1?"":"s"} recorded</span>`;
@@ -1190,12 +1197,23 @@ function sessionDelegationBadge(s){
   return "";
 }
 function sessionTypeDetails(s){
-  if(s.subagent)
-    return `<div class="session-type-detail"><svg class="ic" aria-hidden="true"><use href="#i-subagent"/></svg><div><b>Subagent session</b><p>The source log recorded a subagent marker. A parent session is not linked here.</p></div></div>`;
-  return `<div class="session-type-detail"><svg class="ic" aria-hidden="true"><use href="#i-subagent"/></svg><div><b>Other session</b><p>Not marked as a subagent. Some tools and older logs do not record this.</p></div></div>`;
+  if(s.subagent){
+    const parent=s.subagent_parent;
+    const linked=parent && typeof parent.id==="string" && typeof parent.title==="string"
+      && typeof parent.source==="string" && typeof parent.device==="string";
+    const identity=linked?JSON.stringify([parent.device,parent.source,parent.id]):"";
+    const available=linked && RAW.sessions.filter(x=>sessionIdentity(x)===identity).length===1;
+    const detail=linked
+      ? `<p>Parent session: ${available?`<button type="button" class="session-parent-link" data-session-parent="${esc(identity)}" aria-label="Open parent session ${esc(parent.title)}">${esc(parent.title)} <span aria-hidden="true">↗</span></button>`:esc(parent.title)}</p>`
+      : '<p>The source log recorded a subagent marker. Its parent could not be resolved from retained session metadata.</p>';
+    return `<div class="session-type-detail"><svg class="ic" aria-hidden="true"><use href="#i-subagent"/></svg><div><b>Subagent session</b>${detail}</div></div>`;
+  }
+  return `<div class="session-type-detail"><svg class="ic" aria-hidden="true"><use href="#i-subagent"/></svg><div><b>Main agent session</b><p>Not marked as a subagent. Some tools and older logs do not record this.</p></div></div>`;
 }
 function sessionDelegationDetails(s){
   const notes=[];
+  if(Number.isSafeInteger(s.subagent_children) && s.subagent_children>0)
+    notes.push(`At least ${fmtNum(s.subagent_children)} recorded child transcript${s.subagent_children===1?"":"s"} across the whole session. This count does not follow date or model filters. Each child keeps its own usage; the count adds no tokens or cost.`);
   if((s.subagents||0)>0) notes.push(`${fmtNum(s.subagents)} subagent${s.subagents===1?"":"s"} recorded across this whole session; the count is not tied to the selected date or model filters.`);
   if(!s.subagent && s.source==="claude" && (s.side||0)>0)
     notes.push(`Claude Code recorded ${fmtTok(s.side)} sidechain tokens across this whole session. They are already included in the session total and are not additional usage.`);
@@ -1324,7 +1342,7 @@ function viewSessions(d){
   const sorted=sortRows(rows,S.sessSort).slice(0,400);
   const emptyMessage=rows.length?"":`<tr><td colspan="${cols.length}"><div class="session-empty" role="status">
       <p>${S.sessionType==="all"?(S.search?"No sessions match this search.":"No sessions match the current dashboard filters and date range."):
-        `No ${S.sessionType==="subagents"?"subagent":"other"} sessions match the current dashboard filters, date range and search.`}</p>
+        `No ${S.sessionType==="subagents"?"subagent":"main agent"} sessions match the current dashboard filters, date range and search.`}</p>
       ${S.sessionType!=="all"?'<button type="button" class="session-empty-action" data-session-type-reset>Show all sessions</button>':
         S.search?'<button type="button" class="session-empty-action" data-session-search-reset>Clear search</button>':""}
     </div></td></tr>`;
@@ -1354,7 +1372,7 @@ function viewSessions(d){
   const capped = RAW.sessions_total && RAW.sessions_total > RAW.sessions.length;
   const clipped = rows.filter(x=>x.clipped).length;
   document.getElementById("sessHint").textContent =
-    `${fmtNum(rows.length)} ${S.sessionType==="subagents"?"subagent ":S.sessionType==="other"?"other ":""}session${rows.length===1?"":"s"} active in range`
+    `${fmtNum(rows.length)} ${S.sessionType==="subagents"?"subagent ":S.sessionType==="other"?"main agent ":""}session${rows.length===1?"":"s"} active in range`
     + (S.sessionType==="all"?` · ${fmtNum(counts.subagents)} marked Subagent`:` · ${fmtNum(allRows.length)} matching session${allRows.length===1?"":"s"} across all types`)
     + (clipped?` · ${clipped} with scoped figures (◔ = range and model filters)`:"")
     + (rows.length>400?" · showing the top 400 by the current sort":"")
@@ -1371,11 +1389,23 @@ function viewSessions(d){
 }
 function openSession(i){
   const s=SESS_CACHE[i]; if(!s) return;
+  openSessionDetails(s);
+}
+function openSessionParent(identity){
+  const matches=RAW.sessions.filter(s=>sessionIdentity(s)===identity);
+  if(matches.length!==1) return;
+  const s=sessionRow(clipSession(matches[0],range()));
+  openSessionDetails(s,true);
+}
+function openSessionDetails(s,related=false){
+  const relatedLimited=related&&!sessionDays(s);
   const row=(k,v)=>v==null||v===""?"":`<div class="kv"><span class="k">${k}</span><span class="v">${v}</span></div>`;
   openDrawer(`
-    <div class="eyebrow">${s.subagent?"Subagent session":"Session"}</div>
+    <div class="eyebrow">${s.subagent?"Subagent session":"Main agent session"}</div>
     <h2>${esc(s.title||s.project||s.id)}</h2>
     <div style="margin-bottom:16px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;min-width:0">${srcBadge(s.source)} <span class="dim" style="font-size:12px;min-width:0;overflow-wrap:anywhere">${esc(s.id)}</span>${renameButton(s,true)}</div>
+    ${related?(relatedLimited?'<p class="hint">Parent session · whole-session figures. This older entry has no daily detail, so its usage cannot be scoped to your date or model filters.</p>':'<p class="hint">Parent session. Figures follow the selected date and model filters; your table filters are unchanged.</p>'):''}
+    ${related&&!activeInRange(s,range())?'<div class="warnbar">This parent has no recorded activity matching the selected date and model filters.</div>':''}
     ${sessionTypeDetails(s)}
     ${row("Name scope",s.rename_scope==='display'?'AgentTelemetry only — Claude and its parent session are unchanged.':null)}
     ${row("Source title",s.display_alias?esc(s.original_title):null)}
@@ -2185,14 +2215,13 @@ function findContextTax(d){
 /* Recorded delegation can keep the parent's context small; missing markers do not prove none occurred. */
 function findSubagents(d){
   const parents = d.sessions.filter(s => !s.subagent);
-  // "delegated" shows up two different ways depending on the tool: Claude Code's
-  // subagent tokens land back on the parent's own token stream (s.side); Codex's
-  // subagents are wholly separate sessions, so the parent only carries a spawn
-  // COUNT (s.subagents, from SubAgentActivity "started" markers in its own log).
-  const heavy = parents.filter(s => s.tools >= 150 && !s.side && !s.subagents);
+  // Inline sidechain usage, source spawn counts and associated child transcripts
+  // are distinct evidence. Any positive evidence rules out "no recorded delegation".
+  const hasChildren=s=>Number.isSafeInteger(s.subagent_children) && s.subagent_children>0;
+  const heavy = parents.filter(s => s.tools >= 150 && !s.side && !s.subagents && !hasChildren(s));
   if(heavy.length < 2) return null;
   const spend = heavy.reduce((a,s)=>a+s.cost,0);
-  const used = parents.filter(s => s.side > 0 || s.subagents > 0).length;
+  const used = parents.filter(s => s.side > 0 || s.subagents > 0 || hasChildren(s)).length;
   return {
     id:"subagents", impact: spend*0.15, sev: spend>100?"high":"low", tools:[...new Set(heavy.map(x=>x.source))],
     title:"Tool-heavy sessions with no recorded delegation",
@@ -2812,11 +2841,11 @@ async function load(){
     const hi=dates.length?dates.reduce((a,b)=>a>b?a:b):"—";
     const fresh=new Date(RAW.meta.last_refresh*1000).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"});
     document.getElementById("statusText").textContent = (S.live ? "Live" : "Paused") + " · updated " + fresh;
-    document.getElementById("coverage").textContent = `${fmtNum(RAW.meta.files)} logs · ${lo} → ${hi}`
-      + (RAW.openclaw_undecoded ? ` · ${fmtNum(RAW.openclaw_undecoded)} OpenClaw events unread — install zstd` : "");
-    if(RAW.cache_error) document.getElementById("coverage").textContent += " · " + RAW.cache_error;
-    if(RAW.meta.parse_errors) document.getElementById("coverage").textContent += ` · ${fmtNum(RAW.meta.parse_errors)} log errors — see Settings`;
-    if(RAW.meta.backup_error) document.getElementById("coverage").textContent += " · backup failed — see Settings";
+    document.getElementById("coverage").innerHTML = `<span>${fmtNum(RAW.meta.files)} logs</span><span class="coverage-dates">${esc(lo)} → ${esc(hi)}</span>`
+      + (RAW.openclaw_undecoded ? `<span class="coverage-detail">${fmtNum(RAW.openclaw_undecoded)} OpenClaw events unread — install zstd</span>` : "")
+      + (RAW.cache_error ? `<span class="coverage-detail">${esc(RAW.cache_error)}</span>` : "")
+      + (RAW.meta.parse_errors ? `<span class="coverage-detail">${fmtNum(RAW.meta.parse_errors)} log errors — see Settings</span>` : "")
+      + (RAW.meta.backup_error ? `<span class="coverage-detail">backup failed — see Settings</span>` : "");
     renderVersion();
     // a device that was disconnected can't stay selected, or it would filter out everything
     for(const id of [...S.devs]) if(!devices().some(v=>v.id===id)) S.devs.delete(id);
@@ -3126,6 +3155,8 @@ document.addEventListener("click",e=>{
   }
   const sessionOpen=e.target.closest("[data-session-open]");
   if(sessionOpen){e.preventDefault();openSession(+sessionOpen.dataset.sessionOpen);return;}
+  const sessionParent=e.target.closest("[data-session-parent]");
+  if(sessionParent){e.preventDefault();openSessionParent(sessionParent.dataset.sessionParent);return;}
   const tv=e.target.closest(".tv[data-tv]");
   if(tv){ const id=tv.dataset.tv; if(S.tableView.has(id)) S.tableView.delete(id); else S.tableView.add(id);
     applyTableView(id); return; }
