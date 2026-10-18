@@ -123,6 +123,25 @@ assert.equal(run(`sessionDelegationDetails({source:'claude',subagent:true,side:1
 assert.doesNotMatch(run(`sessionDelegationBadge({source:'cursor',subagents:2})`),/start marker/,'Cursor retains counts rather than Codex start events');
 assert.doesNotMatch(run(`sessionTypeDetails({subagent:true,parent_thread_id:'inferred-parent'})`),/data-parent|<a\b|inferred-parent/,'No parent relationship is manufactured from unsupported fields');
 
+// Claude's source directory can associate retained child transcripts with a
+// parent even when the parent has no inline sidechain or spawn-count records.
+const children=run(`sessionDelegationBadge({source:'claude',subagent_children:25,subagents:3,side:1000})`);
+assert.match(children,/25 subagents recorded/);
+assert.match(children,/At least 25 recorded child transcripts/);
+assert.doesNotMatch(children,/28 subagents/,'Observed child transcripts and spawn counts are independent evidence');
+const childDetail=run(`sessionDelegationDetails({source:'claude',subagent_children:25,subagents:3,side:1000})`);
+assert.match(childDetail,/whole session/);
+assert.match(childDetail,/independently of selected date or model filters/);
+assert.match(childDetail,/adds no tokens or cost/);
+assert.match(childDetail,/not added to other delegation evidence/);
+assert.match(childDetail,/already included/,'Inline usage explanations remain separate');
+for(const value of ['undefined','0','-1','1.5','"<img src=x>"'])
+  assert.equal(run(`sessionDelegationBadge({source:'claude',subagent_children:${value}})`),'','Missing/invalid child evidence must not assert zero or a count');
+run(`var parentScope=clipSession({source:'claude',subagent_children:25,days:{'2026-10-18':[1,100,10,0,0,1,1,0,0,0,1]}},{from:'2026-10-18',to:'2026-10-18'})`);
+assert.equal(run('parentScope.subagent_children'),25,'The count keeps its stated whole-session scope');
+assert.equal(run(`findSubagents({sessions:[{source:'claude',tools:200,cost:20,subagent_children:2},{source:'claude',tools:200,cost:20,subagent_children:1}]})`),null,'Observed child transcripts rule out a no-delegation recommendation');
+assert.match(run(`findSubagents({sessions:[{source:'claude',tools:200,cost:20,title:'Unknown one'},{source:'claude',tools:200,cost:20,title:'Unknown two'},{source:'claude',tools:200,cost:20,subagent_children:2}]}).body`),/Delegation was recorded in 1 other session/);
+
 run(`S.search='';S.sessionType='all';viewSessions(slice());var opened='';openDrawer=html=>{opened=html};loadSessionTimeline=()=>{};openSession(2)`);
 assert.match(run('opened'),/Subagent session/);
 assert.match(run('opened'),/session-type-detail/);
