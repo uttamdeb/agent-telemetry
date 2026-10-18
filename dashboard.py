@@ -838,6 +838,79 @@ def _model_history(model):
     return P.PRICE_HISTORY.get(P._canonicalize(base), ())
 
 
+def _claude_parent_key(path, child=False):
+    """Recognize Claude's own parent/child transcript layout without disk reads.
+
+    The parent UUID and project-root prefix must both agree. Workflow children
+    use the same session directory as the older direct agent-*.jsonl files.
+    Unknown layouts remain unassociated; titles and activity dates are not IDs.
+    """
+    if not isinstance(path, str):
+        return None
+    path = path.replace("\\", "/")
+    if "\0" in path or any(part in (".", "..") for part in path.split("/")):
+        return None
+    uuid = r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}"
+    if child:
+        match = re.fullmatch(
+            rf"(.+)/({uuid})/(subagents/(?:workflows/wf_[A-Za-z0-9_-]+/)?"
+            r"agent-[A-Za-z0-9_-]{1,128}\.jsonl)", path)
+    else:
+        match = re.fullmatch(rf"(.+)/({uuid})\.jsonl", path)
+    if not match:
+        return None
+    root, parent = match.group(1), match.group(2).lower()
+    # Copied Windows paths may differ in drive/directory case as well as slash.
+    windows = bool(re.match(r"^[A-Za-z]:/", root) or root.startswith("//"))
+    if windows:
+        root = root.casefold()
+    key = (root, parent)
+    if child:
+        identity = match.group(3)
+        return key, identity.casefold() if windows else identity
+    return key
+
+
+def _claude_child_transcript_counts(files, local):
+    """Positive-only, whole-session evidence derived from retained aggregates.
+
+    Each full relative transcript identity counts once within its parent/device,
+    including archives and shared copies. Workflow names are part of that ID:
+    short agent basenames may be reused. This never changes usage accounting.
+    """
+    children = {}
+    for agg in files:
+        if agg.get("source") != "claude" or not agg.get("subagent"):
+            continue
+        recognized = _claude_parent_key(agg.get("path"), child=True)
+        if recognized is None:
+            continue
+        parent, identity = recognized
+        key = (agg.get("_device") or local, parent)
+        children.setdefault(key, set()).add(identity)
+    return {key: len(identities) for key, identities in children.items()}
+
+
+def _claude_parent_descriptors(files, local):
+    """Resolve only one retained parent in the child's exact source namespace."""
+    candidates = {}
+    for agg in files:
+        if agg.get("source") != "claude" or agg.get("subagent"):
+            continue
+        parent = _claude_parent_key(agg.get("path"))
+        sessions = agg.get("sessions") or []
+        if parent is None or len(sessions) != 1 or sessions[0].get("subagent"):
+            continue
+        device = agg.get("_device") or local
+        session = sessions[0]
+        title = session.get("title") or session.get("project") or parent[1]
+        if not isinstance(title, str):
+            title = parent[1]
+        candidates.setdefault((device, parent), []).append({
+            "id": parent[1], "title": title, "source": "claude", "device": device})
+    return {key: values[0] for key, values in candidates.items() if len(values) == 1}
+
+
 def _build_payload_locked():
     records = {}      # (date, source, model, project, ide, device) -> aggregates
     tools = {}        # (date, source, name, device) -> count
@@ -864,6 +937,8 @@ def _build_payload_locked():
     items += _peer_items()
     files = _one_per_conversation(items)
     local = _local_id()
+    claude_children = _claude_child_transcript_counts(files, local)
+    claude_parents = _claude_parent_descriptors(files, local)
 
     for agg in files:
         source = agg["source"]
@@ -1026,6 +1101,18 @@ def _build_payload_locked():
             s2["archived"] = bool(agg.get("archived"))
             s2["subagent"] = bool(session.get("subagent"))
             s2["device"] = device
+            if source == "claude" and not s2["subagent"]:
+                parent = _claude_parent_key(agg.get("path"))
+                child_count = claude_children.get((device, parent))
+                if child_count:
+                    # Absence means no known association, never proof of zero.
+                    # Keep this separate from source spawn counts/inline usage.
+                    s2["subagent_children"] = child_count
+            elif source == "claude" and agg.get("subagent"):
+                recognized = _claude_parent_key(agg.get("path"), child=True)
+                parent = claude_parents.get((device, recognized[0])) if recognized else None
+                if parent:
+                    s2["subagent_parent"] = dict(parent)
             if not remote and source in ("codex", "claude"):
                 s2["account_metadata"] = A.session_metadata(agg)
             available, reason = SN.availability(source, agg.get("path", ""), remote)
