@@ -336,11 +336,40 @@ function reasoningEffortInRange(s, r){
   result.entries.sort((a,b)=>a.date.localeCompare(b.date)||a.model.localeCompare(b.model));
   return result;
 }
+/* Display-only model identity follows the same date/model/provider precision as
+   the session figures. Keep historical fields and complete maps untouched. */
+function sessionModelsInRange(s, r, nameLimit=6){
+  const maps=S.exactOnly && s.source==="copilot"?s.exact_model_days:s.model_days;
+  if(!maps || typeof maps!=="object" || Array.isArray(maps)){
+    const model=typeof s.model==="string" && s.model?s.model:"Not recorded";
+    const models=Array.isArray(s.models)?s.models.filter(m=>typeof m==="string" && m && m!=="(user)"):[model];
+    const count=Number.isSafeInteger(s.nmodels) && s.nmodels>0?s.nmodels:models.length;
+    return {model,models:models.slice(0,nameLimit),nmodels:Math.max(count,models.length),scope:"whole-session"};
+  }
+  const observed=[];
+  for(const [model,days] of Object.entries(maps)){
+    if(!model || model==="(user)" || !passModel(model) || !days || typeof days!=="object" || Array.isArray(days)) continue;
+    let tokens=0,calls=0,replies=0,present=false;
+    for(const [date,row] of Object.entries(days)){
+      if(!isDay(date) || date<r.from || date>r.to || !Array.isArray(row)) continue;
+      const value=i=>Number.isFinite(row[i]) && row[i]>0?row[i]:0;
+      const total=value(1)+value(2)+value(3)+value(4);
+      const requests=value(10), responses=value(5);
+      // A user-only or compaction-only day does not name a model that ran.
+      if(total || requests || responses || value(0)) present=true;
+      tokens+=total;calls+=requests;replies+=responses;
+    }
+    if(present) observed.push({model,tokens,calls,replies});
+  }
+  observed.sort((a,b)=>b.tokens-a.tokens || b.calls-a.calls || b.replies-a.replies || a.model.localeCompare(b.model));
+  return {model:observed[0]?.model||"No model usage",models:observed.slice(0,nameLimit).map(x=>x.model),
+    nmodels:observed.length,scope:"selected"};
+}
 /* Keep the first ten legacy slots; newer maps add calls and write tiers. */
 function clipSession(s, r){
   const compactions=compactionsInRange(s,r);
   const events={compactions,compaction_count:compactions===null?null:compactions.length,
-    reasoning_effort_scoped:reasoningEffortInRange(s,r)};
+    reasoning_effort_scoped:reasoningEffortInRange(s,r),model_scoped:sessionModelsInRange(s,r)};
   const D = sessionDays(s);
   if(!D) return Object.assign({}, s, {span:1, clipped:false, detail_limited:true}, events);
   const total=Array(15).fill(0); let inN=0,allN=0,callsKnown=true;
