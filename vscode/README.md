@@ -29,7 +29,7 @@ code --install-extension agenttelemetry-team.agenttelemetry
 
 ### Install a VSIX in another desktop editor
 
-Use the provided `agenttelemetry-2.0.0.vsix` in a **desktop** VS Code, Cursor, Antigravity or compatible VS Code fork supporting the VS Code 1.85+ API and a local extension host.
+Use the provided `agenttelemetry-2.0.1.vsix` in a **desktop** VS Code, Cursor, Antigravity or compatible VS Code fork supporting the VS Code 1.85+ API and a local extension host.
 
 1. Open the editor's Extensions view.
 2. Choose **Install from VSIX…** from the Extensions menu or Command Palette.
@@ -89,6 +89,29 @@ Restricted Mode permits read-only attachment to an existing local service. Start
 | `agentTelemetry.port` | `7878` | Attach to an existing service on this loopback port. Starting a service requires the default port. |
 | `agentTelemetry.pythonPath` | Empty | Discover an interpreter, or use an absolute trusted Python executable path outside the workspace. |
 | `agentTelemetry.showStatusBar` | `true` | Show the selected scope's tokens and estimated cost in the status bar. |
+
+## Optional MCP analytics
+
+Version **2.0.1** bundles the current AgentTelemetry backend, including its optional
+read-only MCP bridge. The application itself remains **2.0.0**. Updating this extension
+does not replace a dashboard service that is already running: update and restart the
+installation owning that service to use its newest features.
+
+To connect a compatible AI client, open **AgentTelemetry: Open local dashboard**,
+then **Settings → Local MCP access**. Review the sharing warning, enable access and
+copy the generated configuration into your MCP client. Keep the local dashboard
+running; the bridge does not start it automatically. Project/device display names
+and usage from paired devices require separate consent and are off by default.
+Revoke access in Settings at any time. The extension never changes an AI client's
+configuration or enables MCP on installation.
+
+The eight tools cover usage, comparisons, insights, sessions, session timelines,
+data health, available dimensions and saved subscription-limit observations.
+They cannot rename sessions, run server commands, change settings, refresh account
+credentials or make model calls. Results exclude prompts, transcript text, session
+titles, native IDs, paths and account identities. A cloud-backed client may send
+the returned telemetry to its provider, so enable access only when intended.
+See the [MCP setup and privacy guide](https://github.com/uttamdeb/agent-telemetry/blob/HEAD/docs/mcp.md).
 
 ## Read the numbers accurately
 

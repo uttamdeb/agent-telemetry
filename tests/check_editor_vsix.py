@@ -63,5 +63,5 @@ def check_archive(path):
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
-        raise SystemExit("Usage: python tests/check_editor_vsix.py dist/agenttelemetry-2.0.0.vsix")
+        raise SystemExit("Usage: python tests/check_editor_vsix.py dist/agenttelemetry-VERSION.vsix")
     check_archive(Path(sys.argv[1]))

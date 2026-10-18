@@ -3,7 +3,7 @@
   "displayName": "AgentTelemetry",
   "icon": "media/app-icon.png",
   "description": "Tokens, estimated API cost and subagent sessions for Claude Code, Codex, Copilot and more. Local by default.",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "publisher": "agenttelemetry-team",
   "license": "MIT",
   "engines": {
@@ -21,6 +21,7 @@
     "cost",
     "usage",
     "analytics",
+    "mcp",
     "codex",
     "claude",
     "copilot",
@@ -55,7 +56,7 @@
     "test": "node --test test/*.test.js",
     "build": "node scripts/build-backend.js",
     "test:integration": "node scripts/run-editor-tests.js",
-    "package": "npm run build && node -e \"require('node:fs').mkdirSync('../dist', {recursive:true})\" && vsce package --no-dependencies --baseContentUrl https://github.com/uttamdeb/agent-telemetry/blob/HEAD/vscode/ --baseImagesUrl https://github.com/uttamdeb/agent-telemetry/raw/HEAD/vscode/ --out ../dist/agenttelemetry-2.0.0.vsix"
+    "package": "npm run build && node -e \"require('node:fs').mkdirSync('../dist', {recursive:true})\" && vsce package --no-dependencies --baseContentUrl https://github.com/uttamdeb/agent-telemetry/blob/HEAD/vscode/ --baseImagesUrl https://github.com/uttamdeb/agent-telemetry/raw/HEAD/vscode/ --out ../dist"
   },
   "devDependencies": {
     "@vscode/test-electron": "3.1.0",
