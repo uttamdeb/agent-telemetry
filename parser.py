@@ -4058,9 +4058,15 @@ def _copilot_project_map():
 def discover():
     """Return list of (source, path, editor_hint)."""
     out = []
+    claude_paths = set()
     for g in CLAUDE_GLOBS:
         for p in glob.glob(g, recursive=True):
-            out.append(("claude", p, None))
+            # Project-folder compatibility links must not parse one transcript
+            # twice. Keep the physical path so parents and children share a root.
+            p = os.path.realpath(p)
+            if p not in claude_paths:
+                claude_paths.add(p)
+                out.append(("claude", p, None))
     for g in CODEX_GLOBS:
         for p in glob.glob(g, recursive=True):
             out.append(("codex", p, None))

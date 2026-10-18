@@ -31,3 +31,22 @@ ledger. Compatibility symlinks can keep currently open editors and processes wor
 until they are reopened at the new path. Moving a data directory changes MCP's
 directory binding: preserve the user's existing scopes by confirming access again
 for the relocated ledger, then reconnect and verify the client.
+
+Claude Code also keys its conversation history and project memory by the encoded
+working-folder path inside `~/.claude/projects/`. Renaming the repository does not
+move that store. Back up both affected project stores before reconnecting them;
+preserve session JSONL files, nested subagent folders and memory together. If a new
+store already exists, check every relative path for collisions and preserve both
+versions rather than overwriting a file. A directory compatibility link can let
+the old and new project keys use the same physical history. Keep that link while
+either path is referenced, including by retained ledger entries. Do not rewrite
+recorded working directories inside transcripts.
+
+AgentTelemetry discovers each physical Claude transcript once through directory
+links. Older ledger entries under an alias remain intact, but their usage is
+counted once with the physical entry; the fullest aggregate wins. The exporting
+device also removes these duplicate aliases from its shared projection, since a
+receiver cannot resolve another machine's filesystem links. Unrelated project
+roots and remote source paths are not merged based on matching session filenames.
+Check the original Claude client's history picker after a move; dashboard display
+aliases alone do not repair that client's discovery.
