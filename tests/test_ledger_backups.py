@@ -1,3 +1,4 @@
+import copy
 import datetime
 import json
 import os
@@ -139,6 +140,55 @@ class LedgerBackupTests(unittest.TestCase):
                 self.restore(item["id"], preview["sha256"], preview["current_sha256"])
         self.assertEqual(self.cache.read_bytes(), newer)
         self.assertNotEqual(self.cache.read_bytes(), original)
+
+    def test_malformed_session_records_and_precision_rows_cannot_replace_ledger(self):
+        valid = ledger()
+        bad_sessions = [
+            {"records": []},
+            {"records": {"not-a-date\tmodel": {"in": 1}}},
+            {"records": {"2026-10-16\tmodel": {"in": "100"}}},
+            {"records": {"2026-10-16\tmodel": {"exact": []}}},
+            {"records": {"2026-10-16\tmodel": {"exact": {"in": True}}}},
+            {"days": []},
+            {"days": {"2026-10-16": {"out": float("nan")}}},
+        ]
+        for fields in bad_sessions:
+            with self.subTest(fields=fields):
+                malformed = copy.deepcopy(valid)
+                malformed["files"]["deleted-source.jsonl"]["sessions"][0].update(fields)
+                rejected_bytes = self.write_ledger(malformed)
+                item = self.backup(reason="manual")
+                self.assertFalse(item["valid"])
+                self.assertEqual((self.cache.parent / B.BACKUP_DIR_NAME / item["id"]).read_bytes(), rejected_bytes)
+                current = self.write_ledger(marker="keep-current")
+                with self.assertRaises(B.BackupError):
+                    self.preview(item["id"])
+                self.assertEqual(self.cache.read_bytes(), current)
+
+    def test_old_optional_and_nested_precision_usage_remains_restorable(self):
+        for version in range(52, 59):
+            with self.subTest(version=version):
+                value = ledger(version=version)
+                value["files"]["deleted-source.jsonl"]["sessions"][0].update(
+                    records={"2026-10-16\tmodel": {"in": 100, "exact": {"in": 80}}},
+                    days={"2026-10-16": {"in": 100}})
+                raw = self.write_ledger(value)
+                item = self.backup(reason="manual")
+                self.assertTrue(item["valid"])
+                self.assertEqual(self.preview(item["id"])["sha256"], item["sha256"])
+                self.assertEqual((self.cache.parent / B.BACKUP_DIR_NAME / item["id"]).read_bytes(), raw)
+
+    def test_malformed_aggregate_containers_are_safeguards_only(self):
+        for name in ("state", "totals", "tools", "skills", "ctx", "hourly", "activity",
+                     "reads", "used_ext", "mcp_offered", "compactions"):
+            with self.subTest(name=name):
+                malformed = ledger()
+                malformed["files"]["deleted-source.jsonl"][name] = []
+                self.write_ledger(malformed)
+                item = self.backup(reason="manual")
+                self.assertFalse(item["valid"])
+                with self.assertRaises(B.BackupError):
+                    self.preview(item["id"])
 
     def test_changed_backup_or_ledger_makes_preview_stale(self):
         self.write_ledger(marker="older")

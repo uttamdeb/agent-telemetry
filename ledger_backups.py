@@ -24,7 +24,7 @@ _ID_RE = re.compile(r"^(\d{8}T\d{6}Z)-([0-9a-f]{32})-(scheduled|manual|pre-resto
 _REASONS = frozenset(("scheduled", "manual", "pre-restore", "safeguard"))
 _KEEP_PER_REASON = {"scheduled": 7, "manual": 5, "pre-restore": 5, "safeguard": 5}
 _USAGE_FIELDS = frozenset(("in", "out", "cr", "cc", "cc5", "cc1", "reason",
-                           "asst", "user", "req", "prem", "tools", "active", "cost"))
+                           "asst", "user", "req", "prem", "tools", "active", "cost", "ws"))
 
 
 class BackupError(ValueError):
@@ -80,6 +80,40 @@ def _filename(reason, now=None):
     return f"{stamp}-{secrets.token_hex(16)}-{reason}.json"
 
 
+def _validate_usage(row):
+    if not isinstance(row, dict):
+        raise BackupError("ledger aggregate has invalid usage rows")
+    fields = _USAGE_FIELDS | {"lc_" + field for field in _USAGE_FIELDS}
+    for field in fields.intersection(row):
+        value = row[field]
+        if type(value) not in (int, float) or value < 0:
+            raise BackupError("ledger aggregate has invalid usage values")
+        try:
+            finite = math.isfinite(value)
+        except OverflowError:
+            finite = False
+        if not finite:
+            raise BackupError("ledger aggregate has invalid usage values")
+    if "exact" in row:
+        _validate_usage(row["exact"])
+
+
+def _validate_records(records):
+    if not isinstance(records, dict):
+        raise BackupError("ledger aggregate has invalid records")
+    for key, row in records.items():
+        if not isinstance(key, str) or "\t" not in key:
+            raise BackupError("ledger aggregate has invalid usage keys")
+        date, model = key.split("\t", 1)
+        try:
+            if len(date) != 10 or not model:
+                raise ValueError
+            _dt.date.fromisoformat(date)
+        except ValueError as exc:
+            raise BackupError("ledger aggregate has invalid usage keys") from exc
+        _validate_usage(row)
+
+
 def _decode_ledger(raw, expected_version):
     try:
         data = json.loads(raw.decode("utf-8"))
@@ -93,27 +127,27 @@ def _decode_ledger(raw, expected_version):
     for agg in data["files"].values():
         if not isinstance(agg.get("source"), str) or not agg["source"].strip():
             raise BackupError("ledger aggregate has no recognized source")
-        records = agg.get("records", {})
+        # These containers are consumed directly by the dashboard and parser.
+        # A JSON file can be syntactically valid yet unusable as a ledger.
+        for name in ("state", "totals", "tools", "skills", "ctx", "hourly", "activity",
+                     "reads", "used_ext", "mcp_offered", "compactions"):
+            if name in agg and not isinstance(agg[name], dict):
+                raise BackupError("ledger aggregate has invalid " + name)
+        _validate_records(agg.get("records", {}))
         sessions = agg.get("sessions", [])
-        if not isinstance(records, dict) or not isinstance(sessions, list):
-            raise BackupError("ledger aggregate has invalid records or sessions")
-        if any(not isinstance(row, dict) for row in records.values()):
-            raise BackupError("ledger aggregate has invalid usage rows")
-        if any(not isinstance(key, str) or "\t" not in key for key in records):
-            raise BackupError("ledger aggregate has invalid usage keys")
-        if any(not isinstance(session, dict) for session in sessions):
+        if not isinstance(sessions, list) or any(not isinstance(s, dict) for s in sessions):
             raise BackupError("ledger aggregate has invalid sessions")
-        for row in records.values():
-            for field in _USAGE_FIELDS.intersection(row):
-                value = row[field]
-                if type(value) not in (int, float) or value < 0:
-                    raise BackupError("ledger aggregate has invalid usage values")
-                try:
-                    finite = math.isfinite(value)
-                except OverflowError:
-                    finite = False
-                if not finite:
-                    raise BackupError("ledger aggregate has invalid usage values")
+        for session in sessions:
+            # Multi-session stores render and price these buckets instead of the
+            # aggregate records. Validate them before replacing a working ledger.
+            _validate_usage(session)
+            if "records" in session:
+                _validate_records(session["records"])
+            if session.get("days") is not None:
+                if not isinstance(session["days"], dict):
+                    raise BackupError("ledger session has invalid daily usage")
+                for row in session["days"].values():
+                    _validate_usage(row)
     return data
 
 
