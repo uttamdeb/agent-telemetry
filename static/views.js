@@ -2794,11 +2794,11 @@ async function load(){
     const hi=dates.length?dates.reduce((a,b)=>a>b?a:b):"—";
     const fresh=new Date(RAW.meta.last_refresh*1000).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"});
     document.getElementById("statusText").textContent = (S.live ? "Live" : "Paused") + " · updated " + fresh;
-    document.getElementById("coverage").textContent = `${fmtNum(RAW.meta.files)} logs · ${lo} → ${hi}`
-      + (RAW.openclaw_undecoded ? ` · ${fmtNum(RAW.openclaw_undecoded)} OpenClaw events unread — install zstd` : "");
-    if(RAW.cache_error) document.getElementById("coverage").textContent += " · " + RAW.cache_error;
-    if(RAW.meta.parse_errors) document.getElementById("coverage").textContent += ` · ${fmtNum(RAW.meta.parse_errors)} log errors — see Settings`;
-    if(RAW.meta.backup_error) document.getElementById("coverage").textContent += " · backup failed — see Settings";
+    document.getElementById("coverage").innerHTML = `<span>${fmtNum(RAW.meta.files)} logs</span><span class="coverage-dates">${esc(lo)} → ${esc(hi)}</span>`
+      + (RAW.openclaw_undecoded ? `<span class="coverage-detail">${fmtNum(RAW.openclaw_undecoded)} OpenClaw events unread — install zstd</span>` : "")
+      + (RAW.cache_error ? `<span class="coverage-detail">${esc(RAW.cache_error)}</span>` : "")
+      + (RAW.meta.parse_errors ? `<span class="coverage-detail">${fmtNum(RAW.meta.parse_errors)} log errors — see Settings</span>` : "")
+      + (RAW.meta.backup_error ? `<span class="coverage-detail">backup failed — see Settings</span>` : "");
     renderVersion();
     // a device that was disconnected can't stay selected, or it would filter out everything
     for(const id of [...S.devs]) if(!devices().some(v=>v.id===id)) S.devs.delete(id);

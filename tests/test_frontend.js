@@ -515,7 +515,7 @@ console.log('Frontend regression checks passed: pricing, precision, scope, model
   const loading=vm.createContext({console,Date,Set,S:{live:true,devs:new Set()},RAW:null,
     document:{getElementById:id=>loadNodes[id],documentElement:{dataset:{}}},
     fetch:async()=>{pending++;if(pending===1)return await new Promise(resolve=>{resolveOld=resolve});return {ok:true,json:async()=>payload(200)}},
-    devices:()=>[],renderVersion(){},loadAccounts(){},fmtNum:value=>value,renderAll(){rendered++}});
+    devices:()=>[],renderVersion(){},loadAccounts(){},fmtNum:value=>value,esc:run('esc'),renderAll(){rendered++}});
   vm.runInContext(views.slice(views.indexOf('let loadSequence='),views.indexOf('async function loadStorage()')),loading);
   const oldLoad=vm.runInContext('load()',loading);
   await vm.runInContext('load()',loading);
@@ -523,6 +523,23 @@ console.log('Frontend regression checks passed: pricing, precision, scope, model
   await oldLoad;
   assert.equal(vm.runInContext('RAW.records[0].in',loading),200);
   assert.equal(rendered,1,'Superseded payload rendered after a newer one');
+  loading.fetch=async()=>({ok:true,json:async()=>({...payload(300),
+    records:[{date:'2025-07-07'},{date:'2026-10-18'}],
+    cache_error:'Cannot read <ledger> & backup',openclaw_undecoded:2,
+    meta:{last_refresh:1,files:731,parse_errors:3,backup_error:true}})});
+  assert.equal(await vm.runInContext('load()',loading),true);
+  assert.match(loadNodes.coverage.innerHTML,/<span>731 logs<\/span><span class="coverage-dates">2025-07-07 → 2026-10-18<\/span>/,
+    'Coverage dates must stay in one span so CSS can move the whole range to a new line');
+  assert.match(loadNodes.coverage.innerHTML,/class="coverage-detail">Cannot read &lt;ledger&gt; &amp; backup<\/span>/);
+  assert.doesNotMatch(loadNodes.coverage.innerHTML,/<ledger>/,'Coverage errors must remain text when rendered as HTML');
+  assert.match(loadNodes.coverage.innerHTML,/>2 OpenClaw events unread — install zstd<\/span>/);
+  assert.match(loadNodes.coverage.innerHTML,/>3 log errors — see Settings<\/span>/);
+  assert.match(loadNodes.coverage.innerHTML,/>backup failed — see Settings<\/span>/);
+  loading.fetch=async()=>({ok:true,json:async()=>({...payload(200),records:[{date:'<img src=x onerror=alert(1)>',in:200}]})});
+  assert.equal(await vm.runInContext('load()',loading),true);
+  assert.doesNotMatch(loadNodes.coverage.innerHTML,/<img/,'Coverage dates from a payload must also remain escaped text');
+  assert.match(loadNodes.coverage.innerHTML,/&lt;img src=x onerror=alert\(1\)&gt;/);
+  assert.doesNotMatch(loadNodes.coverage.innerHTML,/coverage-detail/,'Resolved coverage errors must disappear on refresh');
   loading.console={error(){}};
   loading.fetch=async()=>({ok:false});
   assert.equal(await vm.runInContext('load()',loading),false);
