@@ -10,12 +10,16 @@ your prompts, session titles, project names and file paths.
 Two properties are load-bearing, and any change that weakens them is a
 vulnerability:
 
-1. **Nothing leaves the machine unless you ask.** No telemetry, no analytics, no API
-   keys. Chart.js is vendored precisely so the page never fetches from a CDN. The only
-   network use is opt-in: the **Check for updates** button (a `git fetch`, on click),
-   and **Your devices**, which you turn on in Settings (below). The explicitly invoked
-   macOS source-build installer downloads a SHA-256-pinned Python runtime; this is an
-   installation step, not background telemetry or a runtime update check.
+1. **No telemetry is sent to AgentTelemetry maintainers, no provider API key is
+   required for ordinary use, and no remote request runs automatically.** Chart.js is
+   vendored, so the dashboard does not load it from a CDN. Separate user actions can
+   contact GitHub for update or release-note metadata, contact a provider for a confirmed
+   account lookup, or send selected usage over the local network to a paired device. When
+   enabled, the local MCP bridge returns requested analytics to its configured client;
+   that client may forward the results to its model provider. An explicitly started saved
+   server command runs with the user's own file and network permissions. Native package
+   installation may download a hash-pinned Python runtime. These actions are separate
+   from background telemetry; the app makes no automatic telemetry upload.
 2. **It binds to `127.0.0.1` by default** and has **no authentication whatsoever**.
    It trusts anything that can reach its port.
 
@@ -89,13 +93,13 @@ is why the write endpoint is guarded.
 
 | Concern | Mitigation |
 |---|---|
-| A website you visit silently POSTing to the local API (CSRF) | `POST /api/settings` requires `Content-Type: application/json`, which forces a CORS preflight that is deliberately never answered, and rejects any non-same-origin `Origin` / `Sec-Fetch-Site`. A cross-site write returns `403`. |
+| A website you visit silently POSTing to the local API (CSRF) | Every browser write route uses the same JSON content-type and same-origin / fetch-metadata guard, including settings, cache, account, device, MCP, session-name, backup, native-app and local-server actions. Cross-site writes return `403`. |
 | Someone on your network reading a shared device's usage | Sharing is off by default and asks before it starts. Only `/api/peer/export` is served on the network port, behind a ~59-bit pairing code, with a 1s delay per wrong guess. Nothing on that port writes anything. |
-| A connected device sending malformed data | The export is size-capped (512 MB decompressed), must identify as AgentTelemetry at a supported cache schema (53, or legacy 52 with optional-field defaults), and entries without the expected shape are dropped. Log-derived strings are escaped as for local logs. |
+| A connected device sending malformed data | The export is size-capped (512 MB decompressed), must identify as AgentTelemetry at a supported cache schema (versions 52 through 61), and entries without the expected shape are dropped. Log-derived strings are escaped as for local logs. |
 | Reading arbitrary files through `/static/` | Path is normalised and must stay under `static/`; anything else is `404`. |
 | Malicious content inside a parsed log rendering as HTML | All log-derived strings are escaped before insertion into the DOM. Log files are attacker-influenced if you ever paste untrusted text into a coding tool — treat them as untrusted input. |
 | SQL injection via Cursor's / opencode's SQLite stores | Queries are static; no value from a log is ever interpolated into SQL. Databases are opened read-only (`mode=ro`). |
-| Supply chain | Standard library only. There is nothing to `pip install`, and no dependency can be substituted at install time. |
+| Supply chain | The Python runtime has no third-party package dependencies, and the dashboard vendors its JavaScript chart library. Release packages use explicit file allowlists; native apps bundle a hash-pinned Python runtime. |
 
 ## Out of scope
 

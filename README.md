@@ -37,6 +37,7 @@ starting monitoring. On macOS, opening the app manually also lets you import fir
 
 These builds are unsigned/unnotarized. macOS may require **System Settings → Privacy &
 Security → Open Anyway**; Windows SmartScreen may require **More info → Run anyway**.
+[Product and install page](https://agenttelemetry-app.vercel.app/) ·
 [All releases](https://github.com/uttamdeb/agent-telemetry/releases) ·
 [What's new in 2.1.0](docs/releases/v2.1.0.md) ·
 [SHA-256 checksums](https://github.com/uttamdeb/agent-telemetry/releases/download/v2.1.0/SHA256SUMS.txt) ·
@@ -142,12 +143,14 @@ estimated from tokens or combined across devices. Session details show recorded
 creator/account IDs with their attribution limits. Account metadata is private to the
 source device. See [setup, research and limitations](docs/account-limits.md).
 
-## Local servers (macOS)
+## Local servers (macOS and Windows)
 
-The **Local servers** tab and menu bar can list local project listeners, pin them,
-and save an explicit launch command for Start and Restart. Process actions ask for
-confirmation. They require a ready macOS backend; Windows and Linux show the support
-limitation. Commands stay on this machine and are never included in device sharing.
+The **Local servers** dashboard tab can list local project listeners, pin them,
+and save an explicit launch command for Start and Restart. macOS can also show pinned
+controls in the menu bar; the Windows tray opens the dashboard controls. Process actions
+ask for confirmation. Lifecycle controls are supported on macOS and Windows; Linux does
+not yet support this feature. Windows asks for a working folder and uses ownership-checked
+process controls. Commands stay on this machine and are never included in device sharing.
 Running a saved command gives it your account's file and network access.
 See [behavior, privacy and limitations](docs/local-servers.md).
 
