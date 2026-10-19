@@ -188,4 +188,57 @@ openSessionParent(JSON.stringify(['local','codex','parent01-full-native-id']))`)
 assert.match(run('opened'),/whole-session figures/);
 assert.match(run('opened'),/cannot be scoped to your date or model filters/);
 assert.doesNotMatch(run('opened'),/Figures follow the selected date and model filters/);
+// Copilot inline children are a Sessions-only projection. Their receipt usage
+// must never enter Overview/Cost/Optimize slices a second time.
+run(`resetFilters();S.preset='custom';S.from='2026-10-18';S.to='2026-10-18';
+  S.tools=new Set(['copilot']);S.search='';S.sessionType='all';
+  var copilotParent={id:'cp-parent',rename_id:'copilot-full-parent',source:'copilot',title:'SDK parent',
+    project:'SDK project',ide:'VS Code',device:'local',model:'M',
+    days:{'2026-10-18':[1,100,10,0,0,1,1,0,0,0,1]},
+    model_days:{M:{'2026-10-18':[1,100,10,0,0,1,1,0,0,0,1]}}};
+  RAW.sessions.push(copilotParent);
+  RAW.session_children=[
+    {id:'sdk-child',rename_id:'copilot-full-parent/agent/child-full-id',source:'copilot',
+      title:'Review <unsafe>',project:'SDK project',ide:'VS Code',device:'local',subagent:true,usage_in_parent:true,
+      rename_available:false,model:'M',start:'2026-10-18T10:00:00',end:'2026-10-18T11:00:00',
+      subagent_parent:{id:'copilot-full-parent',title:'SDK parent',source:'copilot',device:'local'},
+      days:{'2026-10-18':[.2,20,5,0,0,0,0,0,0,0,0]},model_days:{M:{'2026-10-18':[.2,20,5,0,0,0,0,0,0,0,0]}},
+      exact_days:{'2026-10-18':[.2,20,5,0,0,0,0,0,0,0,0]},exact_model_days:{M:{'2026-10-18':[.2,20,5,0,0,0,0,0,0,0,0]}},
+      activity_dates:['2026-10-18'],copilot_sdk:{usage_status:'recorded',recorded_fields:['in','out']},compactions:[]},
+    {id:'sdk-missing',rename_id:'copilot-full-parent/agent/missing',source:'copilot',title:'Missing child usage',
+      project:'SDK project',ide:'VS Code',device:'local',subagent:true,usage_in_parent:true,rename_available:false,
+      start:'2026-10-18T10:00:00',end:'2026-10-18T11:00:00',days:{},model_days:{},exact_days:{},exact_model_days:{},
+      activity_dates:['2026-10-18'],copilot_sdk:{usage_status:'unavailable'},compactions:[]},
+    {id:'sdk-idle',rename_id:'copilot-full-parent/agent/idle',source:'copilot',title:'Idle child',
+      project:'SDK project',device:'local',subagent:true,usage_in_parent:true,
+      start:'2026-10-17T10:00:00',end:'2026-10-19T11:00:00',days:{},activity_dates:['2026-10-17','2026-10-19']}];`);
+const analyticsBefore=json('slice()');
+assert.deepEqual(json('sessionTypeCounts(sessionRows(slice()))'),{all:3,subagents:2,other:1});
+assert.deepEqual(json('slice()'),analyticsBefore,'Inclusive children must not enter analytics slices');
+run(`S.sessionType='subagents';viewSessions(slice())`);
+assert.match(node('sessTable').innerHTML,/Review &lt;unsafe&gt;/);
+assert.match(node('sessTable').innerHTML,/Not recorded for this child/);
+assert.doesNotMatch(node('sessTable').innerHTML,/Idle child|SDK parent/);
+run(`S.search='child-full-id'`);
+assert.deepEqual(json('sessionRows(slice()).map(s=>s.id)'),['sdk-child']);
+run(`S.search='';S.models=new Set(['M'])`);
+assert.deepEqual(json('sessionRowsForType(sessionRows(slice())).map(s=>s.id)'),['sdk-child']);
+run(`S.models.clear();S.ides=new Set(['Other editor'])`);
+assert.equal(json('sessionRows(slice())').length,0);
+run(`S.ides.clear();S.devs=new Set(['remote'])`);
+assert.equal(json('sessionRows(slice())').length,0);
+run(`S.devs.clear();S.projs=new Set(['Other project'])`);
+assert.equal(json('sessionRows(slice())').length,0);
+run(`S.projs.clear();S.exactOnly=true`);
+assert.deepEqual(json('sessionRowsForType(sessionRows(slice())).map(s=>s.id)'),['sdk-child']);
+run(`S.exactOnly=false;viewSessions(slice());openSession(SESS_CACHE.findIndex(s=>s.id==='sdk-child'))`);
+assert.match(run('opened'),/already included in its Copilot parent/);
+assert.match(run('opened'),/data-session-parent/);
+assert.match(run('opened'),/Not recorded/);
+assert.doesNotMatch(run('opened'),/Your prompts<\/span>|Tool calls<\/span>/);
+run(`openSessionParent(JSON.stringify(['local','copilot','copilot-full-parent']))`);
+assert.match(run('opened'),/SDK parent/);
+assert.equal(run('S.sessionType'),'subagents');
+assert.deepEqual(json('slice()'),analyticsBefore);
+
 console.log('Subagent Sessions state, recorded evidence, parent navigation, scope and escaping checks passed.');

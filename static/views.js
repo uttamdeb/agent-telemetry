@@ -1157,7 +1157,10 @@ function sessionRow(s){
 }
 function sessionRows(d){
   const q=S.search.toLowerCase();
-  return d.sessions.map(sessionRow).filter(s=>!q || (s.name+" "+(s.original_title||"")+" "+(s.project||"")+" "+sessionModelList(sessionModelsInRange(s,range(),Infinity))+" "+(s.branch||"")+" "+(s.id||"")+" "+(s.rename_id||"")).toLowerCase().includes(q));
+  const r=d.r||range();
+  const children=(RAW.session_children||[]).filter(s=>passSrc(s.source)&&passProj(s.project)
+    &&sessionMatchesModel(s)&&passIde(s.ide)&&passDev(s.device)&&activeInRange(s,r)).map(s=>clipSession(s,r));
+  return [...d.sessions,...children].map(sessionRow).filter(s=>!q || (s.name+" "+(s.original_title||"")+" "+(s.project||"")+" "+sessionModelList(sessionModelsInRange(s,range(),Infinity))+" "+(s.branch||"")+" "+(s.id||"")+" "+(s.rename_id||"")).toLowerCase().includes(q));
 }
 function sessionModelSummary(s){ return s.model_scoped||sessionModelsInRange(s,range()); }
 function sortSessionRows(rows,st=S.sessSort){
@@ -1242,7 +1245,7 @@ function sessionIdentity(s){ return JSON.stringify([s.device||RAW.device.id,s.so
 function sdkUsageNote(s){
   const sdk=s.copilot_sdk; if(!sdk) return "";
   const notes=[];
-  if(sdk.usage_status==="unavailable") notes.push("Copilot SDK has not saved token usage for this session. Tokens and estimated cost are unavailable, not zero. Recorded prompts, replies and tools are still included.");
+  if(sdk.usage_status==="unavailable") notes.push(s.usage_in_parent?"Token usage was not saved for this child. Its figures are unavailable, not zero.":"Copilot SDK has not saved token usage for this session. Tokens and estimated cost are unavailable, not zero. Recorded prompts, replies and tools are still included.");
   else if(sdk.usage_status==="partial") notes.push("Copilot SDK usage is partial. Only recorded token counts are included; totals and estimated cost can undercount.");
   if(sdk.missing_turns) notes.push(`${sdk.missing_turns} session turn${sdk.missing_turns===1?"":"s"} without fully reconciled usage.`);
   if((sdk.limitations||[]).includes("undated_usage")) notes.push("Some saved totals cannot safely be assigned to a single day; they are excluded from daily figures.");
@@ -1250,7 +1253,7 @@ function sdkUsageNote(s){
   if((sdk.limitations||[]).includes("ambiguous_editor")) notes.push("Multiple editors contain this SDK session; editor attribution is unavailable.");
   if(sdk.errors) notes.push(`${sdk.errors} SDK error${sdk.errors===1?"":"s"} recorded. Failed attempts are not assistant replies.`);
   if(sdk.aborts) notes.push(`${sdk.aborts} interrupted attempt${sdk.aborts===1?"":"s"} recorded.`);
-  if(notes.length) notes.push("Recording status covers the whole session. Saved per-call receipts, VS Code turn totals or SDK shutdown summaries can provide usage later.");
+  if(notes.length&&!s.usage_in_parent) notes.push("Recording status covers the whole session. Saved per-call receipts, VS Code turn totals or SDK shutdown summaries can provide usage later.");
   return notes.join(" ");
 }
 function sdkUsageBadge(s){
@@ -1259,6 +1262,7 @@ function sdkUsageBadge(s){
 }
 function sdkUsageDetails(s){
   const sdk=s.copilot_sdk; if(!sdk) return "";
+  if(s.usage_in_parent) return `<div class="warnbar">This child's recorded usage is already included in its Copilot parent's totals. Do not add it again.</div>${sdkUsageNote(s)?`<p class="hint">${esc(sdkUsageNote(s))}</p>`:""}<p class="hint">This breakdown records tokens and compactions. Prompt, reply, tool-call and active-time counts are unavailable.</p>`;
   const note=sdkUsageNote(s);
   const sources={vscode_turn_usage:"VS Code saved turn totals",usage_receipts:"Saved SDK per-call receipts",usage_events:"Saved SDK usage events",shutdown:"SDK shutdown totals",message_output:"Saved output tokens only"};
   const totals=(sdk.limitations||[]).includes("undated_usage") && (sdk.shutdown_totals||[]).length
@@ -1386,19 +1390,19 @@ function viewSessions(d){
       <td class="dim">${esc(s.project||"—")}</td>
       <td>${sessionModelHTML(s)}${reasoningEffortLabel(s)}</td>
       <td class="r">${s.copilot_sdk?.usage_status==="unavailable"?'<span class="dim" title="Token usage was not saved">—</span>':fmtTok(s.tok)}</td><td class="r"><b>${s.copilot_sdk?.usage_status==="unavailable"?'<span class="dim" title="Cost cannot be estimated without token usage">—</span>':fmtUSD(s.cost)}</b></td>
-      <td class="r">${fmtNum(s.user)}</td><td class="r">${fmtNum(s.copilot_sdk?s.asst:(s.asst||s.req))}</td>
-      <td class="r">${fmtNum(s.tools)}</td>
+      <td class="r">${s.usage_in_parent?'<span class="dim" title="Not recorded for this child">—</span>':fmtNum(s.user)}</td><td class="r">${s.usage_in_parent?'<span class="dim" title="Not recorded for this child">—</span>':fmtNum(s.copilot_sdk?s.asst:(s.asst||s.req))}</td>
+      <td class="r">${s.usage_in_parent?'<span class="dim" title="Not recorded for this child">—</span>':fmtNum(s.tools)}</td>
       <td class="r">${s.active?fmtDur(s.active):'<span class="dim">—</span>'}</td>
       <td class="r">${s.cache?fmtPct(s.cache):'<span class="dim">—</span>'}</td></tr>`;
     }).join(""):emptyMessage)+"</tbody>";
-  const capped = RAW.sessions_total && RAW.sessions_total > RAW.sessions.length;
+  const capped = (RAW.sessions_total>RAW.sessions.length)||(RAW.session_children_total>(RAW.session_children||[]).length);
   const clipped = rows.filter(x=>x.clipped).length;
   document.getElementById("sessHint").textContent =
     `${fmtNum(rows.length)} ${S.sessionType==="subagents"?"subagent ":S.sessionType==="other"?"main agent ":""}session${rows.length===1?"":"s"} active in range`
     + (S.sessionType==="all"?` · ${fmtNum(counts.subagents)} marked Subagent`:` · ${fmtNum(allRows.length)} matching session${allRows.length===1?"":"s"} across all types`)
     + (clipped?` · ${clipped} with scoped figures (◔ = range and model filters)`:"")
     + (rows.length>400?" · showing the top 400 by the current sort":"")
-    + (capped?` · of the ${fmtNum(RAW.sessions_total)} most recent loaded`:"")
+    + (capped?" · loaded session history is capped":"")
     + " · click a row or title for details";
   SESS_CACHE = sorted;
   if(focusedIdentity){
@@ -1454,10 +1458,10 @@ function openSessionDetails(s,related=false){
     ${row("· output",sdkField(s,"out",fmtNum(s.out)))}
     ${row("· reasoning (within output)",s.copilot_sdk?sdkField(s,"reason",fmtNum(s.reason||0)):null)}
     ${row("Cache hit rate",s.cache?fmtPct(s.cache):"—")}
-    ${row("Your prompts",fmtNum(s.user))}
-    ${row("Assistant replies",fmtNum(s.copilot_sdk?s.asst:(s.asst||s.req)))}
-    ${row(s.copilot_sdk?"Observed model calls":"Model calls",s.copilot_sdk?(s.req?fmtNum(s.req):"Not recorded"):(s.asst&&s.req&&s.req!==s.asst?fmtNum(s.req):null))}
-    ${row("Tool calls",fmtNum(s.tools))}
+    ${row("Your prompts",s.usage_in_parent?null:fmtNum(s.user))}
+    ${row("Assistant replies",s.usage_in_parent?null:fmtNum(s.copilot_sdk?s.asst:(s.asst||s.req)))}
+    ${row(s.copilot_sdk?"Observed model calls":"Model calls",s.usage_in_parent?null:s.copilot_sdk?(s.req?fmtNum(s.req):"Not recorded"):(s.asst&&s.req&&s.req!==s.asst?fmtNum(s.req):null))}
+    ${row("Tool calls",s.usage_in_parent?null:fmtNum(s.tools))}
     ${row("Active time",s.active?fmtDur(s.active):null)}
     ${row("SDK API time (whole session)",s.copilot_sdk?.totalApiDurationMs!=null?fmtDur(s.copilot_sdk.totalApiDurationMs/1000):null)}
     ${row("Mode",s.mode?esc(s.mode):null)}

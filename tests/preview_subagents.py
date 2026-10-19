@@ -25,8 +25,8 @@ import parser as P
 
 LOCAL_ID = "fixture-local"
 REMOTE_ID = "fixture-remote"
-MODELS = {"codex": "GPT-6.1 Sol", "claude": "Claude Sonnet 5.5"}
-FIXTURE_SESSION_COUNT = 10
+MODELS = {"codex": "GPT-6.1 Sol", "claude": "Claude Sonnet 5.5", "copilot": "GLM 5.3"}
+FIXTURE_SESSION_COUNT = 11
 
 
 def _vector(*, cost=0.0, input_tokens=0, output_tokens=0, cache_read=0,
@@ -75,7 +75,7 @@ def _session(*, source, suffix, title, project, days_ago, tokens, subagent=None,
         "model": model,
         "models": [model],
         "nmodels": 1,
-        "ide": "VS Code" if source == "codex" else "CLI",
+        "ide": "VS Code" if source in ("codex", "copilot") else "CLI",
         "device": device,
         "start": start.isoformat(),
         "end": end.isoformat(),
@@ -149,8 +149,19 @@ def _payload():
                  days_ago=5, tokens=33000, subagent=False, malicious=True),
     ]
 
+    copilot = _session(source="copilot", suffix=11, title="Copilot parent: delegated review",
+                       project="copilot-preview", days_ago=0, tokens=120000, subagent=False, delegated=2)
+    date = copilot["end"][:10]
+    copilot["copilot_sdk"] = {"usage_status": "recorded", "agents": [
+        {"id": "preview-review-"+str(n), "title": "Review implementation" if n == 1 else "Review tests",
+         "model": "GLM 5.3", "usage_status": "recorded", "start": copilot["start"], "end": copilot["end"],
+         "activity_dates": [date], "records": {date+"\tGLM 5.3": {"in": 10000*n, "out": 500*n}},
+         "compactions": []} for n in (1, 2)]}
+    sessions.append(copilot)
     payload["sessions"] = sessions
     payload["sessions_total"] = len(sessions)
+    payload["session_children"] = D._copilot_child_sessions(copilot)
+    payload["session_children_total"] = len(payload["session_children"])
 
     # Give the other dashboard dimensions coherent synthetic rows, so the usual
     # filters, date range, and figures remain usable while inspecting Sessions.
