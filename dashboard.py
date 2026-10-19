@@ -902,6 +902,60 @@ def _day_vectors(days):
     return {d: [round(row.get(k, 0), 6) for k in fields] for d, row in sorted(days.items())}
 
 
+def _copilot_child_sessions(parent):
+    """Sessions-view breakdowns only: never add inclusive child usage to analytics."""
+    sdk = parent.get("copilot_sdk")
+    native_id = parent.get("rename_id")
+    if parent.get("source") != "copilot" or parent.get("subagent") or not isinstance(sdk, dict) or not isinstance(native_id, str) or not native_id:
+        return []
+    agents = sdk.get("agents")
+    if not isinstance(agents, list):
+        return []
+    result, seen = [], set()
+    for agent in agents:
+        if not isinstance(agent, dict):
+            continue
+        aid = agent.get("id")
+        if not isinstance(aid, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", aid) or aid in seen:
+            continue
+        seen.add(aid)
+        raw_bucket = agent.get("records") or {}
+        if not isinstance(raw_bucket, dict):
+            continue
+        bucket = {}
+        for key, row in raw_bucket.items():
+            if not isinstance(key, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}\t[^\t]{1,160}", key) or not isinstance(row, dict):
+                continue
+            if P._from_iso(key.split("\t", 1)[0]) is None:
+                continue
+            counts = {field: row[field] for field in ("in", "out", "cr", "cc", "cc5", "cc1", "reason") if field in row}
+            if counts and all(isinstance(n, int) and not isinstance(n, bool) and 0 <= n <= 2**53 - 1 for n in counts.values()):
+                bucket[key] = counts
+        days, models = _priced_days(bucket, "copilot", False)
+        status = agent.get("usage_status")
+        if status not in ("recorded", "partial", "unavailable"):
+            status = "unavailable"
+        fields = sorted({key for row in bucket.values() if isinstance(row, dict)
+                         for key in ("in", "out", "cr", "cc", "reason") if key in row})
+        child = {key: parent[key] for key in ("source", "project", "ide", "device", "archived", "branch", "entry", "cliver") if key in parent}
+        child.update(id=aid[:8], rename_id=native_id + "/agent/" + aid,
+            rename_available=False, rename_reason="Copilot subagent names are read-only source metadata.",
+            title=agent.get("title") if isinstance(agent.get("title"), str) else "Copilot subagent",
+            model=agent.get("model") if isinstance(agent.get("model"), str) else "Unknown",
+            start=ST._timestamp(agent.get("start")), end=ST._timestamp(agent.get("end")), subagent=True, usage_in_parent=True,
+            subagent_parent={"id": native_id, "title": parent.get("title") or parent.get("project") or native_id,
+                             "source": "copilot", "device": parent["device"]},
+            days=_day_vectors(days), model_days={model: _day_vectors(rows) for model, rows in models.items()},
+            activity_dates=[d for d in agent.get("activity_dates", []) if isinstance(d, str)] if isinstance(agent.get("activity_dates"), list) else [],
+            compactions=[e for e in agent.get("compactions", []) if isinstance(e, dict) and isinstance(e.get("date"), str)] if isinstance(agent.get("compactions"), list) else [],
+            copilot_sdk={"usage_status": status, "recorded_fields": fields},
+            detail_limited=status != "recorded")
+        child["exact_days"] = child["days"] if status == "recorded" else {}
+        child["exact_model_days"] = child["model_days"] if status == "recorded" else {}
+        result.append(child)
+    return result
+
+
 def _model_history(model):
     base = model[:-len(P.US_SUFFIX)] if model.endswith(P.US_SUFFIX) else model
     if base.endswith(P.FAST_SUFFIX):
@@ -1000,6 +1054,7 @@ def _build_payload_locked():
     projects = {}     # (project, source) -> {tokens, msgs, sessions, cost}
     hourly = {}       # (date, hour, source, device) -> {tokens, msgs}
     sessions = []
+    session_children = []  # inclusive SDK breakdowns, used only by the Sessions view
     skills = {}       # (date, skill, device) -> tokens/cost
     ctxb = {}         # (date, bucket, source, device) -> tokens/requests
     model_meta = {}   # model -> vendor
@@ -1221,6 +1276,7 @@ def _build_payload_locked():
                                         (session.get("end") or session.get("start") or "")[:10],
                                         session, has_logged_cost)["cost"])
             sessions.append(s2)
+            session_children.extend(_copilot_child_sessions(s2))
 
     # Parent resolution uses full source IDs and the exporting device, never a
     # title, project label, shared root-session ID or eight-character table ID.
@@ -1320,6 +1376,8 @@ def _build_payload_locked():
         "hourly": hour_list,
         "sessions": sessions[:2000],
         "sessions_total": len(sessions),
+        "session_children": sorted(session_children, key=lambda s: s.get("end") or "", reverse=True)[:2000],
+        "session_children_total": len(session_children),
         "model_vendor": model_meta,
         "ai_lines": [{"date": d, "source": "cursor", "device": dv, **v}
                      for (d, dv), v in sorted(ai_lines.items())],

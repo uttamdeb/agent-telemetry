@@ -155,6 +155,12 @@ Subagent labels, and the selector's reset on project/comparison drilldowns. Coun
 follow the current range, shared filters and search. Delegation counts and Claude
 sidechain tokens are whole-session evidence, not parent-child links; sidechain
 tokens are already included in the parent's total. See docs/subagent-sessions.md.
+Copilot SDK's inline child breakdowns are presented separately in payload
+`session_children`. Combine them only in the Sessions list, after the same shared
+filters/date scope. Never add them to `slice().sessions`, analytics records, Optimize,
+MCP totals or project counts: their usage is already included in the parent.
+Keep full parent/agent identities, explicit parent links, unavailable usage labels
+and recorded activity dates; do not infer activity on idle days or rename these children.
 Only what differs from the default is written, params that aren't the filters' own are left
 alone, and a change replaces the history entry the way switching tab does. `?theme=` and
 `?side=collapsed|open` preset the look (handy for headless screenshots). **A new filter goes

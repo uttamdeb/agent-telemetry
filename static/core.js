@@ -306,6 +306,10 @@ function activeInRange(s, r){
   // Boundaries have no billed model attribution. They can make an otherwise
   // empty day visible when no model/provider filter asks for model-specific work.
   if(!S.models.size && !S.provs.size && (compactionsInRange(s,r)||[]).length) return true;
+  // SDK child lifecycles have explicit activity dates even without saved usage.
+  // Never fill the idle dates between start and end, or guess a billed model.
+  if(s.usage_in_parent && !S.exactOnly && !S.models.size && !S.provs.size
+      && Array.isArray(s.activity_dates) && s.activity_dates.some(d=>isDay(d)&&d>=r.from&&d<=r.to)) return true;
   if(D) return false;
   const e = (s.end||s.start||"").slice(0,10);
   return e>=r.from && e<=r.to;
