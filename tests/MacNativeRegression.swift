@@ -26,18 +26,221 @@ struct MacNativeRegression {
         let backend = BackendController(settings: settings)
         let menu = MenuBarPopoverController()
         let localServers = LocalServerMonitor()
+        let recentActivity = NativeActivityMonitor()
         menu.install(backend: backend, settings: settings, localServers: localServers,
-                     openDashboard: {}, openLocalServers: {}, quit: {})
+                     recentActivity: recentActivity,
+                     openDashboard: {}, openLocalServers: {}, openRecentSessions: {}, quit: {})
+        let oldDashboardURL = URL(string: base.absoluteString + "/?nativeApp=1&nativePollSeconds=60&range=today&models=Fixture&devices=Fixture#cost")!
+        let sessionsURL = dashboardURLSelecting(view: "sessions", range: "7d", from: oldDashboardURL)!
+        let sessionQuery = URLComponents(url: sessionsURL, resolvingAgainstBaseURL: false)!.queryItems!
+        precondition(sessionQuery.contains { $0.name == "range" && $0.value == "7d" }
+            && sessionQuery.contains { $0.name == "models" && $0.value == "Fixture" }
+            && sessionQuery.contains { $0.name == "devices" && $0.value == "Fixture" }
+            && sessionQuery.contains { $0.name == "nativeApp" && $0.value == "1" }
+            && sessionsURL.fragment == "sessions",
+            "View sessions changed unrelated filters or failed to select a seven-day range")
         backend.start()
         try await Task.sleep(nanoseconds: 1_000_000_000)
         precondition(backend.summary.tokens == 100 && backend.isReady)
         let localServerDeadline = Date().addingTimeInterval(5)
-        while !localServers.isAvailable && Date() < localServerDeadline {
+        while (!localServers.isAvailable || !recentActivity.isAvailable) && Date() < localServerDeadline {
             try await Task.sleep(nanoseconds: 50_000_000)
         }
         precondition(localServers.isAvailable && localServers.isSupported == true)
         precondition(localServers.runningServers.first?.id == "server-fixture")
         precondition(localServers.runningServers.first?.address == "127.0.0.1:3000")
+        precondition(recentActivity.isAvailable && recentActivity.isSupported == true)
+        precondition(recentActivity.sessions.count == 3 && recentActivity.total == 5)
+        precondition(recentActivity.sessions[0].displayTool == "Codex")
+        precondition(recentActivity.sessions[0].displayProvider == "OpenAI")
+        precondition(recentActivity.sessions[0].safeTokens == 12845)
+        precondition(recentActivity.sessions[1].subagent)
+        precondition(recentActivity.sessions[2].displayProvider == nil,
+                     "Configurable tools must not claim a billing provider")
+        precondition(recentActivity.sessions[0].safeTitle.contains("Fixture session"))
+        let newestActivity = recentActivity.sessions[0].activityDate!
+        let beforeExpiry = recentActivity.visibleSessions(at: newestActivity.addingTimeInterval(899))
+        let afterExpiry = recentActivity.visibleSessions(at: newestActivity.addingTimeInterval(901))
+        precondition(beforeExpiry.contains { $0.key == recentActivity.sessions[0].key })
+        precondition(!afterExpiry.contains { $0.key == recentActivity.sessions[0].key },
+                     "The native client must age the list out locally after fifteen minutes")
+        print("PASS recent-activity payload decoding, tool branding, subagent and lifetime-token semantics")
+        func log(_ message: String) {
+            print(message)
+            fflush(stdout)
+        }
+        func captureRecentActivity(_ name: String, dark: Bool = false) throws {
+            guard CommandLine.arguments.count > 3 else { return }
+            let directory = URL(fileURLWithPath: CommandLine.arguments[3])
+            let layout = MenuBarPopoverLayout()
+            layout.maximumScrollHeight = 400
+            let background = NSColor(calibratedWhite: dark ? 0.13 : 0.94, alpha: 1)
+            let preview = StatusMenu(
+                backend: backend,
+                settings: settings,
+                localServers: localServers,
+                recentActivity: recentActivity,
+                layout: layout,
+                openDashboard: {},
+                openLocalServers: {},
+                openRecentSessions: {},
+                quit: {},
+                onDisclosureChange: { _ in }
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .background(Color(nsColor: background))
+            let host = NSHostingView(rootView: preview)
+            host.frame = NSRect(x: 0, y: 0, width: 310, height: 720)
+            let previewWindow = NSWindow(contentRect: host.frame, styleMask: [.borderless],
+                                         backing: .buffered, defer: false)
+            previewWindow.isReleasedWhenClosed = false
+            previewWindow.isOpaque = true
+            previewWindow.backgroundColor = background
+            previewWindow.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+            host.appearance = previewWindow.appearance
+            previewWindow.contentView = host
+            previewWindow.orderFrontRegardless()
+            previewWindow.displayIfNeeded()
+            host.layoutSubtreeIfNeeded()
+            let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds)!
+            host.cacheDisplay(in: host.bounds, to: bitmap)
+            let corner = bitmap.colorAt(x: 0, y: 0)!.usingColorSpace(.deviceRGB)!
+            precondition(corner.alphaComponent > 0.99,
+                         "Native preview images must include an opaque theme background")
+            try bitmap.representation(using: .png, properties: [:])!
+                .write(to: directory.appendingPathComponent(name))
+            log("Captured \(name)")
+            previewWindow.close()
+            log("Closed preview window for \(name)")
+        }
+        try captureRecentActivity("mac-recent-activity.png")
+        try captureRecentActivity("mac-recent-activity-dark.png", dark: true)
+        log("PASS opaque light and dark recent-activity previews")
+
+        log("Starting short-screen popover layout check")
+        let compactLayout = MenuBarPopoverLayout()
+        let compactPreview = StatusMenu(
+            backend: backend,
+            settings: settings,
+            localServers: localServers,
+            recentActivity: recentActivity,
+            layout: compactLayout,
+            openDashboard: {},
+            openLocalServers: {},
+            openRecentSessions: {},
+            quit: {},
+            onDisclosureChange: { _ in }
+        )
+        .background(Color(nsColor: NSColor(calibratedWhite: 0.94, alpha: 1)))
+        let compactHost = NSHostingView(rootView: compactPreview)
+        compactHost.appearance = NSAppearance(named: .aqua)
+        compactHost.frame = NSRect(x: 0, y: 0, width: 310, height: 900)
+        compactLayout.maximumScrollHeight = 360
+        compactHost.layoutSubtreeIfNeeded()
+        let compactFixedHeight = compactHost.fittingSize.height - 360
+        compactLayout.constrainScrollHeight(availableHeight: 320, fixedHeight: compactFixedHeight)
+        try await Task.sleep(nanoseconds: 100_000_000)
+        compactHost.layoutSubtreeIfNeeded()
+        let compactSize = compactHost.fittingSize
+        precondition(compactLayout.maximumScrollHeight < 120,
+                     "Short screens should allow the middle section to shrink below 120 points")
+        precondition(compactSize.height <= 320.5 && compactSize.height > compactLayout.maximumScrollHeight,
+                     "The scroll region and fixed dashboard/footer controls must fit inside the small-screen work area")
+        if CommandLine.arguments.count > 3 {
+            let compactBackground = NSColor(calibratedWhite: 0.94, alpha: 1)
+            compactHost.wantsLayer = true
+            compactHost.layer?.backgroundColor = compactBackground.cgColor
+            compactHost.frame = NSRect(origin: .zero, size: compactSize)
+            compactHost.layoutSubtreeIfNeeded()
+            let bitmap = compactHost.bitmapImageRepForCachingDisplay(in: compactHost.bounds)!
+            compactHost.cacheDisplay(in: compactHost.bounds, to: bitmap)
+            let corner = bitmap.colorAt(x: 0, y: 0)!.usingColorSpace(.deviceRGB)!
+            precondition(corner.alphaComponent > 0.99,
+                         "Compact native preview must include an opaque theme background")
+            try bitmap.representation(using: .png, properties: [:])!
+                .write(to: URL(fileURLWithPath: CommandLine.arguments[3])
+                    .appendingPathComponent("mac-recent-activity-compact.png"))
+        }
+
+        let originalActivityKeys = recentActivity.sessions.map(\.key)
+        _ = try await URLSession.shared.data(from: base.appendingPathComponent("fail-native-activity"))
+        backend.refreshNow()
+        let staleDeadline = Date().addingTimeInterval(5)
+        while !recentActivity.isStale && Date() < staleDeadline {
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        precondition(recentActivity.isStale && !recentActivity.isAvailable
+            && recentActivity.sessions.map(\.key) == originalActivityKeys,
+            "A failed detail request must retain the last successful list and mark it stale")
+        try captureRecentActivity("mac-recent-activity-stale.png")
+
+        _ = try await URLSession.shared.data(from: base.appendingPathComponent("disable-native-activity-support"))
+        backend.refreshNow()
+        let unsupportedDeadline = Date().addingTimeInterval(5)
+        while recentActivity.isSupported != false && Date() < unsupportedDeadline {
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        precondition(recentActivity.isSupported == false && recentActivity.isStale,
+                     "A legacy backend must be marked unavailable instead of showing zero sessions")
+        _ = try await URLSession.shared.data(from: base.appendingPathComponent("enable-native-activity-support"))
+        _ = try await URLSession.shared.data(from: base.appendingPathComponent("recover-native-activity"))
+        backend.refreshNow()
+        let recoveryDeadline = Date().addingTimeInterval(5)
+        while (!recentActivity.isAvailable || recentActivity.isStale) && Date() < recoveryDeadline {
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        precondition(recentActivity.isAvailable && recentActivity.isSupported == true && !recentActivity.isStale,
+                     "Activity should recover on the next shared dashboard refresh")
+
+        let retainedKeys = recentActivity.sessions.map(\.key)
+        _ = try await URLSession.shared.data(from: base.appendingPathComponent("redirect-native-activity"))
+        recentActivity.refresh()
+        let redirectDeadline = Date().addingTimeInterval(5)
+        while recentActivity.isAvailable && Date() < redirectDeadline {
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        let (followCountData, _) = try await URLSession.shared.data(from: base.appendingPathComponent("fixture/native-activity-redirect-count"))
+        let followCount = (try JSONSerialization.jsonObject(with: followCountData) as! [String: Int])["count"]!
+        precondition(recentActivity.isStale && recentActivity.sessions.map(\.key) == retainedKeys && followCount == 0,
+                     "The native request must retain stale rows and refuse even a same-origin redirect")
+        _ = try await URLSession.shared.data(from: base.appendingPathComponent("restore-native-activity-redirect"))
+        recentActivity.refresh()
+        let redirectRecoveryDeadline = Date().addingTimeInterval(5)
+        while !recentActivity.isAvailable && Date() < redirectRecoveryDeadline {
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+
+        _ = try await URLSession.shared.data(from: base.appendingPathComponent("oversize-native-activity"))
+        recentActivity.refresh()
+        let sizeDeadline = Date().addingTimeInterval(5)
+        while recentActivity.isAvailable && Date() < sizeDeadline {
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        precondition(recentActivity.isStale && recentActivity.sessions.map(\.key) == retainedKeys,
+                     "Oversized activity responses must be rejected without erasing the last good list")
+        _ = try await URLSession.shared.data(from: base.appendingPathComponent("restore-native-activity-oversize"))
+        recentActivity.refresh()
+        let sizeRecoveryDeadline = Date().addingTimeInterval(5)
+        while !recentActivity.isAvailable && Date() < sizeRecoveryDeadline {
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+
+        _ = try await URLSession.shared.data(from: base.appendingPathComponent("empty-native-activity"))
+        recentActivity.refresh()
+        let emptyDeadline = Date().addingTimeInterval(5)
+        while (!recentActivity.isAvailable || !recentActivity.sessions.isEmpty) && Date() < emptyDeadline {
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        precondition(recentActivity.isAvailable && recentActivity.sessions.isEmpty && recentActivity.total == 0)
+        try captureRecentActivity("mac-recent-activity-empty.png")
+        _ = try await URLSession.shared.data(from: base.appendingPathComponent("restore-native-activity"))
+        recentActivity.refresh()
+        let restoreDeadline = Date().addingTimeInterval(5)
+        while recentActivity.sessions.isEmpty && Date() < restoreDeadline {
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        precondition(recentActivity.isAvailable && recentActivity.sessions.count == 3)
+        print("PASS activity errors retain stale rows, old backends stay honest, redirects and large responses are refused")
         let reflected = Mirror(reflecting: menu).children.first { $0.label == "statusItem" }!.value
         let statusItem = reflected as! NSStatusItem
         let brandIcon = statusItem.button!.image!
@@ -115,10 +318,15 @@ struct MacNativeRegression {
         try await Task.sleep(nanoseconds: 1_300_000_000)
         let (beforePollData, _) = try await URLSession.shared.data(from: base.appendingPathComponent("fixture/local-server-count"))
         let beforePoll = (try JSONSerialization.jsonObject(with: beforePollData) as! [String: Int])["count"]!
+        let (beforeActivityPollData, _) = try await URLSession.shared.data(from: base.appendingPathComponent("fixture/native-activity-count"))
+        let beforeActivityPoll = (try JSONSerialization.jsonObject(with: beforeActivityPollData) as! [String: Int])["count"]!
         try await Task.sleep(nanoseconds: 1_300_000_000)
         let (afterPollData, _) = try await URLSession.shared.data(from: base.appendingPathComponent("fixture/local-server-count"))
         let afterPoll = (try JSONSerialization.jsonObject(with: afterPollData) as! [String: Int])["count"]!
-        precondition(beforePoll == afterPoll, "Manual refresh mode kept polling local server inventory")
+        let (afterActivityPollData, _) = try await URLSession.shared.data(from: base.appendingPathComponent("fixture/native-activity-count"))
+        let afterActivityPoll = (try JSONSerialization.jsonObject(with: afterActivityPollData) as! [String: Int])["count"]!
+        precondition(beforePoll == afterPoll && beforeActivityPoll == afterActivityPoll,
+                     "Manual refresh mode kept polling local details without a shared dashboard refresh")
         print("PASS unsupported capability preserves stale data, recovers, and Manual mode stops background polling")
 
         _ = try await URLSession.shared.data(from: base.appendingPathComponent("advance"))
@@ -148,6 +356,9 @@ struct MacNativeRegression {
         try await Task.sleep(nanoseconds: 700_000_000)
         precondition(backend.summaryStale && backend.isMonitoring && backend.status.message != nil)
         precondition(backend.summary.tokens == 250)
+        precondition(recentActivity.isStale && !recentActivity.isAvailable
+            && !recentActivity.sessions.isEmpty,
+            "A summary outage must mark the last recent-activity list stale too")
         precondition(statusItem.button!.image === brandIcon, "Failure replaced the app mark")
         precondition(statusItem.button!.toolTip!.contains("Needs attention"), "Failure status is missing from the tooltip")
         settings.refreshIntervalSeconds = 15
@@ -156,8 +367,29 @@ struct MacNativeRegression {
         try await Task.sleep(nanoseconds: 1_400_000_000)
         precondition(!backend.summaryStale && backend.isReady && backend.lastSummaryUpdate != nil)
         print("PASS summary failure retains data and retries after a cadence change during an outage")
+        _ = try await URLSession.shared.data(from: base.appendingPathComponent("delay-native-activity"))
+        let (beforeCancelData, _) = try await URLSession.shared.data(from: base.appendingPathComponent("fixture/native-activity-count"))
+        let beforeCancel = (try JSONSerialization.jsonObject(with: beforeCancelData) as! [String: Int])["count"]!
+        recentActivity.refresh()
+        var didStartActivityRequest = false
+        let requestDeadline = Date().addingTimeInterval(3)
+        while Date() < requestDeadline {
+            let (countData, _) = try await URLSession.shared.data(from: base.appendingPathComponent("fixture/native-activity-count"))
+            let count = (try JSONSerialization.jsonObject(with: countData) as! [String: Int])["count"]!
+            if count > beforeCancel {
+                didStartActivityRequest = true
+                break
+            }
+            try await Task.sleep(nanoseconds: 25_000_000)
+        }
+        precondition(didStartActivityRequest, "The fixture did not observe the pending activity request")
         backend.stop()
+        try await Task.sleep(nanoseconds: 500_000_000)
         precondition(!localServers.isAvailable && localServers.isStale)
+        precondition(recentActivity.sessions.isEmpty && !recentActivity.isAvailable
+            && !recentActivity.isStale,
+            "Stopping monitoring must clear recent rows and discard any in-flight response")
+        _ = try await URLSession.shared.data(from: base.appendingPathComponent("restore-native-activity-delay"))
         precondition(statusItem.button!.image === brandIcon, "Stopping replaced the app mark")
         precondition(statusItem.button!.toolTip!.contains("Monitoring off"))
         settings.refreshIntervalSeconds = 300
@@ -197,6 +429,7 @@ struct MacNativeRegression {
         host.frame = NSRect(x: 0, y: 0, width: 900, height: 700)
         let window = NSWindow(contentRect: host.frame, styleMask: [.titled], backing: .buffered, defer: false)
         window.contentView = host
+        window.isReleasedWhenClosed = false
         host.layoutSubtreeIfNeeded()
         try await Task.sleep(nanoseconds: 1_000_000_000)
         func findWebView(_ view: NSView) -> WKWebView? {

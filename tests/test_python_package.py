@@ -47,7 +47,7 @@ class PackageTests(unittest.TestCase):
         bare_names = (
             "parser", "native", "session_names", "accounts", "local_servers",
             "local_servers_windows", "ledger_backups", "diagnostics", "session_timeline",
-            "release_notes", "mcp_access", "mcp_backend", "mcp_protocol", "mcp_server", "mcp_tools",
+            "release_notes", "native_activity", "mcp_access", "mcp_backend", "mcp_protocol", "mcp_server", "mcp_tools",
             "telemetry_query", "telemetry_insights",
         )
         bare_before = {name: sys.modules.get(name) for name in bare_names}
@@ -63,6 +63,7 @@ class PackageTests(unittest.TestCase):
         backups = self.import_module("ledger_backups")
         diagnostics = self.import_module("diagnostics")
         timeline = self.import_module("session_timeline")
+        native_activity = self.import_module("native_activity")
         mcp_access = self.import_module("mcp_access")
         mcp_backend = self.import_module("mcp_backend")
         mcp_protocol = self.import_module("mcp_protocol")
@@ -79,6 +80,7 @@ class PackageTests(unittest.TestCase):
         self.assertIs(dashboard.LB, backups)
         self.assertIs(dashboard.DG, diagnostics)
         self.assertIs(dashboard.ST, timeline)
+        self.assertIs(dashboard.NA, native_activity)
         self.assertIs(dashboard.MA, mcp_access)
         self.assertIs(dashboard.MCP, mcp_backend)
         self.assertIs(mcp_access.native, native)
@@ -274,10 +276,11 @@ class PackageTests(unittest.TestCase):
 
     def test_legacy_checkout_imports_stay_top_level(self):
         script = (
-            "import accounts, dashboard, native, parser, session_names; "
+            "import accounts, dashboard, native, native_activity, parser, session_names; "
             "assert dashboard.__package__ == ''; "
             "assert dashboard.P is parser and dashboard.N is native; "
             "assert dashboard.SN is session_names and dashboard.A is accounts; "
+            "assert dashboard.NA is native_activity; "
             "assert parser.A is accounts and accounts.N is native"
         )
         environment = os.environ.copy()

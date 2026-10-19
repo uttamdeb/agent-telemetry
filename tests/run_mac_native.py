@@ -1,6 +1,7 @@
 """Compile actual macOS native sources against an ephemeral mock dashboard."""
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import argparse
+from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 import subprocess
@@ -19,7 +20,11 @@ if options.screenshots:
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "macos/AgentTelemetryMac/Sources/AgentTelemetryMac"
 state = {"failed": False, "delay": False, "seconds": 15, "revision": 0, "tokens": 100,
-         "localServerSupported": True, "localServerGets": 0, "localServerActions": []}
+         "localServerSupported": True, "localServerGets": 0, "localServerActions": [],
+         "nativeActivitySupported": True, "nativeActivityFailed": False,
+         "nativeActivityDelay": False, "nativeActivityEmpty": False, "nativeActivityGets": 0,
+         "nativeActivityRedirect": False, "nativeActivityOversized": False,
+         "nativeActivityRedirectFollowed": 0}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -34,6 +39,18 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/raw-advance": state["tokens"] = 250
         if self.path == "/disable-local-server-support": state["localServerSupported"] = False
         if self.path == "/enable-local-server-support": state["localServerSupported"] = True
+        if self.path == "/fail-native-activity": state["nativeActivityFailed"] = True
+        if self.path == "/recover-native-activity": state["nativeActivityFailed"] = False
+        if self.path == "/disable-native-activity-support": state["nativeActivitySupported"] = False
+        if self.path == "/enable-native-activity-support": state["nativeActivitySupported"] = True
+        if self.path == "/delay-native-activity": state["nativeActivityDelay"] = True
+        if self.path == "/restore-native-activity-delay": state["nativeActivityDelay"] = False
+        if self.path == "/empty-native-activity": state["nativeActivityEmpty"] = True
+        if self.path == "/restore-native-activity": state["nativeActivityEmpty"] = False
+        if self.path == "/redirect-native-activity": state["nativeActivityRedirect"] = True
+        if self.path == "/restore-native-activity-redirect": state["nativeActivityRedirect"] = False
+        if self.path == "/oversize-native-activity": state["nativeActivityOversized"] = True
+        if self.path == "/restore-native-activity-oversize": state["nativeActivityOversized"] = False
         if self.path == "/fixture/local-server-actions":
             body = json.dumps(state["localServerActions"]).encode()
             self.send_response(200)
@@ -48,6 +65,70 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
+        if self.path == "/fixture/native-activity-count":
+            body = json.dumps({"count": state["nativeActivityGets"]}).encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if self.path == "/fixture/native-activity-redirect-count":
+            body = json.dumps({"count": state["nativeActivityRedirectFollowed"]}).encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if self.path == "/fixture/redirect-followed":
+            state["nativeActivityRedirectFollowed"] += 1
+            self.send_response(200)
+            self.send_header("Content-Length", "2")
+            self.end_headers()
+            self.wfile.write(b"{}")
+            return
+        if self.path == "/api/native-activity":
+            state["nativeActivityGets"] += 1
+            if state["nativeActivityDelay"]:
+                time.sleep(0.35)
+            if state["nativeActivityRedirect"]:
+                self.send_response(302)
+                self.send_header("Location", "/fixture/redirect-followed")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            if state["nativeActivityOversized"]:
+                body = b" " * (64 * 1024 + 1)
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            now = datetime.now(timezone.utc)
+            stamp = lambda seconds: (now - timedelta(seconds=seconds)).isoformat(timespec="seconds").replace("+00:00", "Z")
+            body = json.dumps({
+                "observed_at": stamp(0),
+                "window_seconds": 900,
+                "sessions": [] if state["nativeActivityEmpty"] else [
+                    {"key": "a" * 64, "source": "codex", "tool": "Codex", "provider": "OpenAI",
+                     "title": "Fixture session with a long title that should truncate gracefully in the compact native popover", "tokens": 12845,
+                     "last_activity_at": stamp(30), "subagent": False},
+                    {"key": "b" * 64, "source": "claude", "tool": "Claude Code", "provider": "Anthropic",
+                     "title": "Reviewing the fixture", "tokens": 5820,
+                     "last_activity_at": stamp(95), "subagent": True},
+                    {"key": "c" * 64, "source": "opencode", "tool": "OpenCode", "provider": None,
+                     "title": "An older local fixture session", "tokens": None,
+                     "last_activity_at": stamp(420), "subagent": False},
+                ],
+                "total": 0 if state["nativeActivityEmpty"] else 5,
+            }).encode()
+            if not state["nativeActivitySupported"]:
+                self.send_response(404)
+            else:
+                self.send_response(503 if state["nativeActivityFailed"] else 200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if self.path == "/api/local-servers":
             state["localServerGets"] += 1
             body = json.dumps({
@@ -56,7 +137,7 @@ class Handler(BaseHTTPRequestHandler):
                 "updatedAt": "2026-10-10T12:00:00Z",
                 "servers": [{
                     "id": "server-fixture", "pid": 123, "process": "vite", "cwd": "/tmp/Fixture",
-                    "project": "Fixture", "host": "127.0.0.1", "port": 3000,
+                    "project": "A Very Long Fixture Project Name for Native Popover Truncation", "host": "127.0.0.1", "port": 3000,
                     "startedAt": "2026-10-10T11:00:00Z", "state": "running",
                     "firstSeen": "2026-10-10T11:00:00Z", "lastSeen": "2026-10-10T12:00:00Z",
                     "stoppedAt": None, "profileId": "profile-fixture", "isConfigured": True,
@@ -118,6 +199,7 @@ try:
             "CacheMigration.swift",
             "DashboardWebView.swift",
             "LocalServerMonitor.swift",
+            "NativeActivityMonitor.swift",
             "StatusMenu.swift",
             "MenuBarPopoverController.swift",
             "NativeControl.swift",

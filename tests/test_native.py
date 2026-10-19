@@ -1,5 +1,6 @@
 """Native control, install and Windows monitoring regressions; isolated data only."""
 import copy
+import http.server
 import json
 from pathlib import Path
 import tempfile
@@ -469,6 +470,164 @@ class MonitorTests(unittest.TestCase):
         with patch.object(self.monitor, "start", return_value=True):
             self.monitor.open_dashboard(opener=opener, view="local-servers")
         opener.assert_called_once_with(self.monitor.url + "#local-servers")
+
+    def test_sessions_link_uses_the_last_seven_days_and_rejects_arbitrary_views(self):
+        from unittest.mock import Mock
+        opener = Mock()
+        with patch.object(self.monitor, "start", return_value=True):
+            self.monitor.open_dashboard(opener=opener, view="sessions")
+            self.monitor.open_dashboard(opener=opener, view="https://example.invalid")
+        self.assertEqual([call.args[0] for call in opener.call_args_list], [
+            self.monitor.url + "?range=7d#sessions", self.monitor.url])
+
+    def test_detail_fetch_is_separate_and_does_not_define_summary_freshness(self):
+        import datetime
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+        activity = {"observed_at": now, "window_seconds": 900, "total": 1,
+            "sessions": [{"key": "a" * 64, "source": "codex", "tool": "Codex",
+                "provider": "OpenAI", "title": "A named local session", "tokens": 321,
+                "last_activity_at": now, "subagent": False}]}
+        servers = {"supported": True, "servers": [{"state": "running", "project": "demo",
+            "host": "localhost", "port": 8765, "isPinned": True}]}
+        calls = []
+        def request(path, *args, **kwargs):
+            calls.append(path)
+            return {"/api/summary": {"date": "2026-10-19", "tokens": 10, "spend": 1.5},
+                    "/api/native-activity": activity, "/api/local-servers": servers}[path]
+        with patch.object(self.monitor, "_request", side_effect=request):
+            self.monitor.refresh()
+        snapshot = self.monitor.snapshot()
+        self.assertEqual(calls, ["/api/summary", "/api/native-activity", "/api/local-servers"])
+        self.assertEqual(snapshot["tokens"], 10)
+        self.assertFalse(snapshot["stale"])
+        self.assertEqual(snapshot["activity"]["sessions"][0]["tokens"], 321)
+        self.assertEqual(snapshot["servers"]["servers"][0]["port"], 8765)
+        self.assertFalse(snapshot["activity_stale"])
+        self.assertFalse(snapshot["servers_stale"])
+
+    def test_detail_errors_preserve_figures_and_old_backend_is_not_an_empty_claim(self):
+        calls = []
+        def request(path, *args, **kwargs):
+            calls.append(path)
+            if path == "/api/summary":
+                return {"date": "2026-10-19", "tokens": 44, "spend": 0.5}
+            if path == "/api/native-activity":
+                raise urllib.error.HTTPError("fixture", 404, "missing", {}, None)
+            raise OSError("local detail unavailable")
+        with patch.object(self.monitor, "_request", side_effect=request):
+            self.monitor.refresh()
+        snapshot = self.monitor.snapshot()
+        self.assertEqual(snapshot["tokens"], 44)
+        self.assertFalse(snapshot["stale"])
+        self.assertIs(snapshot["activity_supported"], False)
+        self.assertIn("Update dashboard", snapshot["activity_error"])
+        self.assertTrue(snapshot["servers_stale"])
+        self.assertTrue(self.monitor.details_retry)
+
+    def test_summary_failure_marks_retained_details_stale(self):
+        self.monitor.activity = {"observed_at": "2026-10-19T12:00:00Z", "window_seconds": 900,
+            "sessions": [{"key": "saved", "title": "Last good session"}], "total": 1}
+        self.monitor.activity_supported = True
+        self.monitor.activity_stale = False
+        self.monitor.servers = {"supported": True, "servers": [
+            {"state": "running", "title": "Last good server", "host": "localhost", "port": 8765}]}
+        self.monitor.servers_supported = True
+        self.monitor.servers_stale = False
+        with patch.object(self.monitor, "_request", side_effect=OSError("summary unavailable")):
+            self.monitor.refresh()
+        snapshot = self.monitor.snapshot()
+        self.assertEqual(snapshot["activity"]["sessions"][0]["title"], "Last good session")
+        self.assertEqual(snapshot["servers"]["servers"][0]["title"], "Last good server")
+        self.assertTrue(snapshot["stale"])
+        self.assertTrue(snapshot["activity_stale"])
+        self.assertTrue(snapshot["servers_stale"])
+
+    def test_local_detail_opener_refuses_redirects_and_keeps_control_token_local(self):
+        requests = []
+
+        class RedirectHandler(http.server.BaseHTTPRequestHandler):
+            def _redirect(self):
+                requests.append((self.path, self.headers.get("X-AgentTelemetry-Control")))
+                self.send_response(302)
+                self.send_header("Location", "http://127.0.0.1:%d/redirected" % self.server.server_port)
+                self.send_header("Content-Length", "0")
+                self.send_header("Connection", "close")
+                self.end_headers()
+
+            def do_GET(self):
+                self._redirect()
+
+            def do_POST(self):
+                self._redirect()
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.HTTPServer(("127.0.0.1", 0), RedirectHandler)
+        worker = threading.Thread(target=server.serve_forever, daemon=True)
+        original_url = self.monitor.url
+        worker.start()
+        try:
+            self.monitor.url = "http://127.0.0.1:%d" % server.server_port
+            self.monitor.activity = {"observed_at": "old", "window_seconds": 900,
+                                     "sessions": [{"key": "saved", "title": "Last good session"}],
+                                     "total": 1}
+            self.monitor.servers = {"supported": True, "servers": [
+                {"state": "running", "title": "Last good server", "host": "localhost", "port": 8765}]}
+            self.monitor._refresh_details(self.monitor.intent)
+            error = None
+            try:
+                self.monitor._request("/api/shutdown", {}, token="fixture-control-token")
+            except urllib.error.HTTPError as caught:
+                error = caught
+                caught.close()
+            self.assertIsNotNone(error)
+            self.assertEqual(error.code, 302)
+        finally:
+            self.monitor.url = original_url
+            server.shutdown()
+            server.server_close()
+            worker.join(timeout=2)
+        self.assertEqual([path for path, _ in requests], [
+            "/api/native-activity", "/api/local-servers", "/api/shutdown"])
+        self.assertEqual(requests[-1][1], "fixture-control-token")
+        self.assertEqual(self.monitor.activity["sessions"][0]["title"], "Last good session")
+        self.assertEqual(self.monitor.servers["servers"][0]["title"], "Last good server")
+        self.assertTrue(self.monitor.snapshot()["activity_stale"])
+        self.assertTrue(self.monitor.snapshot()["servers_stale"])
+        self.assertTrue(self.monitor.details_retry)
+
+    def test_failed_details_retry_on_the_same_shared_tick(self):
+        self.monitor.sync_revision = "same"
+        self.monitor.details_retry = True
+        self.monitor.details_retry_at = 0
+        self.monitor._state("Monitoring on", False)
+        calls = []
+        now = "2026-10-19T12:00:00Z"
+        def request(path, *args, **kwargs):
+            calls.append(path)
+            if path == "/api/sync":
+                return {"seconds": 15, "revision": "same"}
+            if path == "/api/native-activity":
+                return {"observed_at": now, "window_seconds": 900, "sessions": [], "total": 0}
+            if path == "/api/local-servers":
+                return {"supported": True, "servers": []}
+            raise AssertionError(path)
+        with patch.object(self.monitor, "_request", side_effect=request):
+            self.monitor.sync()
+        self.assertEqual(calls, ["/api/sync", "/api/native-activity", "/api/local-servers"])
+        self.assertFalse(self.monitor.details_retry)
+
+    def test_stop_keeps_details_but_marks_them_off_and_stale(self):
+        row = {"key": "k", "source": "codex", "tool": "Codex", "provider": "OpenAI",
+               "title": "Retained", "tokens": 1, "last_activity_at": "2026-10-19T12:00:00Z",
+               "subagent": False}
+        self.monitor.activity["sessions"] = [row]
+        self.assertTrue(self.monitor.stop())
+        snapshot = self.monitor.snapshot()
+        self.assertEqual(snapshot["activity"]["sessions"], [row])
+        self.assertTrue(snapshot["activity_stale"])
+        self.assertFalse(snapshot["requested"])
 
     def test_owned_stop_uses_token_and_waits_without_force_kill(self):
         from unittest.mock import Mock

@@ -10,6 +10,8 @@ final class MenuBarPopoverController: NSObject, ObservableObject, NSPopoverDeleg
     private var backend: BackendController?
     private var settings: AppSettings?
     private var localServers: LocalServerMonitor?
+    private var recentActivity: NativeActivityMonitor?
+    private let layout = MenuBarPopoverLayout()
     private var subscriptions = Set<AnyCancellable>()
     // Load the bundle resource directly so a stale Launch Services icon cache
     // cannot substitute a different glyph. Copy before sizing the status item.
@@ -24,8 +26,10 @@ final class MenuBarPopoverController: NSObject, ObservableObject, NSPopoverDeleg
         backend: BackendController,
         settings: AppSettings,
         localServers: LocalServerMonitor,
+        recentActivity: NativeActivityMonitor,
         openDashboard: @escaping () -> Void,
         openLocalServers: @escaping () -> Void,
+        openRecentSessions: @escaping () -> Void,
         quit: @escaping () -> Void
     ) {
         guard statusItem == nil else { return }
@@ -33,7 +37,9 @@ final class MenuBarPopoverController: NSObject, ObservableObject, NSPopoverDeleg
         self.backend = backend
         self.settings = settings
         self.localServers = localServers
+        self.recentActivity = recentActivity
         localServers.connect(to: backend)
+        recentActivity.connect(to: backend)
 
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem = item
@@ -50,6 +56,8 @@ final class MenuBarPopoverController: NSObject, ObservableObject, NSPopoverDeleg
             backend: backend,
             settings: settings,
             localServers: localServers,
+            recentActivity: recentActivity,
+            layout: layout,
             openDashboard: { [weak self] in
                 guard let self else { return }
                 self.popover.performClose(nil)
@@ -60,8 +68,16 @@ final class MenuBarPopoverController: NSObject, ObservableObject, NSPopoverDeleg
                 self.popover.performClose(nil)
                 openLocalServers()
             },
+            openRecentSessions: { [weak self] in
+                guard let self else { return }
+                self.popover.performClose(nil)
+                openRecentSessions()
+            },
             quit: quit,
-            onDisclosureChange: { [weak self] _ in self?.resizePopoverFromContent() }
+            onDisclosureChange: { [weak self] expanded in
+                self?.layout.detailsExpanded = expanded
+                self?.resizePopoverFromContent()
+            }
         )
         let host = NSHostingController(rootView: rootView)
         hostingController = host
@@ -98,6 +114,7 @@ final class MenuBarPopoverController: NSObject, ObservableObject, NSPopoverDeleg
 
     func popoverDidShow(_ notification: Notification) {
         Task { await localServers?.refresh() }
+        recentActivity?.refresh()
     }
 
     private func resizePopoverFromContent() {
@@ -111,6 +128,18 @@ final class MenuBarPopoverController: NSObject, ObservableObject, NSPopoverDeleg
 
     private func updatePopoverSize() {
         guard let host = hostingController else { return }
+        let screenHeight = statusItem?.button?.window?.screen?.visibleFrame.height
+            ?? NSScreen.main?.visibleFrame.height
+            ?? 800
+        // Measure the fixed header/footer first, then let the scroll region use
+        // only the remaining work area. This keeps the footer visible on short
+        // displays instead of cropping the complete popover.
+        let availableHeight = max(0, screenHeight - 48)
+        let desiredScrollHeight: CGFloat = layout.detailsExpanded ? 400 : 360
+        layout.maximumScrollHeight = desiredScrollHeight
+        host.view.layoutSubtreeIfNeeded()
+        let fixedHeight = max(0, host.view.fittingSize.height - desiredScrollHeight)
+        layout.constrainScrollHeight(availableHeight: availableHeight, fixedHeight: fixedHeight)
         host.view.layoutSubtreeIfNeeded()
         let fitted = host.view.fittingSize
         guard fitted.height.isFinite, fitted.height > 0 else { return }

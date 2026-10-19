@@ -8,6 +8,7 @@ struct AgentTelemetryApp: App {
     @StateObject private var settings: AppSettings
     @StateObject private var backend: BackendController
     @StateObject private var localServers = LocalServerMonitor()
+    @StateObject private var recentActivity = NativeActivityMonitor()
     @StateObject private var menuBarPopover = MenuBarPopoverController()
     @StateObject private var nativeControl = NativeControl()
 
@@ -26,8 +27,10 @@ struct AgentTelemetryApp: App {
             backend: backend,
             settings: settings,
             localServers: localServers,
+            recentActivity: recentActivity,
             openDashboard: { openDashboard() },
             openLocalServers: { openDashboard(view: "local-servers") },
+            openRecentSessions: { openDashboard(view: "sessions", range: "7d") },
             quit: { quit() }
         )
         let _ = nativeControl.start(quit: { quit() })
@@ -40,9 +43,13 @@ struct AgentTelemetryApp: App {
         }
     }
 
-    private func openDashboard(view: String? = nil) {
+    private func openDashboard(view: String? = nil, range: String? = nil) {
         if let view {
-            backend.lastDashboardURL = URL(string: backend.dashboardURL.absoluteString + "/#" + view)
+            backend.lastDashboardURL = dashboardURLSelecting(
+                view: view,
+                range: range,
+                from: backend.lastDashboardURL ?? backend.dashboardURL
+            )
         }
         backend.start(openDashboard: {
             openWindow(id: "dashboard")

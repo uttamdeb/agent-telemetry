@@ -10,6 +10,7 @@ include editor_snapshot.py
 include ledger_backups.py
 include diagnostics.py
 include session_timeline.py
+include native_activity.py
 include local_servers.py
 include local_servers_windows.py
 include parser.py
@@ -31,6 +32,7 @@ include sw.js
 include docs/python-package.md
 include docs/mcp.md
 include docs/release-notes.md
+include docs/native-activity.md
 include static/app.css
 include static/apple-touch-icon.png
 include static/charts.js
