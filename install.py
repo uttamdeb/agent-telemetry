@@ -11,6 +11,7 @@ import native
 
 ROOT = Path(__file__).resolve().parent
 BACKEND_FILES = ("dashboard.py", "editor_snapshot.py", "parser.py", "native.py", "session_names.py", "accounts.py",
+                 "release_notes.py",
                  "local_servers.py", "local_servers_windows.py", "ledger_backups.py",
                  "session_timeline.py", "diagnostics.py", "index.html", "chart.umd.min.js",
                  "mcp_access.py", "mcp_backend.py", "mcp_protocol.py", "mcp_server.py",
@@ -20,13 +21,13 @@ WINDOWS_FILES = ("tray.py", "monitor.py", "win32.py", "popover.py", "presentatio
 WINDOWS_ASSETS = ("AgentTelemetry.ico", "TrayIcon.ico")
 PRIVATE_TELEMETRY_NAMES = {".usage-backups", ".usage_cache.json", ".peers.json", ".peers",
                           ".local_servers.json", "mcp-access.json", "mcp-access.lock", "server.log",
-                          "project-names.json"}
+                          "project-names.json", "release-notes.json", "release-notes.lock"}
 
 
 def _is_private_telemetry(path):
     name = Path(path).name
     return (name in PRIVATE_TELEMETRY_NAMES or name.startswith(".local_servers.")
-            or name.startswith(".mcp-access-"))
+            or name.startswith(".mcp-access-") or name.startswith(".release-notes-"))
 
 
 def _validate_windows_payload(destination):

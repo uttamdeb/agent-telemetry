@@ -53,6 +53,7 @@ agent_telemetry = [
   "static/icon-512.png",
   "static/insights.js",
   "static/maintenance.js",
+  "static/release-notes.js",
   "static/mcp.js",
   "static/timeline.js",
   "static/tool-icons/LICENSE.hermes.txt",

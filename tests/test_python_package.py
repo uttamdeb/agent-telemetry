@@ -47,7 +47,7 @@ class PackageTests(unittest.TestCase):
         bare_names = (
             "parser", "native", "session_names", "accounts", "local_servers",
             "local_servers_windows", "ledger_backups", "diagnostics", "session_timeline",
-            "mcp_access", "mcp_backend", "mcp_protocol", "mcp_server", "mcp_tools",
+            "release_notes", "mcp_access", "mcp_backend", "mcp_protocol", "mcp_server", "mcp_tools",
             "telemetry_query", "telemetry_insights",
         )
         bare_before = {name: sys.modules.get(name) for name in bare_names}
@@ -57,6 +57,7 @@ class PackageTests(unittest.TestCase):
         native = self.import_module("native")
         session_names = self.import_module("session_names")
         accounts = self.import_module("accounts")
+        release_notes = self.import_module("release_notes")
         local_servers = self.import_module("local_servers")
         windows_servers = self.import_module("local_servers_windows")
         backups = self.import_module("ledger_backups")
@@ -74,6 +75,7 @@ class PackageTests(unittest.TestCase):
         self.assertIs(dashboard.N, native)
         self.assertIs(dashboard.SN, session_names)
         self.assertIs(dashboard.A, accounts)
+        self.assertIs(dashboard.RN, release_notes)
         self.assertIs(dashboard.LB, backups)
         self.assertIs(dashboard.DG, diagnostics)
         self.assertIs(dashboard.ST, timeline)
@@ -93,6 +95,7 @@ class PackageTests(unittest.TestCase):
         self.assertIs(local_servers._windows(), windows_servers)
         self.assertIs(parser.A, accounts)
         self.assertIs(accounts.N, native)
+        self.assertIs(release_notes.native, native)
         self.assertIs(session_names.N, native)
         for name in bare_names:
             self.assertIs(sys.modules.get(name), bare_before[name],

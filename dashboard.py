@@ -27,6 +27,7 @@ if __package__:
     from . import diagnostics as DG
     from . import session_timeline as ST
     from . import editor_snapshot as ES
+    from . import release_notes as RN
     from .local_servers import LocalServerInventory
     from . import mcp_access as MA
     from . import mcp_backend as MCP
@@ -40,6 +41,7 @@ else:
     import diagnostics as DG
     import session_timeline as ST
     import editor_snapshot as ES
+    import release_notes as RN
     from local_servers import LocalServerInventory
     import mcp_access as MA
     import mcp_backend as MCP
@@ -154,9 +156,8 @@ DEVICE = _device()
 
 # ---------------------------------------------------------------------------
 # Version + self-update. The version comes from this checkout's git metadata.
-# Apart from opt-in device sharing (see Devices below), checking for an update is the
-# only thing here that touches the network, and it runs only when the user clicks
-# "Check for updates" — never on a timer.
+# Apart from opt-in device sharing (see Devices below), only an explicit update check
+# or release-notes load contacts GitHub; neither runs on startup or a timer.
 # ---------------------------------------------------------------------------
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -189,6 +190,32 @@ def _version():
 VERSION = _version()
 
 
+def _release_notes_status():
+    """Read locally cached release metadata without contacting GitHub."""
+    return RN.ReleaseNotes(APP_DIR, VERSION).status()
+
+
+def _release_notes_check():
+    """Fetch notes only for a clicked check, while preserving updater results on failure."""
+    service = RN.ReleaseNotes(APP_DIR, VERSION)
+    try:
+        return service.check()
+    except Exception:
+        # The Git updater and release-notes API are independent. Keep a failed notes
+        # request visible in its own panel without discarding a successful Git result.
+        sys.stderr.write("[release-notes] GitHub release notes could not be checked\n")
+        try:
+            result = service.status()
+        except Exception:
+            result = {}
+        if not isinstance(result, dict):
+            result = {}
+        result = dict(result)
+        result.update(status="unavailable",
+                      error="GitHub release notes could not be checked. Try again later.")
+        return result
+
+
 def _upstream():
     """What to update from: this branch's upstream while the remote still has it, else
     the remote's default branch. A feature branch that was merged and then deleted on
@@ -209,8 +236,14 @@ def _upstream():
 def update_action(action):
     """check: fetch and report how far behind this checkout is.
     apply: fast-forward to it (never a merge, never over local edits), then restart."""
+    if action not in ("check", "apply"):
+        raise ValueError("unknown action")
     if not VERSION.get("git"):
-        raise ValueError("This copy isn't a git checkout — download the latest release instead.")
+        if action == "check":
+            return {"current": VERSION, "behind": 0, "ahead": 0, "changes": [],
+                    "download_only": True}
+        raise ValueError("This packaged copy cannot update itself. Download and install the latest release from "
+                         "https://github.com/uttamdeb/agent-telemetry/releases/latest")
     remote = "origin"
     try:
         up = _upstream()
@@ -228,8 +261,6 @@ def update_action(action):
             "changes": [ln for ln in log.splitlines() if ln], "current": VERSION}
     if action == "check":
         return info
-    if action != "apply":
-        raise ValueError("unknown action")
     if not behind:
         return dict(info, updated=False)
     if _git("status", "--porcelain", "--untracked-files=no"):
@@ -2652,6 +2683,15 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, json.dumps(refresh_sync()))
         elif route == "/api/accounts":
             self._send(200, json.dumps(build_account_payload()))
+        elif route == "/api/release-notes":
+            if not self._loopback_client():
+                self._send(403, json.dumps({"error": "release notes are available only on this machine"}))
+                return
+            try:
+                self._send(200, json.dumps(_release_notes_status(), allow_nan=False))
+            except Exception:
+                import traceback; traceback.print_exc()
+                self._send(500, json.dumps({"error": "Release notes are temporarily unavailable."}))
         elif route == "/api/backups":
             self._send(200, json.dumps(backup_status()))
         elif route == "/api/diagnostics":
@@ -2874,10 +2914,14 @@ class Handler(BaseHTTPRequestHandler):
             "/api/local-servers/start",
             "/api/local-servers/restart",
         }
-        if route in ("/api/settings", "/api/cache", "/api/update", "/api/devices", "/api/refresh", "/api/native", "/api/shutdown", "/api/sync", "/api/session-name", "/api/accounts", "/api/backups", "/api/mcp") or route in local_server_routes:
+        if route in ("/api/settings", "/api/cache", "/api/update", "/api/devices", "/api/refresh", "/api/native", "/api/shutdown", "/api/sync", "/api/session-name", "/api/accounts", "/api/backups", "/api/mcp", "/api/release-notes") or route in local_server_routes:
             if route in local_server_routes and not self._loopback_client():
                 self._discard_small_post_body()
                 self._send(403, json.dumps({"error": "local servers can be managed only on this machine"}))
+                return
+            if route == "/api/release-notes" and not self._loopback_client():
+                self._discard_small_post_body()
+                self._send(403, json.dumps({"error": "release notes are available only on this machine"}))
                 return
             if route == "/api/mcp" and not self._loopback_client():
                 self._send(403, json.dumps({"error": "MCP settings are available only on this machine"}))
@@ -2887,7 +2931,19 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(403, json.dumps({"error": "cross-site request refused"}))
                 return
             try:
-                length = int(self.headers.get("Content-Length", 0) or 0)
+                raw_length = self.headers.get("Content-Length", "0") or "0"
+                if route == "/api/release-notes":
+                    if (self.headers.get("Transfer-Encoding") or not raw_length.isascii()
+                            or not raw_length.isdecimal()):
+                        raise ValueError("invalid request body length")
+                    length = int(raw_length)
+                    if length <= 0:
+                        raise ValueError("invalid request body length")
+                    if length > 16384:
+                        self._send(413, json.dumps({"error": "request body exceeds the 16 KiB limit"}))
+                        return
+                else:
+                    length = int(raw_length)
                 if length < 0 or (route in local_server_routes and length > 16384) or (route == "/api/mcp" and length > 16384):
                     raise ValueError("invalid body length")
             except ValueError:
@@ -2895,14 +2951,45 @@ class Handler(BaseHTTPRequestHandler):
                 return
             raw = self.rfile.read(length) if length else b"{}"
             try:
-                body = json.loads(raw or b"{}")
+                if route == "/api/release-notes":
+                    def unique_pairs(items):
+                        value = {}
+                        for key, item in items:
+                            if key in value:
+                                raise ValueError("duplicate JSON key")
+                            value[key] = item
+                        return value
+
+                    def reject_constant(_value):
+                        raise ValueError("invalid JSON number")
+
+                    body = json.loads(raw.decode("utf-8"), object_pairs_hook=unique_pairs,
+                                      parse_constant=reject_constant)
+                else:
+                    body = json.loads(raw or b"{}")
                 if not isinstance(body, dict):
                     raise ValueError("expected a JSON object")
             except Exception:
                 self._send(400, json.dumps({"error": "invalid JSON body"}))
                 return
             try:
-                if route == "/api/mcp":
+                if route == "/api/release-notes":
+                    action = body.get("action")
+                    expected = {"action", "claim"} if action == "shown" else {"action"}
+                    if action not in ("claim", "shown", "check") or set(body) != expected:
+                        raise ValueError("Invalid release notes action or request fields.")
+                    if action == "shown":
+                        claim = body.get("claim")
+                        if not isinstance(claim, str) or not re.fullmatch(r"[0-9a-f]{64}", claim):
+                            raise ValueError("The release notes display claim is invalid or expired.")
+                    service = RN.ReleaseNotes(APP_DIR, VERSION)
+                    if action == "claim":
+                        result = service.claim()
+                    elif action == "shown":
+                        result = service.shown(body["claim"])
+                    else:
+                        result = service.check()
+                elif route == "/api/mcp":
                     backend_url = self._mcp_backend_url()
                     MA.configure(backend_url, DATA_DIR, body)
                     result = MCP.settings_response(backend_url, DATA_DIR, _mcp_python_executable(),
@@ -2938,7 +3025,12 @@ class Handler(BaseHTTPRequestHandler):
                     result = cache_action(body.get("action"))
                     notify_refresh()
                 elif route == "/api/update":
-                    result = update_action(body.get("action"))
+                    action = body.get("action")
+                    if action not in ("check", "apply"):
+                        raise ValueError("unknown action")
+                    result = update_action(action)
+                    if action == "check":
+                        result["release_notes"] = _release_notes_check()
                 elif route == "/api/devices":
                     result = devices_action(body)
                     notify_refresh()

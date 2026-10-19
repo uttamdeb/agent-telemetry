@@ -115,6 +115,9 @@ class PackagingTests(unittest.TestCase):
             self.assertTrue((payload / "windows" / "register_install.py").is_file())
             self.assertEqual((payload / "session_names.py").read_bytes(), (ROOT / "session_names.py").read_bytes())
             self.assertEqual((payload / "accounts.py").read_bytes(), (ROOT / "accounts.py").read_bytes())
+            self.assertEqual((payload / "release_notes.py").read_bytes(), (ROOT / "release_notes.py").read_bytes())
+            self.assertEqual((payload / "static" / "release-notes.js").read_bytes(),
+                             (ROOT / "static" / "release-notes.js").read_bytes())
             for name in ("ledger_backups.py", "session_timeline.py", "diagnostics.py", "editor_snapshot.py"):
                 self.assertEqual((payload / name).read_bytes(), (ROOT / name).read_bytes())
             self.assertEqual((payload / "local_servers.py").read_bytes(), (ROOT / "local_servers.py").read_bytes())
@@ -122,8 +125,9 @@ class PackagingTests(unittest.TestCase):
             for icon in (ROOT / "static" / "tool-icons").glob("*.svg"):
                 self.assertEqual((payload / "static" / "tool-icons" / icon.name).read_bytes(), icon.read_bytes())
             self.assertFalse(any(
-                p.name in {".usage-backups", ".usage_cache.json", ".peers.json", ".peers", "server.log", ".local_servers.json"}
-                or p.name.startswith(".local_servers.")
+                p.name in {".usage-backups", ".usage_cache.json", ".peers.json", ".peers", "server.log",
+                           ".local_servers.json", "release-notes.json", "release-notes.lock"}
+                or p.name.startswith((".local_servers.", ".release-notes-"))
                 for p in payload.rglob("*")
             ))
 

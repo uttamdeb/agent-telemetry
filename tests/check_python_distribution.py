@@ -13,7 +13,7 @@ import zipfile
 
 MODULES = {
     "__init__.py", "__main__.py", "cli.py", "dashboard.py", "editor_snapshot.py", "parser.py",
-    "native.py", "accounts.py", "session_names.py",
+    "native.py", "accounts.py", "session_names.py", "release_notes.py",
     "local_servers.py", "local_servers_windows.py",
     "ledger_backups.py", "diagnostics.py", "session_timeline.py",
     "mcp_access.py", "mcp_backend.py", "mcp_protocol.py", "mcp_server.py",
@@ -24,6 +24,7 @@ ASSETS = {
     "static/app.css", "static/core.js", "static/charts.js", "static/views.js",
     "static/insights.js", "static/maintenance.js", "static/timeline.js",
     "static/mcp.js",
+    "static/release-notes.js",
     "static/apple-touch-icon.png", "static/icon-192.png", "static/icon-512.png",
     "static/tool-icons/claude.svg", "static/tool-icons/copilot.svg",
     "static/tool-icons/cursor.svg", "static/tool-icons/hermes.svg",
@@ -57,7 +58,7 @@ def check_archives(wheel, sdist):
         expected = MODULES | ASSETS | {
             "pyproject.toml", "setup.py", "setup.cfg", "MANIFEST.in", "README.md",
             "LICENSE", "PKG-INFO", "docs/python-package.md",
-            "docs/mcp.md",
+            "docs/mcp.md", "docs/release-notes.md",
         }
         extras = paths - expected
         assert all(path.startswith("agenttelemetry_app.egg-info/")
@@ -81,13 +82,13 @@ with contextlib.redirect_stdout(io.StringIO()):
     except SystemExit as error:
         assert error.code == 0
 from agent_telemetry import dashboard as D
-from agent_telemetry import parser as P, native as N, accounts as A, session_names as SN
+from agent_telemetry import parser as P, native as N, accounts as A, session_names as SN, release_notes as RN
 from agent_telemetry import __version__
 from importlib.metadata import version
 assert version("agenttelemetry-app") == EXPECTED_VERSION
 assert __version__ == EXPECTED_VERSION.split(".post", 1)[0]
-assert D.P is P and D.N is N and D.A is A and D.SN is SN
-assert P.A is A and A.N is N and SN.N is N
+assert D.P is P and D.N is N and D.A is A and D.SN is SN and D.RN is RN
+assert P.A is A and A.N is N and SN.N is N and RN.native is N
 assert D.VERSION == {"git": False, "describe": __version__}, D.VERSION
 assert not Path(D.CACHE_PATH).exists()
 # Serve the installed resources directly; never discover or parse tool logs.
@@ -159,7 +160,7 @@ def check_install(wheel, version):
             assert ("AgentTelemetry MCP server" in result.stdout if arguments == ("--version",)
                     else "--backend" in result.stdout)
             assert_home_empty("python -m agent_telemetry.mcp_server " + " ".join(arguments))
-        paths = ["/", "/chart.js", "/manifest.json", "/sw.js", "/api/health"]
+        paths = ["/", "/chart.js", "/manifest.json", "/sw.js", "/api/health", "/api/release-notes"]
         paths += ["/" + asset for asset in sorted(ASSETS) if asset.startswith("static/")]
         code = "EXPECTED_VERSION = " + repr(version) + "\nRESOURCE_PATHS = " + repr(paths) + "\n" + SMOKE
         result = subprocess.run([str(python), "-c", code], cwd=root,

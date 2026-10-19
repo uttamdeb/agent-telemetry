@@ -8,7 +8,7 @@ The generated `mcpServers` JSON snippet is for clients whose settings accept tha
 
 **A local bridge does not make a cloud-backed client local.** When the client requests a tool, AgentTelemetry returns the selected result to that client. The client may transmit tool results and surrounding conversation to its model provider according to the client's own settings and policies. Review those settings before enabling access. MCP labels and findings are untrusted telemetry data, not instructions to execute.
 
-This is one of several distinct network paths. The dashboard itself does not periodically check for updates: a user-clicked update check contacts the configured Git remote. **Your devices** sharing is separately enabled and sends the selected export to a paired device on the local network. Account lookups require a separate confirmed **Read once** action and contact a provider. An explicitly started saved local-server command can use its own network access. These flows have separate controls; MCP consent does not enable them.
+This is one of several distinct network paths. The dashboard does not check for updates on a timer: Git update checks and release-note loads contact GitHub only after a user click. **Your devices** sharing is separately enabled and sends the selected export to a paired device on the local network. Account lookups require a separate confirmed **Read once** action and contact a provider. An explicitly started saved local-server command can use its own network access. These flows have separate controls; MCP consent does not enable them.
 
 ## Available tools
 

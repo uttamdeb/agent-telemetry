@@ -477,6 +477,20 @@
     </div>
   </form>
 </dialog>
+<dialog class="modal release-notes-dialog" id="releaseNotesDialog" aria-labelledby="releaseNotesHeading">
+  <div class="release-notes-shell">
+    <header class="release-notes-head">
+      <div class="release-notes-brand"><span class="release-notes-brand-mark" aria-hidden="true">✦</span><span>AGENTTELEMETRY <i>RELEASE NOTES</i></span></div>
+      <button class="release-notes-x" type="button" data-release-notes-close aria-label="Close release notes">×</button>
+      <h2 id="releaseNotesHeading" data-rn-title>What’s new</h2>
+      <div class="release-notes-meta" data-rn-meta></div>
+    </header>
+    <div class="release-notes-content" data-rn-body></div>
+    <footer class="release-notes-foot" data-rn-footer>
+      <button type="button" class="btn sm primary" data-release-notes-close>Done</button>
+    </footer>
+  </div>
+</dialog>
 
 <script>
 /* surface any uncaught error on the root element so headless checks (and the
@@ -500,6 +514,7 @@ try {
 <script src="/static/timeline.js"></script>
 <script src="/static/maintenance.js"></script>
 <script src="/static/mcp.js"></script>
+<script src="/static/release-notes.js"></script>
 <script src="/static/views.js"></script>
 </body>
 </html>

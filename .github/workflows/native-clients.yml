@@ -30,6 +30,7 @@ jobs:
         env:
           MCP_SDK_ROOT: ${{ runner.temp }}/mcp-sdk/node_modules/@modelcontextprotocol/sdk
       - run: node tests/test_frontend.js
+      - run: node tests/test_release_notes_frontend.js
       - run: node tests/test_insights_frontend.js
       - run: node tests/test_mcp_frontend.js
       - run: node tests/test_mcp_insights_parity.js

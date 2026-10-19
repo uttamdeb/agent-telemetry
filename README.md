@@ -11,7 +11,8 @@ By default, log inventory, usage and the cache stay on this machine. Separate ac
 share selected exports with [paired devices](#your-devices-optional), return requested
 analytics to an enabled [local MCP client](docs/mcp.md) (which may forward tool results to
 its model provider), contact a provider after a confirmed **Read once** account lookup, or
-fetch update metadata after you click **Check for updates**. No account or API key is needed
+fetch GitHub update and release-note metadata after you click **Check for updates** or
+**Load notes**. Cached release notes can be shown offline after an upgrade. No account or API key is needed
 for the dashboard; it has no runtime dependencies beyond Python's standard library and a
 vendored copy of Chart.js.
 
@@ -411,9 +412,12 @@ loss of the drive. Use `python tests/preview_features.py --port 8896` for an iso
 preview with invented data.
 
 **Version and updates** — the sidebar footer shows the running version. *Check for updates*
-asks GitHub (the only time the dashboard goes online, and only when you click); *Update*
-fast-forwards your checkout and restarts the server. It refuses if you have local edits or
-commits that aren't on GitHub. A copy that isn't a git clone has no update button.
+asks GitHub for the latest stable release and its tagged notes only when you click; notes
+already cached on this machine can be shown offline. A first open records the current version
+as the baseline. Later upgrades can show their notes once, after which the display is
+acknowledged. *Update* fast-forwards a source checkout and restarts the server; it refuses
+local edits and commits that aren't upstream. Packaged apps link to the official release for
+manual installation. See [release notes behavior](docs/release-notes.md).
 
 ---
 
