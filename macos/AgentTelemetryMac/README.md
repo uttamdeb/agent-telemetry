@@ -1,7 +1,7 @@
 # AgentTelemetry for macOS
 
-Download the v2.0.0 DMG for [Apple Silicon](https://github.com/uttamdeb/agent-telemetry/releases/download/v2.0.0/AgentTelemetry-2.0.0-macos-arm64.dmg)
-or [Intel](https://github.com/uttamdeb/agent-telemetry/releases/download/v2.0.0/AgentTelemetry-2.0.0-macos-x86_64.dmg),
+Download the v2.1.0 DMG for [Apple Silicon](https://github.com/uttamdeb/agent-telemetry/releases/download/v2.1.0/AgentTelemetry-2.1.0-macos-arm64.dmg)
+or [Intel](https://github.com/uttamdeb/agent-telemetry/releases/download/v2.1.0/AgentTelemetry-2.1.0-macos-x86_64.dmg),
 open it and drag AgentTelemetry to Applications. Python is bundled; Swift and a terminal
 are not needed to run the download. It requires macOS 13+. These builds are ad-hoc signed
 and unnotarized; use System Settings → Privacy & Security → Open Anyway if macOS blocks

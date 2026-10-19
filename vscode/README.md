@@ -29,7 +29,7 @@ code --install-extension agenttelemetry-team.agenttelemetry
 
 ### Install a VSIX in another desktop editor
 
-Use the provided `agenttelemetry-2.0.2.vsix` in a **desktop** VS Code, Cursor, Antigravity or compatible VS Code fork supporting the VS Code 1.85+ API and a local extension host.
+Use the provided `agenttelemetry-2.1.0.vsix` in a **desktop** VS Code, Cursor, Antigravity or compatible VS Code fork supporting the VS Code 1.85+ API and a local extension host.
 
 1. Open the editor's Extensions view.
 2. Choose **Install from VSIX…** from the Extensions menu or Command Palette.
@@ -37,6 +37,14 @@ Use the provided `agenttelemetry-2.0.2.vsix` in a **desktop** VS Code, Cursor, A
 4. Open the AgentTelemetry waveform icon in the activity bar, or run **AgentTelemetry: Open Agent desk**.
 
 The same universal VSIX contains the cross-platform extension and stdlib-only backend. It does not bundle a new Python interpreter. Browser-only editors such as `vscode.dev` cannot run this desktop extension.
+
+### Install from Cursor or Antigravity
+
+Search for **AgentTelemetry** in the editor's extension marketplace. Cursor and compatible
+editors can install the same extension from [Open VSX](https://open-vsx.org/extension/agenttelemetry-team/agenttelemetry)
+when the listing is available there. If the editor does not offer that listing, use the
+universal VSIX instructions above. Google Antigravity's extension for standard VS Code is
+a separate product from the standalone Antigravity IDE.
 
 ## First connection
 
@@ -92,8 +100,8 @@ Restricted Mode permits read-only attachment to an existing local service. Start
 
 ## Optional MCP analytics
 
-Version **2.0.1** bundles the current AgentTelemetry backend, including its optional
-read-only MCP bridge. The application itself remains **2.0.0**. Updating this extension
+Version **2.1.0** bundles the current AgentTelemetry backend, including its optional
+read-only MCP bridge. The application and MCP server are also **2.1.0**. Updating this extension
 does not replace a dashboard service that is already running: update and restart the
 installation owning that service to use its newest features.
 

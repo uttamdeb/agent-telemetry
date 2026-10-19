@@ -20,7 +20,7 @@ HERE = Path(__file__).resolve().parent
 def validate_source(source, tag, source_commit=None):
     """Keep the release tag intact; an explicit refresh must pin its descendant."""
     if not re.fullmatch(r"v\d+\.\d+\.\d+", tag):
-        raise ValueError("Expected a release tag such as v2.0.0.")
+        raise ValueError("Expected a release tag such as v2.1.0.")
     def git(*arguments):
         return subprocess.check_output(["git", "-C", str(source), *arguments], text=True).strip()
     tagged = git("rev-parse", "--verify", "refs/tags/" + tag + "^{commit}")

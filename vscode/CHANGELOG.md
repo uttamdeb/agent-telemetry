@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.1.0
+
+- Include the latest AgentTelemetry backend, session activity and release notes in the Agent desk.
+- Show recorded Copilot child sessions in workspace views and retain accurate parent and usage relationships.
+- Update the shared app and MCP bridge to AgentTelemetry 2.1.0.
+- Publish the universal desktop extension through Microsoft Marketplace and Open VSX.
+
 ## 2.0.2
 
 - Attribute Copilot SDK sessions to their recorded workspace instead of excluding them from the workspace brief.

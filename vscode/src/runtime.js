@@ -120,7 +120,7 @@ function launchArguments(backend) {
 }
 function bundledVersion(backend) {
   try { const info = JSON.parse(fs.readFileSync(path.join(backend, 'BUILD-INFO.json'), 'utf8')); if (typeof info.version === 'string' && /^[0-9A-Za-z.+_-]{1,64}$/.test(info.version)) return info.version; } catch (_) {}
-  return '2.0.0';
+  return '2.1.0';
 }
 function startupFailure(logFile) {
   return new ServiceError('AgentTelemetry exited before it could start. Check the private startup log at ' + logFile + ' and retry after fixing the Python setup.', 'BACKEND_START');

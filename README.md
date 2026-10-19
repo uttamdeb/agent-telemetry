@@ -22,9 +22,9 @@ Covers **Claude Code · Claude Desktop · Codex · GitHub Copilot · Cursor · O
 
 | Platform | Download |
 | --- | --- |
-| macOS 13+ · Apple Silicon | **[Download DMG](https://github.com/uttamdeb/agent-telemetry/releases/download/v2.0.0/AgentTelemetry-2.0.0-macos-arm64.dmg)** |
-| macOS 13+ · Intel | **[Download DMG](https://github.com/uttamdeb/agent-telemetry/releases/download/v2.0.0/AgentTelemetry-2.0.0-macos-x86_64.dmg)** |
-| Windows 10/11 · x64 | **[Download EXE installer](https://github.com/uttamdeb/agent-telemetry/releases/download/v2.0.0/AgentTelemetry-2.0.0-windows-x64-setup.exe)** |
+| macOS 13+ · Apple Silicon | **[Download DMG](https://github.com/uttamdeb/agent-telemetry/releases/download/v2.1.0/AgentTelemetry-2.1.0-macos-arm64.dmg)** |
+| macOS 13+ · Intel | **[Download DMG](https://github.com/uttamdeb/agent-telemetry/releases/download/v2.1.0/AgentTelemetry-2.1.0-macos-x86_64.dmg)** |
+| Windows 10/11 · x64 | **[Download EXE installer](https://github.com/uttamdeb/agent-telemetry/releases/download/v2.1.0/AgentTelemetry-2.1.0-windows-x64-setup.exe)** |
 
 **Python is bundled — no terminal setup needed.** macOS: open the DMG, drag the app to
 Applications and open it. Windows: run the installer and open AgentTelemetry from Start.
@@ -38,7 +38,9 @@ starting monitoring. On macOS, opening the app manually also lets you import fir
 These builds are unsigned/unnotarized. macOS may require **System Settings → Privacy &
 Security → Open Anyway**; Windows SmartScreen may require **More info → Run anyway**.
 [All releases](https://github.com/uttamdeb/agent-telemetry/releases) ·
-[SHA-256 checksums](https://github.com/uttamdeb/agent-telemetry/releases/download/v2.0.0/SHA256SUMS.txt)
+[What's new in 2.1.0](docs/releases/v2.1.0.md) ·
+[SHA-256 checksums](https://github.com/uttamdeb/agent-telemetry/releases/download/v2.1.0/SHA256SUMS.txt) ·
+[PyPI package 2.1.0](https://pypi.org/project/agenttelemetry-app/2.1.0/)
 
 ---
 
@@ -99,7 +101,10 @@ The [AgentTelemetry editor extension](vscode/README.md) brings local usage into
 VS Code compatible desktop editors, including Cursor and Antigravity IDE. Its
 Agent desk uses the app's icon and light/dark theme, with workspace totals,
 recorded main-agent/subagent relationships, and an in-memory usage baseline.
-Install the universal VSIX following the [extension guide](vscode/README.md#install-a-vsix).
+Install from the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=agenttelemetry-team.agenttelemetry)
+in VS Code, from [Open VSX](https://open-vsx.org/extension/agenttelemetry-team/agenttelemetry)
+in Cursor and compatible editors, or use the universal VSIX following the
+[extension guide](vscode/README.md#install-a-vsix).
 
 ## Recognizing subagent sessions
 
@@ -220,6 +225,9 @@ client's data-handling settings before enabling access. Project/device names and
 connected devices require their own opt-in scopes. The MCP bridge never refreshes accounts,
 returns prompt text, or edits client configuration. See [MCP tools, setup and privacy
 limits](docs/mcp.md).
+
+The MCP bridge ships with the **2.1.0** application and Python package. It is not a separate
+marketplace listing; install/update AgentTelemetry, then use the [MCP setup guide](docs/mcp.md).
 
 > `--rebuild` deletes the cache, and with it every session whose log has since been deleted
 > from disk (see [Storage](#storage--what-these-logs-cost-you-in-disk)). Copy

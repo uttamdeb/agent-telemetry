@@ -41,8 +41,9 @@ services, give each a distinct `--port` and `--data-dir`.
 ## Maintainer release procedure
 
 Build artifacts from a clean, reviewed source tree after setting the intended package
-distribution version in `pyproject.toml`. The application version in `__init__.py`
-stays `2.0.0` for packaging revisions such as `2.0.0.post1`; PyPI files are immutable:
+distribution version in `pyproject.toml`. For a coordinated release, keep the package
+distribution version in `pyproject.toml`, the application version in `__init__.py`, and
+the bundled MCP server version aligned (all are `2.1.0` for this release). PyPI files are immutable:
 
 ```sh
 python -m pip install --upgrade build twine
