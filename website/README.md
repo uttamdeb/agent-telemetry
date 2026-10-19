@@ -34,8 +34,9 @@ The files are ready to host as a static site. Download links point to the AgentT
 v2.1.0 release: macOS 13+ Apple Silicon and Intel DMGs, and a Windows
 10/11 x64 installer. Those downloads are unsigned/unnotarized; see the repository README
 for installation notes and checksums. The hero install chooser works without JavaScript
-and links to those assets, the editor card, and the Linux/source alternative. The
-editor card links to the [Visual Studio Marketplace extension](https://marketplace.visualstudio.com/items?itemName=agenttelemetry-team.agenttelemetry),
+and links to those assets, the editor card, and the Linux/source alternative. Linux uses
+the browser dashboard; a native tray app is available for macOS and Windows. The editor
+card links to the [Visual Studio Marketplace extension](https://marketplace.visualstudio.com/items?itemName=agenttelemetry-team.agenttelemetry),
 the [Open VSX extension](https://open-vsx.org/extension/agenttelemetry-team/agenttelemetry),
 and the [universal 2.1.0 VSIX](https://github.com/uttamdeb/agent-telemetry/releases/download/v2.1.0/agenttelemetry-2.1.0.vsix)
 with its desktop editor install guide. It supports desktop VS Code 1.85+ and compatible
