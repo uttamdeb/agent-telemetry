@@ -54,4 +54,10 @@ jobs:
       - if: runner.os == 'macOS'
         run: swift build --package-path macos/AgentTelemetryMac
       - if: runner.os == 'macOS'
-        run: python tests/run_mac_native.py
+        run: python tests/run_mac_native.py --screenshots macos-ui-fixtures
+      - if: runner.os == 'macOS' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-ui-fixtures
+          path: macos-ui-fixtures/*.png
+          if-no-files-found: warn

@@ -36,12 +36,26 @@ private final class StatusMenuState: ObservableObject {
     @Published var busyServerID: String?
 }
 
+@MainActor
+final class MenuBarPopoverLayout: ObservableObject {
+    @Published var maximumScrollHeight: CGFloat = 400
+    @Published var detailsExpanded = false
+
+    func constrainScrollHeight(availableHeight: CGFloat, fixedHeight: CGFloat) {
+        let desiredHeight: CGFloat = detailsExpanded ? 400 : 360
+        maximumScrollHeight = max(0, min(desiredHeight, availableHeight - fixedHeight))
+    }
+}
+
 struct StatusMenu: View {
     @ObservedObject var backend: BackendController
     @ObservedObject var settings: AppSettings
     @ObservedObject var localServers: LocalServerMonitor
+    @ObservedObject var recentActivity: NativeActivityMonitor
+    @ObservedObject var layout: MenuBarPopoverLayout
     let openDashboard: () -> Void
     let openLocalServers: () -> Void
+    let openRecentSessions: () -> Void
     let quit: () -> Void
     let onDisclosureChange: (Bool) -> Void
 
@@ -82,6 +96,7 @@ struct StatusMenu: View {
                             .buttonStyle(.bordered)
                     }
 
+                    recentActivitySection
                     localServersSection
 
                     Button {
@@ -111,10 +126,7 @@ struct StatusMenu: View {
                 }
                 .padding(.top, 12)
             }
-            .frame(
-                height: detailsExpanded ? 400 : 226,
-                alignment: .top
-            )
+            .frame(height: min(detailsExpanded ? 400 : 360, layout.maximumScrollHeight), alignment: .top)
             .scrollIndicators(.automatic)
 
             Button(action: openDashboard) {
@@ -294,6 +306,167 @@ struct StatusMenu: View {
         .padding(10)
         .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 9))
         .overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.primary.opacity(0.07)))
+    }
+
+    private var recentActivitySection: some View {
+        TimelineView(.periodic(from: Date(), by: 30)) { timeline in
+            let visible = recentActivity.visibleSessions(at: timeline.date)
+            VStack(alignment: .leading, spacing: 7) {
+                HStack(spacing: 6) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Recently active")
+                            .font(.system(size: 10, weight: .semibold))
+                            .help("Shows sessions with recent log activity; this does not confirm that a tool is still running.")
+                            .accessibilityHint("Sessions are included when their logs record recent activity. This does not confirm a tool is still running.")
+                        Text("Last 15 min")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 4)
+                    Text(activityCountLabel(visible: visible))
+                        .font(.system(size: 9, weight: .medium).monospacedDigit())
+                        .foregroundStyle(.secondary)
+                    Button {
+                        recentActivity.refresh()
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 9, weight: .medium))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .help("Refresh recent activity")
+                    .accessibilityLabel("Refresh recently active sessions")
+                    .disabled(!backend.isReady || recentActivity.isRefreshing)
+                }
+
+                if recentActivity.isStale, let message = recentActivity.errorMessage {
+                    Label(message, systemImage: "exclamationmark.triangle.fill")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                if visible.isEmpty {
+                    if recentActivity.isRefreshing && recentActivity.sessions.isEmpty {
+                        HStack(spacing: 6) {
+                            ProgressView().controlSize(.small)
+                            Text("Checking local activity…")
+                                .font(.system(size: 9))
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 3)
+                    } else if let message = recentActivity.errorMessage, !recentActivity.isAvailable {
+                        Text(message)
+                            .font(.system(size: 9))
+                            .foregroundStyle(recentActivity.isSupported == false ? .orange : .secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.vertical, 2)
+                    } else {
+                        Text("No sessions have logged activity in the last 15 minutes.")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.vertical, 2)
+                    }
+                } else {
+                    ForEach(visible) { session in
+                        recentActivityRow(session, now: timeline.date)
+                    }
+                }
+
+                Button(action: openRecentSessions) {
+                    HStack(spacing: 5) {
+                        Text("View sessions")
+                        Image(systemName: "arrow.up.right")
+                            .font(.system(size: 8, weight: .semibold))
+                    }
+                    .font(.system(size: 9, weight: .semibold))
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.accentColor)
+                .padding(.top, 1)
+                .help("Open the Sessions view for the last 7 days")
+            }
+            .padding(10)
+            .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 9))
+            .overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.primary.opacity(0.07)))
+        }
+    }
+
+    private func recentActivityRow(_ session: NativeActivitySession, now: Date) -> some View {
+        HStack(alignment: .top, spacing: 7) {
+            Image(systemName: session.subagent ? "person.2.wave.2.fill" : "terminal.fill")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(session.subagent ? Color.accentColor : Color.secondary)
+                .frame(width: 15, alignment: .center)
+                .padding(.top, 1)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 4) {
+                    Text(session.displayTool)
+                        .font(.system(size: 10, weight: .semibold))
+                        .lineLimit(1)
+                    if let provider = session.displayProvider {
+                        Text(provider)
+                            .font(.system(size: 9))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .help("Tool vendor; not the provider that billed a particular request.")
+                    }
+                    if session.subagent {
+                        Text("Subagent")
+                            .font(.system(size: 8, weight: .semibold))
+                            .foregroundStyle(Color.accentColor)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(Color.accentColor.opacity(0.1), in: Capsule())
+                    }
+                }
+                Text(session.safeTitle)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .accessibilityLabel(session.safeTitle)
+                    .help(session.safeTitle)
+                HStack(spacing: 4) {
+                    Text(session.ageLabel(at: now))
+                    Text("·")
+                    if let tokens = session.safeTokens {
+                        Text("\(compactTokens(tokens)) session tokens")
+                            .help("Lifetime recorded session tokens, including input, output, cache reads and writes. This is not current context or recent-window usage.")
+                    } else {
+                        Text("Session tokens unavailable")
+                            .help("Lifetime session token totals were unavailable in the source logs.")
+                    }
+                }
+                .font(.system(size: 9, weight: .medium).monospacedDigit())
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(activityAccessibilityLabel(session, now: now))
+        .accessibilityHint("Session token values are lifetime recorded totals, not current context usage.")
+        .help(session.safeTitle)
+        .padding(.vertical, 2)
+    }
+
+    private func activityAccessibilityLabel(_ session: NativeActivitySession, now: Date) -> String {
+        let provider = session.displayProvider.map { " · \($0)" } ?? ""
+        let agent = session.subagent ? " · Subagent" : ""
+        let tokens = session.safeTokens.map { " · \(compactTokens($0)) session tokens" } ?? " · session tokens unavailable"
+        return "\(session.displayTool)\(provider)\(agent) · \(session.safeTitle) · \(session.ageLabel(at: now))\(tokens)"
+    }
+
+    private func activityCountLabel(visible: [NativeActivitySession]) -> String {
+        if visible.count == recentActivity.sessions.count && visible.count == 3 {
+            return "\(max(3, recentActivity.total)) sessions"
+        }
+        return "\(visible.count) \(visible.count == 1 ? "session" : "sessions")"
     }
 
     private var featuredServers: [LocalServer] {

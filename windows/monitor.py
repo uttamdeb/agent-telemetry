@@ -12,6 +12,12 @@ import urllib.request
 import webbrowser
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """The tray talks only to its local dashboard; do not follow its redirects."""
+    def redirect_request(self, request, response, code, message, headers, new_url):
+        return None
+
+
 def login_enabled(python, entry):
     import winreg
     try:
@@ -49,12 +55,41 @@ class Monitor:
         self.sync_revision = None
         self.sync_supported = True
         self.next_legacy_poll = 0
-        self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        # Detail panels are independent of the usage summary: a missing or
+        # failed detail endpoint must never blank or stale the figures card.
+        self.activity = {"observed_at": "", "window_seconds": 900,
+                         "sessions": [], "total": 0}
+        self.activity_supported = None
+        self.activity_stale = False
+        self.activity_error = None
+        self.activity_last_success = None
+        self.servers = {"supported": False, "servers": []}
+        self.servers_supported = None
+        self.servers_stale = False
+        self.servers_error = None
+        self.servers_last_success = None
+        self.details_retry = False
+        self.details_retry_at = 0
+        self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect())
 
     def snapshot(self):
         with self.lock:
             return dict(self.summary, status=self.status, stale=self.stale,
-                        requested=self.requested.is_set(), last_success=self.last_success)
+                        requested=self.requested.is_set(), last_success=self.last_success,
+                        activity={"observed_at": self.activity["observed_at"],
+                                  "window_seconds": self.activity["window_seconds"],
+                                  "sessions": [dict(row) for row in self.activity["sessions"]],
+                                  "total": self.activity["total"]},
+                        activity_supported=self.activity_supported,
+                        activity_stale=self.activity_stale or self.stale or not self.requested.is_set(),
+                        activity_error=self.activity_error,
+                        activity_last_success=self.activity_last_success,
+                        servers={"supported": self.servers["supported"],
+                                 "servers": [dict(row) for row in self.servers["servers"]]},
+                        servers_supported=self.servers_supported,
+                        servers_stale=self.servers_stale or self.stale or not self.requested.is_set(),
+                        servers_error=self.servers_error,
+                        servers_last_success=self.servers_last_success)
 
     def _state(self, status, stale=None):
         with self.lock:
@@ -135,10 +170,14 @@ class Monitor:
                         changed = self._accept_sync(state)
                         if changed or self.stale:
                             self.refresh(intent=intent)
+                        elif self.details_retry and time.monotonic() >= self.details_retry_at:
+                            self._refresh_details(intent)
                     return
             if self.interval and time.time() >= self.next_legacy_poll:
                 self.next_legacy_poll = time.time() + self.interval
                 self.refresh(intent=intent)
+            elif self.details_retry and time.monotonic() >= self.details_retry_at:
+                self._refresh_details(intent)
         except (OSError, ValueError, KeyError, TypeError):
             if self._active(intent):
                 self._state("Dashboard unavailable; showing the last successful refresh. Retrying…", True)
@@ -229,7 +268,9 @@ class Monitor:
         # First-run parsing can take a minute. Open only once the service is ready,
         # and never open it on behalf of an older, canceled Start request.
         if self.start(intent) and self._active(intent):
-            (opener or webbrowser.open)(self.url + ("#local-servers" if view == "local-servers" else ""))
+            destinations = {"local-servers": "#local-servers",
+                            "sessions": "?range=7d#sessions"}
+            (opener or webbrowser.open)(self.url + destinations.get(view, ""))
 
     def refresh(self, parse=False, intent=None):
         intent = self.intent if intent is None else intent
@@ -254,13 +295,152 @@ class Monitor:
                 self.stale = False
                 self.last_success = time.time()
                 self.status = "Monitoring on" if self.process is not None else "Using existing dashboard"
+            self._refresh_details(intent)
         except (OSError, ValueError, KeyError, TypeError):
             if self._active(intent):
                 self._state("Dashboard unavailable; showing the last successful refresh. Retrying…", True)
 
+    @staticmethod
+    def _activity_payload(payload):
+        if not isinstance(payload, dict):
+            raise ValueError("Invalid recent activity response")
+        observed_at = payload.get("observed_at")
+        window = payload.get("window_seconds")
+        total = payload.get("total")
+        sessions = payload.get("sessions")
+        if (not isinstance(observed_at, str) or len(observed_at) > 64
+                or type(window) is not int or not 1 <= window <= 3600
+                or type(total) is not int or total < 0
+                or not isinstance(sessions, list)):
+            raise ValueError("Invalid recent activity response")
+        result = []
+        for row in sessions[:3]:
+            if not isinstance(row, dict):
+                continue
+            key, source, tool, title, activity_at = (row.get(name) for name in
+                ("key", "source", "tool", "title", "last_activity_at"))
+            tokens, provider, subagent = row.get("tokens"), row.get("provider"), row.get("subagent")
+            if (not all(isinstance(value, str) and value and len(value) <= limit for value, limit in
+                    ((key, 128), (source, 64), (tool, 80), (title, 120), (activity_at, 64)))
+                    or (tokens is not None and (type(tokens) is not int or tokens < 0))
+                    or (provider is not None and (not isinstance(provider, str) or len(provider) > 80))
+                    or type(subagent) is not bool):
+                continue
+            result.append({"key": key, "source": source, "tool": tool, "provider": provider,
+                           "title": title, "tokens": tokens,
+                           "last_activity_at": activity_at, "subagent": subagent})
+        return {"observed_at": observed_at, "window_seconds": window,
+                "sessions": result, "total": total}
+
+    @staticmethod
+    def _servers_payload(payload):
+        if not isinstance(payload, dict) or type(payload.get("supported")) is not bool:
+            raise ValueError("Invalid local server response")
+        servers = payload.get("servers")
+        if not isinstance(servers, list):
+            raise ValueError("Invalid local server response")
+        clean = []
+        for row in servers:
+            if not isinstance(row, dict):
+                continue
+            state, host, port = row.get("state"), row.get("host"), row.get("port")
+            if (state not in ("running", "stopped") or not isinstance(host, str)
+                    or len(host) > 255 or type(port) is not int or not 1 <= port <= 65535):
+                continue
+            title = row.get("project") or row.get("process") or "Local server"
+            if not isinstance(title, str):
+                title = "Local server"
+            title = " ".join(title.split())[:100] or "Local server"
+            clean.append({"state": state, "title": title, "host": host,
+                          "port": port, "isPinned": row.get("isPinned") is True})
+        message = payload.get("message")
+        if not isinstance(message, str):
+            message = ""
+        return {"supported": payload["supported"], "servers": clean[:100],
+                "message": " ".join(message.split())[:180]}
+
+    def _refresh_details(self, intent):
+        """Fetch local details on the summary worker; details never gate figures."""
+        if not self._active(intent):
+            return
+        retry = False
+        for kind, path, validate in (("activity", "/api/native-activity", self._activity_payload),
+                                     ("servers", "/api/local-servers", self._servers_payload)):
+            if not self._active(intent):
+                return
+            try:
+                payload = validate(self._request(path, timeout=8))
+            except urllib.error.HTTPError as error:
+                missing = error.code == 404
+                error.close()
+                message = "Update dashboard to see this detail." if missing else "Could not refresh; retrying…"
+                retry = retry or not missing
+                self._set_detail_result(kind, error=message, supported=False if missing else None,
+                                        retry=not missing, intent=intent)
+                continue
+            except (OSError, ValueError, KeyError, TypeError):
+                retry = True
+                self._set_detail_result(kind, error="Could not refresh; retrying…", retry=True,
+                                        intent=intent)
+                continue
+            if not self._active(intent):
+                return
+            if kind == "activity":
+                self._set_detail_result(kind, payload=payload, supported=True, intent=intent)
+            else:
+                self._set_detail_result(kind, payload=payload,
+                                        supported=payload["supported"], intent=intent)
+        with self.lock:
+            if self._active_locked(intent):
+                self.details_retry = retry
+                self.details_retry_at = time.monotonic() + (3 if retry else 0)
+
+    def _active_locked(self, intent):
+        return self.requested.is_set() and self.intent == intent
+
+    def _set_detail_result(self, kind, payload=None, error=None, supported=None,
+                           retry=False, intent=None):
+        with self.lock:
+            if intent is not None and not self._active_locked(intent):
+                return
+            now = time.time()
+            if kind == "activity":
+                if payload is not None:
+                    self.activity = payload
+                    self.activity_supported = True
+                    self.activity_last_success = now
+                    self.activity_error = None
+                    self.activity_stale = False
+                else:
+                    if supported is not None:
+                        self.activity_supported = supported
+                    self.activity_error = error
+                    self.activity_stale = True
+            else:
+                if payload is not None:
+                    self.servers = payload
+                    self.servers_supported = supported
+                    self.servers_last_success = now
+                    self.servers_error = payload.get("message") or None
+                    self.servers_stale = False
+                else:
+                    if supported is not None:
+                        self.servers_supported = supported
+                    self.servers_error = error
+                    self.servers_stale = True
+            if retry:
+                self.details_retry = True
+
+    def _mark_details_stale(self):
+        with self.lock:
+            self.activity_stale = True
+            self.servers_stale = True
+            self.details_retry = False
+
     def stop(self, cancel=True):
         if cancel:
             self.request(False)
+        self._mark_details_stale()
         process = self.process
         if process is not None:
             self._state("Stopping; saving usage history…")

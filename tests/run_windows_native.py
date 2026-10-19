@@ -155,8 +155,43 @@ def icon_fixture(icon, background, scale, destination=None):
 
 
 def click(panel, identifier):
-    w.send(panel.controls[identifier], 0xf5, 0, 0)  # BM_CLICK, actual native button routing.
+    handle = panel.controls.get(identifier) or panel.detail_ids.get(identifier)
+    w.send(handle, 0xf5, 0, 0)  # BM_CLICK, actual native button routing.
     assert panel.error is None, panel.error
+
+
+def detail_fixture(app, session_count=3, server_count=3, stale=False, retry=False):
+    """Install invented details; never inspect the user's backend or ledger."""
+    now = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
+    sessions = []
+    tools = (("claude", "Claude Code", "Anthropic"),
+             ("codex", "Codex", "OpenAI"),
+             ("copilot", "Copilot", "GitHub"))
+    for index in range(session_count):
+        source, tool, provider = tools[index % len(tools)]
+        stamp = (now - datetime.timedelta(minutes=index)).isoformat().replace("+00:00", "Z")
+        sessions.append({"key": "%064x" % (index + 1), "source": source, "tool": tool,
+            "provider": provider if index != 1 else None,
+            "title": ("A deliberately long invented session title that should stay fully accessible "
+                      "while the visible row ends with an ellipsis %d" % index),
+            "tokens": 145678 + index * 1000, "last_activity_at": stamp,
+            "subagent": index == 2})
+    app.monitor.activity = {"observed_at": now.isoformat().replace("+00:00", "Z"),
+                            "window_seconds": 900, "sessions": sessions,
+                            "total": session_count}
+    app.monitor.activity_supported = True
+    app.monitor.activity_stale = stale
+    app.monitor.activity_error = "Could not refresh; retrying…" if retry else None
+    app.monitor.servers = {"supported": True, "message": "", "servers": [
+        {"state": "running" if index != 1 else "stopped",
+         "title": ("An invented pinned project server with a long display name %d" % index),
+         "host": "localhost", "port": 8000 + index,
+         "isPinned": index in (0, 1)}
+        for index in range(server_count)]}
+    app.monitor.servers_supported = True
+    app.monitor.servers_stale = stale
+    app.monitor.servers_error = "Could not refresh; retrying…" if retry else None
+    app.monitor.details_retry = retry
 
 
 def main():
@@ -184,6 +219,7 @@ def main():
             app.monitor.request(True)
             app.monitor.summary = {"date": datetime.date.today().isoformat(), "tokens": 15094633, "spend": 2.59}
             app.monitor._state("Monitoring on", False)
+            detail_fixture(app)
             panel.show()
             assert w.is_visible(panel.window)
             assert not w.is_visible(panel.combo), "Settings should start collapsed"
@@ -248,30 +284,99 @@ def main():
                         pump()
                         assert panel.expanded == expanded, ("Layout changed during paint", expanded, panel.expanded)
                         assert panel.error is None, panel.error
+                        assert w.is_visible(panel.panel), "Recent-session and server lists must remain visible"
+                        assert w.is_visible(panel.detail_controls["session"][0]), "Recent sessions must show by default"
                         print("Capture", dark, scale, expanded, panel.geometry)
                         screenshot(panel.window, options.screenshots / ("%s-%s-%s.png" % (
                             "dark" if dark else "light", int(scale * 100), "expanded" if expanded else "collapsed")), panel.colors["bg"])
                         assert panel.expanded == expanded, "Printing toggled settings"
+            assert len(panel.detail_view["sessions"]) == 3
+            assert len(panel.detail_view["servers"]) == 3
+            assert "session tokens" in panel.detail_labels[200]
+            assert "fully accessible" in panel.detail_labels[200]
+            assert "last active" in panel.detail_labels[200]
+            click(panel, 200)
+            assert app.calls[-1] == ("open", "sessions")
+            assert not w.is_visible(panel.window)
+            panel.dismissed_at = 0
+            panel.show()
+            # Manual mode ages rows out by timestamp without another request.
+            app.monitor.interval = 0
+            app.monitor.activity["sessions"] = [dict(row, last_activity_at=(
+                datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=16)
+            ).isoformat().replace("+00:00", "Z")) for row in app.monitor.activity["sessions"]]
+            panel.update(force=True)
+            assert not panel.detail_view["sessions"]
+            assert "No local sessions active" in panel.detail_view["session_message"]
+            detail_fixture(app)
+            panel.update(force=True)
+            # Empty, stale and retry states use invented data and make no requests.
+            detail_fixture(app, 0, 0)
+            panel.update(force=True)
+            assert "No local sessions active" in panel.detail_view["session_message"]
+            assert "No pinned or running" in panel.detail_view["server_message"]
+            panel.dark = False
+            panel.colors = palette(False)
+            w.delete_object(panel.brush)
+            panel.brush = w.solid_brush(panel.colors["bg"])
+            panel.scale = 1
+            panel._fonts()
+            panel.update(force=True)
+            screenshot(panel.window, options.screenshots / "light-100-empty-details.png")
+            detail_fixture(app, 3, 3, stale=True, retry=True)
+            panel.update(force=True)
+            assert panel.detail_view["activity_stale"] and panel.detail_view["server_stale"]
+            assert "Retrying" in panel.detail_view["activity_status"]
+            screenshot(panel.window, options.screenshots / "light-100-stale-retry-details.png")
             # Failure retains the last figures and exposes Retry, not a blank card.
             app.monitor._state("Dashboard unavailable; showing the last successful refresh. Retrying…", True)
             panel.update(force=True)
             assert panel.warning and w.is_visible(panel.controls[12])
-            screenshot(panel.window, options.screenshots / "dark-200-stale.png")
+            screenshot(panel.window, options.screenshots / "light-200-stale.png")
             click(panel, 12)
             assert app.calls[-1] == ("start", None)
             # An actual clipped settings HWND on a small 200% work area; footer
             # remains visible and keyboard focus scrolls Import into view.
+            panel.scale = 2
+            panel._fonts()
             panel.work = (0, 0, 1600, 960)
             panel.anchor = (1500, 940, 1532, 960)
             app.monitor.request(False)  # Import can receive focus only when enabled.
             panel.update(force=True)
             assert panel.geometry["height"] <= 480
-            assert panel.geometry["settings_height"] < 178
+            assert panel.geometry["settings_height"] < panel.geometry["settings_content_height"]
+            panel.scroll = 0
+            panel.expanded = False
+            panel.update(force=True)
+            assert w.is_visible(panel.detail_controls["session"][0])
+            screenshot(panel.window, options.screenshots / "light-200-small-screen-details.png",
+                       panel.colors["bg"])
+            panel.expanded = True
+            panel.update(force=True)
+            last_server = panel.detail_controls["server"][2]
+            w.set_focus(last_server)
+            pump()
+            assert panel.scroll > 0, "Focusing the last server row should scroll it into view"
+            last_server_row = panel.detail_rows[205]
+            assert last_server_row["top"] >= panel.scroll
+            assert last_server_row["top"] + last_server_row["height"] <= (
+                panel.scroll + panel.geometry["settings_height"])
+            click(panel, 205)
+            assert app.calls[-1] == ("open", "local-servers")
+            assert not w.is_visible(panel.window)
+            panel.dismissed_at = 0
+            panel.show()
+            panel.scale = 2
+            panel._fonts()
+            panel.work = (0, 0, 1600, 960)
+            panel.anchor = (1500, 940, 1532, 960)
+            panel.update(force=True)
             w.set_focus(panel.controls[7])
-            assert panel.scroll > 0
+            assert panel.scroll > 0, ("Import focus did not scroll settings into view",
+                                      panel.scroll, panel.expanded, panel.geometry)
             assert w.is_visible(panel.controls[8])
             pump()
-            screenshot(panel.window, options.screenshots / "dark-200-small-screen.png", panel.colors["bg"])
+            screenshot(panel.window, options.screenshots / "light-200-small-screen.png", panel.colors["bg"])
             app.monitor.request(False)
             app.monitor._state("Monitoring off", False)
             panel.update(force=True)
@@ -289,6 +394,10 @@ def main():
             assert app.calls[-1] == ("open", "local-servers") and not w.is_visible(panel.window)
             panel.dismissed_at = 0
             panel.show()
+            click(panel, 14)
+            assert app.calls[-1] == ("open", "sessions") and not w.is_visible(panel.window)
+            panel.dismissed_at = 0
+            panel.show()
             # Busy shutdown must leave Quit visible and prevent a duplicate Quit.
             panel.scale = 2
             panel._fonts()
@@ -298,7 +407,7 @@ def main():
             panel.update(force=True)
             assert w.is_visible(panel.controls[8]) and not w.is_enabled(panel.controls[8])
             assert not w.is_enabled(panel.controls[2])
-            screenshot(panel.window, options.screenshots / "dark-200-saving.png")
+            screenshot(panel.window, options.screenshots / "light-200-saving.png")
             app.quitting = False
             panel.update(force=True)
             # Actual dialog keyboard routing closes the popup on Escape.
@@ -313,7 +422,7 @@ def main():
             w.send(panel.window, 6, 0, 0)
             assert not w.is_visible(panel.window), "Outside activation must dismiss"
             assert panel.error is None, panel.error
-            print("PASS Windows native popover actions, focus, Escape/outside dismissal, scrolling, stale/saving states and 15 real rendering fixtures")
+            print("PASS Windows native popover actions, focus, Escape/outside dismissal, scrolling, recent-session aging, local servers, stale/retry/saving states and mock-data render fixtures")
         finally:
             w.destroy_window(app.window)
 

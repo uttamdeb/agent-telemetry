@@ -201,6 +201,8 @@ class Tray:
             self.submit("open")
         elif command == 13:
             self.submit("open", "local-servers")
+        elif command == 14:
+            self.submit("open", "sessions")
         elif command == 2:
             self.submit("stop" if self.monitor.requested.is_set() else "start")
         elif command == 3:

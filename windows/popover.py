@@ -9,7 +9,8 @@ import time
 import traceback
 
 from windows import win32 as w
-from windows.presentation import WIDTH, INTERVALS, figures, layout, position
+from windows.presentation import (WIDTH, INTERVALS, compact, figures, layout,
+                                  local_servers, position, recent_sessions)
 
 C, W = w.C, w.W
 
@@ -56,7 +57,13 @@ class Popover:
         self.fonts = {}
         self.controls = {}
         self.labels = {}
+        self.detail_controls = {"session": [], "server": []}
+        self.detail_ids = {}
+        self.detail_labels = {}
+        self.detail_rows = {}
         self.snapshot = tray.monitor.snapshot()
+        self.detail_view = None
+        self.detail_layout = None
         self.busy = False
         self.warning = False
         self.error = None
@@ -87,10 +94,11 @@ class Popover:
         # Standard HWNDs retain focus, keyboard and accessibility behavior.
         for identifier, title in ((2, "Start monitoring"), (9, "Details & settings"),
             (1, "Open dashboard"), (13, "Local servers"), (3, "Refresh now"), (8, "Quit AgentTelemetry"),
+            (14, "View sessions for the last 7 days"),
             (10, "Icon"), (11, "Numbers"), (6, "Open at login"),
             (5, "Start monitoring automatically"), (7, "Import existing data…"), (12, "Retry")):
             handle = w.create_window(0, "BUTTON", title, 0x5001400b, 0, 0, 0, 0,
-                                      self.panel if identifier in (5, 6, 7, 10, 11) else self.window,
+                                      self.panel if identifier in (5, 6, 7, 10, 11, 14) else self.window,
                                       identifier + 100, tray.instance, None)
             if not handle:
                 raise C.WinError(C.get_last_error())
@@ -102,6 +110,17 @@ class Popover:
             raise C.WinError(C.get_last_error())
         for _, title in INTERVALS:
             w.send_text(self.combo, 0x143, 0, title)  # CB_ADDSTRING
+        # Owner-drawn buttons keep complete accessible names and keyboard
+        # focus while the parent paints compact list rows.
+        for kind, identifiers in (("session", (200, 201, 202)), ("server", (203, 204, 205))):
+            for identifier in identifiers:
+                handle = w.create_window(0, "BUTTON", "", 0x5001400b, 0, 0, 0, 0,
+                                         self.panel, identifier, tray.instance, None)
+                if not handle:
+                    raise C.WinError(C.get_last_error())
+                self.detail_controls[kind].append(handle)
+                self.detail_ids[identifier] = handle
+                self.detail_labels[identifier] = ""
         w.set_position(self.panel, self.controls[9], 0, 0, 0, 0, 0x13)  # Dialog tab order: header, details, settings, footer.
         self._fonts()
         self.update(force=True)
@@ -116,7 +135,8 @@ class Popover:
         for font in self.fonts.values():
             w.delete_object(font)
         self.fonts = {}
-        for size, weight in ((10, 400), (11, 400), (12, 400), (12, 600), (13, 600), (20, 600)):
+        for size, weight in ((10, 400), (10, 600), (11, 400), (11, 600),
+                             (12, 400), (12, 600), (13, 600), (20, 600)):
             font = w.create_font(-self.p(size), 0, 0, 0, weight, 0, 0, 0, 1, 0, 0, 0, 5, "Segoe UI")
             if not font:
                 raise C.WinError(C.get_last_error())
@@ -135,13 +155,150 @@ class Popover:
             self.labels[identifier] = text
             w.set_text(self.controls[identifier], text)
 
+    @staticmethod
+    def _detail_projection(snapshot):
+        sessions = recent_sessions(snapshot)
+        servers = local_servers(snapshot)
+        activity_supported = snapshot.get("activity_supported")
+        server_supported = snapshot.get("servers_supported")
+        activity_error = snapshot.get("activity_error")
+        server_error = snapshot.get("servers_error")
+        offline = not snapshot.get("requested")
+        summary_stale = bool(snapshot.get("stale"))
+        activity_stale = bool(snapshot.get("activity_stale") or offline or summary_stale)
+        server_stale = bool(snapshot.get("servers_stale") or offline or summary_stale)
+        if activity_supported is False:
+            session_message = "Update dashboard to see recent sessions."
+        elif activity_error:
+            session_message = "Recent sessions unavailable; retrying…"
+        elif not sessions:
+            session_message = ("Start monitoring to load recent sessions."
+                               if activity_supported is None and offline else
+                               "Loading recent sessions…" if activity_supported is None else
+                               "No local sessions active in the last 15 minutes.")
+        else:
+            session_message = ""
+        server_value = snapshot.get("servers") or {}
+        if server_supported is False:
+            message = server_value.get("message") if isinstance(server_value, dict) else ""
+            server_message = message or "Update dashboard to see local servers."
+        elif server_error:
+            server_message = "Local servers unavailable; retrying…"
+        elif not servers:
+            server_message = ("Start monitoring to load local servers."
+                              if server_supported is None and offline else
+                              "Loading local servers…" if server_supported is None else
+                              "No pinned or running local servers.")
+        else:
+            server_message = ""
+        activity_status = ("Monitoring off · may be stale" if offline else
+                           "Retrying; showing last check" if activity_error else
+                           "Showing last check; may be stale" if activity_stale else
+                           "Loading recent activity…" if activity_supported is None else "")
+        server_status = ("Monitoring off · may be stale" if offline else
+                         "Retrying; showing last check" if server_error else
+                         "Showing last check; may be stale" if server_stale else
+                         "Loading server details…" if server_supported is None else "")
+        return {"sessions": sessions, "servers": servers,
+                "session_message": session_message, "server_message": server_message,
+                "activity_heading": "RECENTLY ACTIVE",
+                "activity_window": "LAST 15 MIN",
+                "server_heading": "LOCAL SERVERS",
+                "activity_status": activity_status, "server_status": server_status,
+                "activity_stale": activity_stale, "server_stale": server_stale}
+
+    @staticmethod
+    def _detail_layout(view):
+        session_rows = []
+        for row in view.get("sessions", []):
+            provider = row.get("provider")
+            tokens = row.get("tokens")
+            token_label = (compact(tokens) + " session tokens") if tokens is not None else "session tokens unavailable"
+            pieces = [row.get("tool", "Tool")]
+            if provider:
+                pieces.append(provider)
+            pieces.append(token_label)
+            accessible_parts = [row.get("tool", "Tool")]
+            if provider:
+                accessible_parts.append(provider)
+            accessible_parts.extend((row.get("title", "Untitled session"), token_label,
+                                     "last active " + row.get("age", "recently")))
+            if row.get("subagent"):
+                accessible_parts.append("subagent")
+            session_rows.append({"title": row.get("title", "Untitled session"),
+                "subtitle": " · ".join(pieces), "tone": "text",
+                "accessible": "; ".join(accessible_parts), "height": 40})
+        if not session_rows and view.get("session_message"):
+            session_rows.append({"title": view["session_message"], "subtitle": "", "tone": "muted",
+                                 "accessible": view["session_message"], "height": 34})
+
+        server_rows = []
+        for row in view.get("servers", []):
+            state = "Running" if row.get("state") == "running" else "Stopped"
+            state_label = ("Pinned · " if row.get("isPinned") else "") + state
+            title, address = row.get("title", "Local server"), row.get("address", "")
+            server_rows.append({"title": title, "subtitle": state_label + " · " + address,
+                "tone": "text" if state == "Running" else "muted",
+                "accessible": "; ".join((state_label, title, address)), "height": 35})
+        if not server_rows and view.get("server_message"):
+            server_rows.append({"title": view["server_message"], "subtitle": "", "tone": "muted",
+                                "accessible": view["server_message"], "height": 34})
+
+        session_top = 54 if view.get("activity_status") else 39
+        for index, row in enumerate(session_rows):
+            row["top"] = session_top + index * 44
+        session_end = (session_rows[-1]["top"] + session_rows[-1]["height"]) if session_rows else session_top
+        server_heading = session_end + 8
+        server_top = server_heading + 19 + (14 if view.get("server_status") else 0)
+        for index, row in enumerate(server_rows):
+            row["top"] = server_top + index * 39
+        server_end = (server_rows[-1]["top"] + server_rows[-1]["height"]) if server_rows else server_top
+        return {"sessions": session_rows, "servers": server_rows,
+                "activity_heading_y": 8,
+                "activity_window_y": 23,
+                "activity_status_y": 38 if view.get("activity_status") else None,
+                "server_heading_y": server_heading,
+                "server_status_y": server_heading + 16 if view.get("server_status") else None,
+                "content_height": max(90, server_end + 8)}
+
+    def _set_detail_controls(self, rows, controls, first_id):
+        for index, handle in enumerate(controls):
+            identifier = first_id + index
+            if index < len(rows):
+                row = rows[index]
+                self.detail_rows[identifier] = row
+                label = row["accessible"]
+                if self.detail_labels[identifier] != label:
+                    self.detail_labels[identifier] = label
+                    w.set_text(handle, label)
+                self._place_detail(handle, row["top"] - self.scroll,
+                                   row.get("height", 34), True)
+            else:
+                self.detail_rows.pop(identifier, None)
+                self._place_detail(handle, 0, 0, False)
+            w.invalidate(handle, None, False)
+
+    def place_details(self):
+        """Lay out readable list rows inside the existing scrolling HWND."""
+        rows = self.detail_layout or {"sessions": [], "servers": []}
+        self._set_detail_controls(rows["sessions"], self.detail_controls["session"], 200)
+        self._set_detail_controls(rows["servers"], self.detail_controls["server"], 203)
+
+    def _place_detail(self, handle, y, height, visible):
+        width = getattr(self, "settings_width", 261)
+        w.set_position(handle, None, self.p(21), self.p(y), self.p(width), self.p(height), 0x14)
+        w.show_window(handle, 5 if visible else 0)
+
     def update(self, force=False):
         snapshot = self.tray.monitor.snapshot()
+        detail_view = self._detail_projection(snapshot)
+        detail_layout = self._detail_layout(detail_view)
+        details_changed = detail_view != self.detail_view or detail_layout != self.detail_layout
         busy = bool(self.tray.queue.unfinished_tasks)
         # Routine clock polling should not disable buttons/focus every second.
         busy = busy and self.tray.pending_ui > 0
-        changed = force or snapshot != self.snapshot or busy != self.busy or self.last_interval != self.tray.monitor.interval
-        self.snapshot, self.busy = snapshot, busy
+        changed = force or snapshot != self.snapshot or details_changed or busy != self.busy or self.last_interval != self.tray.monitor.interval
+        self.snapshot, self.detail_view, self.detail_layout, self.busy = snapshot, detail_view, detail_layout, busy
         self.last_interval = self.tray.monitor.interval
         if not changed:
             return
@@ -149,10 +306,12 @@ class Popover:
         self.warning = snapshot["stale"] or not (status in ("Monitoring on", "Monitoring off", "Using existing dashboard")
             or status.startswith(("Starting", "Stopping", "History imported")))
         max_height = int((self.work[3] - self.work[1]) / self.scale)
-        key = (self.expanded, snapshot["stale"], self.warning, self.scale, max_height)
+        key = (self.expanded, snapshot["stale"], self.warning, self.scale, max_height,
+               detail_layout["content_height"])
         geometry_changed = key != self.layout_key
         self.layout_key = key
-        self.geometry = layout(self.expanded, snapshot["stale"], self.warning, max_height)
+        self.geometry = layout(self.expanded, snapshot["stale"], self.warning, max_height,
+                               list_height=detail_layout["content_height"])
         details, settings, dashboard, footer = (self.geometry[k] for k in ("details", "settings", "dashboard", "footer"))
         if geometry_changed:
             self._place(2, 244, 19, 50, 28)
@@ -163,6 +322,8 @@ class Popover:
             self._place(13, 160, dashboard, 136, 30)
             self._place(3, 14, footer, 101, 26)
             self._place(8, 126, footer, 170, 26)
+        if geometry_changed or details_changed:
+            self.place_details()
         requested = snapshot["requested"]
         closing = self.tray.quitting
         w.enable_window(self.controls[2], not closing and not busy)
@@ -171,12 +332,13 @@ class Popover:
         w.enable_window(self.controls[7], not requested and not self.tray.monitor.process and not busy and not closing)
         w.enable_window(self.controls[1], not busy and not closing)
         w.enable_window(self.controls[13], not busy and not closing)
+        w.enable_window(self.controls[14], not busy and not closing)
         w.enable_window(self.controls[12], not busy and not closing)
         w.enable_window(self.controls[8], not closing)
         for identifier in (5, 6, 10, 11):
             w.enable_window(self.controls[identifier], not closing)
         self._label(2, ("Stop" if requested else "Start") + " monitoring")
-        self._label(9, "Details & settings — " + ("expanded" if self.expanded else "collapsed"))
+        self._label(9, "Settings — " + ("expanded" if self.expanded else "collapsed"))
         self._label(5, "Start monitoring automatically — " + ("on" if self.tray.settings.get("auto_start") else "off"))
         self._label(6, "Open at login — " + ("on" if self.tray.login_enabled() else "off"))
         self._label(10, "Icon" + (" — selected" if self.tray.settings.get("display", "icon") == "icon" else ""))
@@ -198,22 +360,28 @@ class Popover:
     def place_settings(self):
         g = self.geometry
         height = g["settings_height"]
-        self.scroll = min(self.scroll, max(0, 178 - height))
-        scrolling = self.expanded and height < 178
+        content_height = g["settings_content_height"]
+        self.scroll = min(self.scroll, max(0, content_height - height))
+        scrolling = height < content_height
         w.set_position(self.panel, None, self.p(14), self.p(g["settings"]), self.p(282), self.p(height), 0x14)
         w.show_scrollbar(self.panel, 1, scrolling)
-        w.show_window(self.panel, 5 if self.expanded else 0)
+        w.show_window(self.panel, 5)
         # The scrollbar only takes space on small/high-DPI screens.
         inset = 18 if scrolling else 0
+        self.settings_width = 261 - inset
         half = (261 - inset) // 2
         y = -self.scroll
-        self._place(10, 21, y + 4, half, 28, self.expanded)
-        self._place(11, 21 + half, y + 4, 261 - inset - half, 28, self.expanded)
-        self._place(20, 129, y + 43, 153 - inset, 170, self.expanded)
-        self._place(6, 21, y + 79, 261 - inset, 26, self.expanded)
-        self._place(5, 21, y + 108, 261 - inset, 26, self.expanded)
-        self._place(7, 21, y + 142, 261 - inset, 28, self.expanded)
-        info = w.SCROLLINFO(C.sizeof(w.SCROLLINFO), 7, 0, 177, height, self.scroll, 0)
+        settings_start = g["settings_start"] if self.expanded else 0
+        self._place(10, 21, y + settings_start + 4, half, 28, self.expanded)
+        self._place(11, 21 + half, y + settings_start + 4, 261 - inset - half, 28, self.expanded)
+        self._place(20, 129, y + settings_start + 43, 153 - inset, 170, self.expanded)
+        self._place(6, 21, y + settings_start + 79, 261 - inset, 26, self.expanded)
+        self._place(5, 21, y + settings_start + 108, 261 - inset, 26, self.expanded)
+        self._place(7, 21, y + settings_start + 138, 261 - inset, 28, self.expanded)
+        self._place(14, 197, self.detail_layout["activity_heading_y"] - self.scroll + 1,
+                    84, 18, True)
+        self.place_details()
+        info = w.SCROLLINFO(C.sizeof(w.SCROLLINFO), 7, 0, content_height - 1, height, self.scroll, 0)
         w.set_scroll(self.panel, 1, C.byref(info), True)
         w.invalidate(self.panel, None, False)
 
@@ -309,7 +477,51 @@ class Popover:
 
     def paint_settings(self, dc):
         w.fill_rect(dc, C.byref(self.rect(0, 0, 282, self.geometry["settings_height"])), self.brush)
-        self.text(dc, "Shared refresh", self.rect(21, 45 - self.scroll, 104, 24), 11, tone="muted")
+        view = self.detail_view or {}
+        rows = self.detail_layout or {}
+        activity_tone = "warning" if view.get("activity_stale") else "muted"
+        server_tone = "warning" if view.get("server_stale") else "muted"
+        width = getattr(self, "settings_width", 261)
+        self.text(dc, view.get("activity_heading", "RECENTLY ACTIVE"),
+                  self.rect(21, rows.get("activity_heading_y", 8) - self.scroll, 165, 16),
+                  10, 600, activity_tone, 0x20 | 0x8000)
+        self.text(dc, view.get("activity_window", "LAST 15 MIN"),
+                  self.rect(21, rows.get("activity_window_y", 23) - self.scroll, 165, 13),
+                  10, tone="muted", flags=0x20 | 0x8000)
+        if view.get("activity_status"):
+            self.text(dc, view["activity_status"],
+                      self.rect(21, rows.get("activity_status_y", 38) - self.scroll, width, 13),
+                      10, tone=activity_tone, flags=0x20 | 0x8000)
+        self.text(dc, view.get("server_heading", "LOCAL SERVERS"),
+                  self.rect(21, rows.get("server_heading_y", 80) - self.scroll, width, 16),
+                  10, 600, server_tone, 0x20 | 0x8000)
+        if view.get("server_status"):
+            self.text(dc, view["server_status"],
+                      self.rect(21, rows.get("server_status_y", 96) - self.scroll, width, 13),
+                      10, tone=server_tone, flags=0x20 | 0x8000)
+        if self.expanded:
+            start = self.geometry["settings_start"]
+            self.box(dc, self.rect(21, start - self.scroll - 7, width, 1), self.colors["line"])
+            self.text(dc, "Settings", self.rect(21, start - self.scroll, width, 16),
+                      10, 600, "muted")
+            self.text(dc, "Shared refresh", self.rect(21, start + 27 - self.scroll, 104, 24),
+                      11, tone="muted")
+
+    def draw_detail(self, item):
+        row = self.detail_rows.get(item.id)
+        if not row:
+            return
+        rect = item.rect
+        self.box(item.dc, rect, self.colors["card"], 5, self.colors["line"])
+        inset = self.p(9)
+        title_rect = W.RECT(rect.left + inset, rect.top + self.p(3),
+                            rect.right - inset, rect.top + self.p(18))
+        self.text(item.dc, row["title"], title_rect, 11, 600,
+                  "muted" if row["tone"] == "muted" else "text", 0x20 | 0x8000)
+        if row["subtitle"]:
+            subtitle_rect = W.RECT(rect.left + inset, rect.top + self.p(20),
+                                   rect.right - inset, rect.bottom - self.p(2))
+            self.text(item.dc, row["subtitle"], subtitle_rect, 10, tone="muted", flags=0x20 | 0x8000)
 
     def draw_button(self, item):
         identifier, dc, rect = item.id - 100, item.dc, item.rect
@@ -340,8 +552,10 @@ class Popover:
         elif identifier == 13:
             self.box(dc, rect, self.colors["hover"] if pressed else self.colors["card"], 6, self.colors["line"])
             self.text(dc, "Local servers", rect, 12, 600, tone, 0x25)
+        elif identifier == 14:
+            self.text(dc, "View sessions ↗", rect, 10, 600, "accent", 0x25)
         elif identifier == 9:
-            self.text(dc, ("⌄" if self.expanded else "›") + "   Details & settings", rect, 12, 600, tone)
+            self.text(dc, ("⌄" if self.expanded else "›") + "   Settings", rect, 12, 600, tone)
         else:
             if pressed:
                 self.box(dc, rect, self.colors["hover"], 5)
@@ -365,7 +579,7 @@ class Popover:
             self.tray.save_settings()
             self.tray.update_icon()
             self.update(force=True)
-        elif identifier in (1, 7, 13):
+        elif identifier in (1, 7, 13, 14):
             self.hide()
             self.tray.command(identifier)
         else:
@@ -394,11 +608,13 @@ class Popover:
                     if item.item < len(INTERVALS):
                         rect = W.RECT(item.rect.left + self.p(7), item.rect.top, item.rect.right, item.rect.bottom)
                         self.text(item.dc, INTERVALS[item.item][1], rect, 12)
+                elif item.id in self.detail_rows:
+                    self.draw_detail(item)
                 else:
                     self.draw_button(item)
                 return 1
             if window == self.panel and message in (0x115, 0x20a):
-                limit = max(0, 178 - self.geometry["settings_height"])
+                limit = max(0, self.geometry["settings_content_height"] - self.geometry["settings_height"])
                 if message == 0x20a:
                     delta = C.c_short((wparam >> 16) & 0xffff).value
                     self.scroll -= int(delta / 120) * 24
@@ -426,13 +642,20 @@ class Popover:
                     identifier -= 100
                 if window == self.panel and (event == 6 or (identifier == 20 and event == 3)):
                     # Tab into a clipped setting scrolls it into view.
-                    top = {10: 4, 11: 4, 20: 43, 6: 79, 5: 108, 7: 142}.get(identifier)
+                    row = self.detail_rows.get(identifier)
+                    setting_start = self.geometry.get("settings_start") or 0
+                    top = (row["top"] if row else
+                           {10: setting_start + 4, 11: setting_start + 4,
+                            20: setting_start + 43, 6: setting_start + 79,
+                            5: setting_start + 108, 7: setting_start + 138,
+                            14: self.detail_layout["activity_heading_y"]}.get(identifier))
+                    item_height = row.get("height", 34) if row else 28
                     if top is not None:
-                        height = self.geometry["settings_height"]
+                        viewport = self.geometry["settings_height"]
                         if top < self.scroll:
                             self.scroll = top
-                        elif top + 28 > self.scroll + height:
-                            self.scroll = top + 28 - height
+                        elif top + item_height > self.scroll + viewport:
+                            self.scroll = top + item_height - viewport
                         self.place_settings()
                     return 0
                 if identifier == 20 and event == 1:
@@ -442,6 +665,9 @@ class Popover:
                         self.update(force=True)
                 elif identifier in self.controls and event == 0:
                     self.command(identifier)
+                elif identifier in self.detail_rows and event == 0:
+                    self.hide()
+                    self.tray.command(14 if identifier < 203 else 13)
                 return 0
             if message == 6 and wparam & 0xffff == 0 and window == self.window:
                 # Owned dropdown windows do not count as leaving the popover.
