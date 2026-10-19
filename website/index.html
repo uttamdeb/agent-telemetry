@@ -3,6 +3,16 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- Google Analytics 4: shared with uttamdeb.com; page_location identifies this site. -->
+  <link rel="preconnect" href="https://www.googletagmanager.com">
+  <link rel="preconnect" href="https://www.google-analytics.com">
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-X485NR8WPC"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', 'G-X485NR8WPC');
+  </script>
   <meta name="description" content="A private, local dashboard for tokens, time and estimated cost across AI coding tools, with a desktop editor extension and optional MCP analytics. Free and open source.">
   <meta property="og:title" content="AgentTelemetry — Every agent. One clear picture.">
   <meta property="og:description" content="See recorded AI coding usage in one local dashboard, a desktop editor, and optional MCP analytics. Free and open source.">
@@ -373,7 +383,7 @@
       <div class="faq-heading" data-reveal><div class="section-index"><span>05</span><span class="index-rule"></span><span>Good to know</span></div><h2 id="faq-title">A few clear<br><em>answers.</em></h2><p>Know what to expect before you bring your usage into focus.</p></div>
       <div class="faq-list" data-reveal>
         <details><summary><span>01</span>Is AgentTelemetry free?</summary><div class="faq-answer"><p>Yes. AgentTelemetry is free and open source under the MIT license. You can inspect the code, run it from source, or use the native installer on macOS and Windows.</p></div></details>
-        <details><summary><span>02</span>Does it upload my usage?</summary><div class="faq-answer"><p>Usage is read and stored locally by default. Optional LAN sharing and provider account lookups require your action. When you enable Local MCP access, a compatible client receives analytics you request; a cloud-backed client may forward those results to its provider. Project/device display names and connected-device usage have separate opt-ins. No AgentTelemetry account is needed.</p></div></details>
+        <details><summary><span>02</span>Does it upload my usage?</summary><div class="faq-answer"><p>AgentTelemetry reads and stores app usage locally by default. Optional LAN sharing and provider account lookups require your action. When you enable Local MCP access, a compatible client receives analytics you request; a cloud-backed client may forward those results to its provider. Project/device display names and connected-device usage have separate opt-ins. The marketing website uses Google Analytics to count visits; it sends standard page-view details, including the page URL, to Google. That website measurement does not send your AgentTelemetry logs or dashboard data. No AgentTelemetry account is needed.</p></div></details>
         <details><summary><span>03</span>Is estimated cost my actual bill?</summary><div class="faq-answer"><p>No. Cost uses published API list prices as an estimate. Subscription plans, negotiated rates, and provider billing details may differ. Some per-request pricing rules cannot be represented exactly in daily summaries.</p></div></details>
         <details><summary><span>04</span>Which tools and usage are covered?</summary><div class="faq-answer"><p>It reads logs from Claude Code and Claude Desktop agent mode, Codex, GitHub Copilot, Cursor, OpenCode, Hermes Agent, and OpenClaw. Coverage depends on what each tool records: some sources provide partial usage or estimates, and recorded, estimated, and unavailable data are distinguished.</p></div></details>
         <details><summary><span>05</span>How do I get started?</summary><div class="faq-answer">
