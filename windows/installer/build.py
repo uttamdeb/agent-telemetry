@@ -67,8 +67,9 @@ def stage(source, destination, archive, version):
         "python_sha256": PYTHON_SHA256}, indent=2) + "\n", encoding="utf-8")
     assert (runtime / "pythonw.exe").is_file()
     forbidden = {".usage_cache.json", ".usage-backups", ".peers.json", ".peers", "server.log",
-                 ".local_servers.json", "mcp-access.json", "mcp-access.lock", "project-names.json"}
-    if any(path.name in forbidden or path.name.startswith((".local_servers.", ".mcp-access-"))
+                 ".local_servers.json", "mcp-access.json", "mcp-access.lock", "project-names.json",
+                 "release-notes.json", "release-notes.lock"}
+    if any(path.name in forbidden or path.name.startswith((".local_servers.", ".mcp-access-", ".release-notes-"))
            for path in destination.rglob("*")):
         raise ValueError("Personal telemetry found in release payload.")
 

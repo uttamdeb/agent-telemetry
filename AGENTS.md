@@ -5,7 +5,8 @@ to this machine and shows tokens, estimated cost, and breakdowns by model / day 
 project / hour. Inventory, telemetry and the ledger stay on this machine by default. Separate
 user actions can share selected exports with paired devices, return requested analytics to an
 enabled local MCP client (which may forward tool results to a model provider), contact a provider
-for a confirmed account lookup, or fetch upstream update metadata after a clicked update check.
+for a confirmed account lookup, or fetch upstream release metadata after a clicked update check
+or release-notes load.
 An explicitly started saved server command can access the network with the user's permissions.
 Nothing to install.
 
@@ -30,6 +31,12 @@ first — it may already be up.
 directory; omitting it keeps the checkout-local paths. Native local clients use `/api/health`
 for readiness only and `/api/summary` for today's token count and estimated spend. Health
 must never include analytics records or project names.
+
+Release notes are separate from the usage ledger. `GET /api/release-notes` reads cached
+metadata offline; same-origin loopback `POST /api/release-notes` handles the baseline,
+display acknowledgement and explicit GitHub check. Never fetch on startup or polling.
+The first open seeds the baseline, and a later version is acknowledged only after display.
+See [docs/release-notes.md](docs/release-notes.md).
 
 ## Native clients and installation (v2.0)
 
@@ -128,12 +135,13 @@ accurately. Keep the existing public tag intact when adding packaging metadata/a
 
 | File | Role |
 |---|---|
-| `dashboard.py` | stdlib `http.server`. Serves `/`, `/static/*`, `/chart.js`, `/manifest.json`, `/sw.js`, `/api/{data,storage,refresh,settings,cache,update,devices}`. Owns the cache, the aggregate merge, `_cost()` and the device sharing listener. |
+| `dashboard.py` | stdlib `http.server`. Serves `/`, `/static/*`, `/chart.js`, `/manifest.json`, `/sw.js`, `/api/{data,storage,refresh,settings,cache,update,release-notes,devices}`. Owns the cache, the aggregate merge, `_cost()` and the device sharing listener. |
 | `parser.py` | `discover()` lists log files; `update_file()` routes each to a `parse_*`. Holds `PRICING` and the model-name normalizers. |
 | `static/core.js` | `SRC`/`ORDER`, state `S`, formatting, date ranges, filtering. |
 | `static/tool-icons/` | Bundled tool/provider SVG marks, pinned sources and licenses. |
 | `session_names.py` | Warning previews, private title backups and verified original-tool renames. |
 | `accounts.py` | Private account observations, optional read-only CLI account queries and Claude status-line capture. |
+| `release_notes.py` | Private cached GitHub release metadata and one-time first-open acknowledgement state; network access is explicit. |
 | `static/charts.js` | Chart.js theming, `mk()`/`hbar()`/`areaDS()`, calendar + heatmap SVG. |
 | `static/views.js` | The eight views, controls, events, boot. |
 | `mcp_server.py` | Local stdio MCP bridge; read-only, authenticated loopback queries. |

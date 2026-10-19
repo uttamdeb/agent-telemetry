@@ -18,6 +18,7 @@ ALLOWED_MODULES = {
     "local_servers_windows",
     "native",
     "parser",
+    "release_notes",
     "session_names",
     "mcp_access",
     "mcp_backend",

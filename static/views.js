@@ -1527,13 +1527,21 @@ function renderVersion(){
   const title = v.git ? `${v.describe||v.commit} · ${v.branch} · committed ${v.date}`
     : v.describe ? `Packaged build ${v.describe}` : "not a git checkout";
   let action = "";
-  if(!v.git) action = "";
+  if(!v.git){
+    if(UPD && UPD.busy) action = `<span class="dim">${esc(UPD.busy)}</span>`;
+    else if(UPD && UPD.error && typeof releaseNotesLink==="function") action = `<span class="ver-err" title="${esc(UPD.error)}">${esc(UPD.error)}</span> <button class="link" data-upd="check">Retry</button>`;
+    else if(UPD && UPD.error) action = `<span class="ver-err" title="${esc(UPD.error)}">${esc(UPD.error)}</span>`;
+    else if(UPD && typeof releaseNotesDownloadAction==="function" && releaseNotesDownloadAction(UPD)) action = releaseNotesDownloadAction(UPD);
+    else if(UPD) action = `<span class="dim">Up to date · </span><button class="link" data-upd="check">Check for updates</button>`;
+    else action = `<button class="link" data-upd="check">Check for updates</button>`;
+  }
   else if(UPD && UPD.busy) action = `<span class="dim">${esc(UPD.busy)}</span>`;
   else if(UPD && UPD.error) action = `<span class="ver-err" title="${esc(UPD.error)}">${esc(UPD.error)}</span> <button class="link" data-upd="check">Retry</button>`;
   else if(UPD && UPD.behind) action = `<button class="btn sm primary" data-upd="apply" title="${esc(UPD.changes.join("\n"))}">Update · ${UPD.behind} new</button>`;
   else if(UPD) action = `<span class="dim">Up to date · </span><button class="link" data-upd="check">Check for updates</button>`;
   else action = `<button class="link" data-upd="check">Check for updates</button>`;
-  el.innerHTML = `<span class="ver" title="${esc(title)}">${esc(versionLabel(v))}</span>${action?`<span class="ver-a">${action}</span>`:""}`;
+  const notesLink=typeof releaseNotesLink==="function"?releaseNotesLink():"";
+  el.innerHTML = `<span class="ver" title="${esc(title)}">${esc(versionLabel(v))}</span>${action?`<span class="ver-a">${action}</span>`:""}${notesLink}`;
 }
 async function updateAction(action){
   UPD = {busy: action==="apply" ? "Updating…" : "Checking…"}; renderVersion();
@@ -1554,6 +1562,7 @@ async function updateAction(action){
     }
     UPD = out;
     if(out.current && RAW) RAW.version = out.current;   // a new tag on this same commit
+    if(out.release_notes && typeof releaseNotesSnapshot==="function") releaseNotesSnapshot(out.release_notes);
   }catch(e){ UPD = {error: String(e.message||e)}; }
   renderVersion();
 }
@@ -2908,6 +2917,7 @@ async function load(){
     for(const id of [...S.devs]) if(!devices().some(v=>v.id===id)) S.devs.delete(id);
     document.getElementById("pricingNote").textContent=RAW.pricing_note;
     renderAll();
+    if(RAW.meta&&!RAW.meta.building&&typeof checkForReleaseNotes==="function") checkForReleaseNotes();
     return true;
   }catch(e){
     console.error(e);

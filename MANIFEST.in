@@ -13,6 +13,7 @@ include session_timeline.py
 include local_servers.py
 include local_servers_windows.py
 include parser.py
+include release_notes.py
 include native.py
 include accounts.py
 include session_names.py
@@ -29,6 +30,7 @@ include manifest.json
 include sw.js
 include docs/python-package.md
 include docs/mcp.md
+include docs/release-notes.md
 include static/app.css
 include static/apple-touch-icon.png
 include static/charts.js
@@ -37,6 +39,7 @@ include static/icon-192.png
 include static/icon-512.png
 include static/insights.js
 include static/maintenance.js
+include static/release-notes.js
 include static/mcp.js
 include static/timeline.js
 include static/tool-icons/LICENSE.hermes.txt
@@ -62,4 +65,4 @@ prune dist
 prune .usage_cache.json
 prune .usage-backups
 prune .peers
-global-exclude .usage_cache.json .usage_cache.json.tmp .peers.json server.log project-names.json *.py[cod]
+global-exclude .usage_cache.json .usage_cache.json.tmp .peers.json server.log project-names.json release-notes.json release-notes.lock .release-notes-*.tmp *.py[cod]
