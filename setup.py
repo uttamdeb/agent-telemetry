@@ -14,6 +14,7 @@ ALLOWED_MODULES = {
     "ledger_backups",
     "diagnostics",
     "session_timeline",
+    "native_activity",
     "local_servers",
     "local_servers_windows",
     "native",

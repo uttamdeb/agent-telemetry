@@ -147,6 +147,7 @@ accurately. Keep the existing public tag intact when adding packaging metadata/a
 | `mcp_server.py` | Local stdio MCP bridge; read-only, authenticated loopback queries. |
 | `mcp_backend.py`, `telemetry_query.py`, `telemetry_insights.py` | Authenticated MCP dispatch and shared analytics. |
 | `mcp_access.py`, `mcp_protocol.py`, `mcp_tools.py` | Local consent/credentials, protocol compatibility and tool contracts. |
+| `native_activity.py` | Pure, bounded projection for native clients' recent local-session list. |
 | `index.html` | Shell only: sidebar (device name, tabs, live/refresh/theme/settings), page header (period, range, metric, filters), card markup, an SVG icon sprite. |
 
 Eight tabs in the sidebar: Overview · Cost · Models · Tools · Projects · Sessions ·
@@ -430,6 +431,23 @@ Claude's documented five_hour/seven_day status-line fields in AgentTelemetryNati
 outside the ledger; missing fields replace older captures. Never edit a user's status
 line automatically. See docs/account-limits.md for verified sources and limitations.
 Use tests/preview_accounts.py for web checks with mock data only.
+
+`native_activity.py` projects at most three newest local sessions active in the
+last 15 minutes for `GET /api/native-activity`. It reads only retained aggregates
+under `_refresh_lock`, applies `_one_per_conversation`, and never scans logs,
+refreshes the ledger, or adds a cache field. The endpoint is loopback- and
+origin-guarded; health, summary and peer exports do not include its rows. Each
+`last_activity_at` is a source session end time, while `tokens` is that session's
+lifetime recorded input + output + cache-read + cache-write total. It is not a
+current-context or 15-minute token count. Missing or invalid counts remain
+unavailable (`null`); inclusive Copilot SDK child breakdowns are not separate
+rows. Titles are bounded and read only from the parser's retained session-title
+field, which may be a short prompt-derived display title; raw messages are never
+read or returned. The key is an opaque hash of the source identity and normalized
+source path, never the displayed short id. `provider` is a tool-vendor label for
+Claude, Codex, Copilot, and Cursor, not a billed-model provider; it is null for
+tools with multiple model providers. The Windows and macOS clients use the
+existing guarded `GET /api/local-servers` for the separate local server list.
 
 ## What the logs cannot show
 

@@ -5,7 +5,7 @@
 module.exports = Object.freeze([
   'dashboard.py', 'editor_snapshot.py', 'parser.py', 'native.py',
   'session_names.py', 'accounts.py', 'release_notes.py', 'local_servers.py',
-  'local_servers_windows.py', 'ledger_backups.py', 'session_timeline.py',
+  'local_servers_windows.py', 'ledger_backups.py', 'session_timeline.py', 'native_activity.py',
   'diagnostics.py', 'mcp_access.py', 'mcp_backend.py', 'mcp_protocol.py',
   'mcp_server.py', 'mcp_tools.py', 'telemetry_query.py', 'telemetry_insights.py',
   'index.html', 'chart.umd.min.js', 'manifest.json', 'sw.js',

@@ -26,6 +26,7 @@ if __package__:
     from . import ledger_backups as LB
     from . import diagnostics as DG
     from . import session_timeline as ST
+    from . import native_activity as NA
     from . import editor_snapshot as ES
     from . import release_notes as RN
     from .local_servers import LocalServerInventory
@@ -40,6 +41,7 @@ else:
     import ledger_backups as LB
     import diagnostics as DG
     import session_timeline as ST
+    import native_activity as NA
     import editor_snapshot as ES
     import release_notes as RN
     from local_servers import LocalServerInventory
@@ -607,6 +609,29 @@ def build_session_timeline(device, source, session_id, date_from=None, date_to=N
     child = SN.claude_child_identity(path) if source == "claude" else ""
     transcript_id = child.split("/", 1)[0] if child == session_id else session_id
     return ST.timeline(source, path, transcript_id, date_from=date_from, date_to=date_to, view=view)
+
+
+def build_native_activity(observed_at=None):
+    """Project a short, private summary from retained local session aggregates."""
+    local_device = _local_id_readonly()
+    with _refresh_lock:
+        items = [(path, aggregate) for path, aggregate in _state["files"].items()
+                 if NA.is_local_live_aggregate(aggregate, local_device)]
+        path_by_object = {id(aggregate): path for path, aggregate in items}
+        unique = _one_per_conversation(items)
+        local_items = [(path_by_object.get(id(aggregate), aggregate.get("path", "")), aggregate)
+                       for aggregate in unique]
+        snapshot = NA.project(local_items, observed_at=observed_at,
+                              identity=SN.identity, local_device=local_device)
+    names = {}
+    if NA.has_display_aliases(snapshot):
+        try:
+            # Private name preferences are read only for eligible local children,
+            # after releasing the parser lock.
+            names = SN.display_names()
+        except (OSError, ValueError):
+            names = {}
+    return NA.apply_display_aliases(snapshot, names, SN.display_name)
 
 
 # ---------------------------------------------------------------------------
@@ -2086,6 +2111,24 @@ def _local_id():
     return _peer_cfg()["device_id"]
 
 
+def _local_id_readonly():
+    """Read an existing local device id without creating peer preferences."""
+    with _peer_lock:
+        cfg = _peer.get("cfg")
+        if isinstance(cfg, dict) and _ID_RE.fullmatch(str(cfg.get("device_id") or "")):
+            return cfg["device_id"]
+        try:
+            with open(PEERS_PATH, "rb") as stream:
+                raw = stream.read(65537)
+            if len(raw) > 65536:
+                return None
+            value = json.loads(raw.decode("utf-8"))
+        except (OSError, ValueError, UnicodeError):
+            return None
+        device = value.get("device_id") if isinstance(value, dict) else None
+        return device if isinstance(device, str) and _ID_RE.fullmatch(device) else None
+
+
 def _mirror_path(pid):
     return os.path.join(PEER_DIR, pid + ".json")
 
@@ -2679,6 +2722,14 @@ class Handler(BaseHTTPRequestHandler):
             self._send(405, json.dumps({"error": "use POST with MCP authorization"}))
         elif route == "/api/native":
             self._send(200, json.dumps(N.status()))
+        elif route == "/api/native-activity":
+            if not self._loopback_client():
+                self._send(403, json.dumps({"error": "recent session details are available only on this machine"}))
+                return
+            try:
+                self._send(200, json.dumps(build_native_activity(), allow_nan=False))
+            except Exception:
+                self._send(500, json.dumps({"error": "Recent session activity is temporarily unavailable."}))
         elif route == "/api/sync":
             self._send(200, json.dumps(refresh_sync()))
         elif route == "/api/accounts":
