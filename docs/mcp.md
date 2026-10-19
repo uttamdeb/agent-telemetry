@@ -63,6 +63,11 @@ Use `list_sessions` first, then pass only one returned opaque selector to `get_s
 
 ## Protocol and dependencies
 
+The MCP bridge ships with the AgentTelemetry application and Python package. Its server
+version reported during initialization and by `--version` follows the AgentTelemetry
+application release; it is **2.1.0** in this release. This is separate from the negotiated
+MCP protocol versions below.
+
 The bridge supports MCP protocol versions `2026-07-28`, `2025-11-25` and `2025-06-18`. It uses stdio only. The dashboard's authenticated `/api/mcp/query` route is a private loopback backend for the bridge, not a Streamable HTTP MCP endpoint; do not configure it as a remote MCP server. Stdio carries one newline-delimited JSON-RPC message per line; JSON-RPC batch arrays are not accepted.
 
 The Python wheel and source distribution include the bridge modules and Settings' MCP client assets. In a package install, `python -m agent_telemetry.mcp_server --help` and `--version` inspect the bridge without starting it or creating user files. Settings still generates the direct bridge command for the active Python executable; start the dashboard explicitly before connecting the MCP client.

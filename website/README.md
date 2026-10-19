@@ -1,7 +1,7 @@
 # AgentTelemetry landing page
 
-This directory is a standalone, static marketing page for the AgentTelemetry 2.0.0 app
-and the 2.0.1 desktop editor extension. It does not start or connect to the dashboard
+This directory is a standalone, static marketing page for the AgentTelemetry 2.1.0 app
+and the 2.1.0 desktop editor extension. It does not start or connect to the dashboard
 and contains no personal usage records. Dashboard figures shown in the interactive
 preview are illustrative sample data written directly in the page.
 
@@ -30,18 +30,19 @@ settings with the source. Keep API tokens outside the repository and deployment 
 
 ## Hosting and downloads
 
-The files are ready to host as a static site. Download links point to the existing
-AgentTelemetry v2.0.0 release: macOS 13+ Apple Silicon and Intel DMGs, and a Windows
+The files are ready to host as a static site. Download links point to the AgentTelemetry
+v2.1.0 release: macOS 13+ Apple Silicon and Intel DMGs, and a Windows
 10/11 x64 installer. Those downloads are unsigned/unnotarized; see the repository README
 for installation notes and checksums. The hero install chooser works without JavaScript
 and links to those assets, the editor card, and the Linux/source alternative. The
-editor card links to the [Visual Studio Marketplace extension](https://marketplace.visualstudio.com/items?itemName=agenttelemetry-team.agenttelemetry)
-and the [universal 2.0.1 VSIX](https://github.com/uttamdeb/agent-telemetry/releases/download/v2.0.0/agenttelemetry-2.0.1.vsix)
+editor card links to the [Visual Studio Marketplace extension](https://marketplace.visualstudio.com/items?itemName=agenttelemetry-team.agenttelemetry),
+the [Open VSX extension](https://open-vsx.org/extension/agenttelemetry-team/agenttelemetry),
+and the [universal 2.1.0 VSIX](https://github.com/uttamdeb/agent-telemetry/releases/download/v2.1.0/agenttelemetry-2.1.0.vsix)
 with its desktop editor install guide. It supports desktop VS Code 1.85+ and compatible
 desktop forks. Starting local monitoring from the editor needs Python 3.9+ or a supported
 installed AgentTelemetry runtime; the extension does not bundle or install Python or
-start monitoring automatically. The dashboard/native app version remains 2.0.0;
-the immutable PyPI distribution revision is [agenttelemetry-app 2.0.0.post1](https://pypi.org/project/agenttelemetry-app/2.0.0.post1/).
+start monitoring automatically. The dashboard/native app version remains 2.1.0;
+the immutable PyPI distribution revision is [agenttelemetry-app 2.1.0](https://pypi.org/project/agenttelemetry-app/2.1.0/).
 The source card and FAQ lead with `pip install agenttelemetry-app`, followed by the
 `agenttelemetry` launch step; `uvx agenttelemetry-app` is a secondary disclosure. Both
 source commands have copy controls.
