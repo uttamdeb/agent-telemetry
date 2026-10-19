@@ -65,11 +65,16 @@ struct MacNativeRegression {
         precondition(!afterExpiry.contains { $0.key == recentActivity.sessions[0].key },
                      "The native client must age the list out locally after fifteen minutes")
         print("PASS recent-activity payload decoding, tool branding, subagent and lifetime-token semantics")
-        func captureRecentActivity(_ name: String) throws {
+        func log(_ message: String) {
+            print(message)
+            fflush(stdout)
+        }
+        func captureRecentActivity(_ name: String, dark: Bool = false) throws {
             guard CommandLine.arguments.count > 3 else { return }
             let directory = URL(fileURLWithPath: CommandLine.arguments[3])
             let layout = MenuBarPopoverLayout()
             layout.maximumScrollHeight = 400
+            let background = NSColor(calibratedWhite: dark ? 0.13 : 0.94, alpha: 1)
             let preview = StatusMenu(
                 backend: backend,
                 settings: settings,
@@ -82,22 +87,37 @@ struct MacNativeRegression {
                 quit: {},
                 onDisclosureChange: { _ in }
             )
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .background(Color(nsColor: background))
             let host = NSHostingView(rootView: preview)
             host.frame = NSRect(x: 0, y: 0, width: 310, height: 720)
             let previewWindow = NSWindow(contentRect: host.frame, styleMask: [.borderless],
                                          backing: .buffered, defer: false)
+            previewWindow.isReleasedWhenClosed = false
+            previewWindow.isOpaque = true
+            previewWindow.backgroundColor = background
+            previewWindow.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+            host.appearance = previewWindow.appearance
             previewWindow.contentView = host
             previewWindow.orderFrontRegardless()
             previewWindow.displayIfNeeded()
             host.layoutSubtreeIfNeeded()
             let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds)!
             host.cacheDisplay(in: host.bounds, to: bitmap)
+            let corner = bitmap.colorAt(x: 0, y: 0)!.usingColorSpace(.deviceRGB)!
+            precondition(corner.alphaComponent > 0.99,
+                         "Native preview images must include an opaque theme background")
             try bitmap.representation(using: .png, properties: [:])!
                 .write(to: directory.appendingPathComponent(name))
+            log("Captured \(name)")
             previewWindow.close()
+            log("Closed preview window for \(name)")
         }
         try captureRecentActivity("mac-recent-activity.png")
+        try captureRecentActivity("mac-recent-activity-dark.png", dark: true)
+        log("PASS opaque light and dark recent-activity previews")
 
+        log("Starting short-screen popover layout check")
         let compactLayout = MenuBarPopoverLayout()
         let compactPreview = StatusMenu(
             backend: backend,
@@ -111,7 +131,9 @@ struct MacNativeRegression {
             quit: {},
             onDisclosureChange: { _ in }
         )
+        .background(Color(nsColor: NSColor(calibratedWhite: 0.94, alpha: 1)))
         let compactHost = NSHostingView(rootView: compactPreview)
+        compactHost.appearance = NSAppearance(named: .aqua)
         compactHost.frame = NSRect(x: 0, y: 0, width: 310, height: 900)
         compactLayout.maximumScrollHeight = 360
         compactHost.layoutSubtreeIfNeeded()
@@ -125,10 +147,16 @@ struct MacNativeRegression {
         precondition(compactSize.height <= 320.5 && compactSize.height > compactLayout.maximumScrollHeight,
                      "The scroll region and fixed dashboard/footer controls must fit inside the small-screen work area")
         if CommandLine.arguments.count > 3 {
+            let compactBackground = NSColor(calibratedWhite: 0.94, alpha: 1)
+            compactHost.wantsLayer = true
+            compactHost.layer?.backgroundColor = compactBackground.cgColor
             compactHost.frame = NSRect(origin: .zero, size: compactSize)
             compactHost.layoutSubtreeIfNeeded()
             let bitmap = compactHost.bitmapImageRepForCachingDisplay(in: compactHost.bounds)!
             compactHost.cacheDisplay(in: compactHost.bounds, to: bitmap)
+            let corner = bitmap.colorAt(x: 0, y: 0)!.usingColorSpace(.deviceRGB)!
+            precondition(corner.alphaComponent > 0.99,
+                         "Compact native preview must include an opaque theme background")
             try bitmap.representation(using: .png, properties: [:])!
                 .write(to: URL(fileURLWithPath: CommandLine.arguments[3])
                     .appendingPathComponent("mac-recent-activity-compact.png"))
@@ -401,6 +429,7 @@ struct MacNativeRegression {
         host.frame = NSRect(x: 0, y: 0, width: 900, height: 700)
         let window = NSWindow(contentRect: host.frame, styleMask: [.titled], backing: .buffered, defer: false)
         window.contentView = host
+        window.isReleasedWhenClosed = false
         host.layoutSubtreeIfNeeded()
         try await Task.sleep(nanoseconds: 1_000_000_000)
         func findWebView(_ view: NSView) -> WKWebView? {
