@@ -13,12 +13,15 @@ From the repository root, run:
 python3 -m http.server 8788 --bind 127.0.0.1 --directory website
 ```
 
-Then open <http://127.0.0.1:8788>. The page has no build step, package install, runtime
-dependencies, analytics, API calls, or remote fonts, scripts, or images. Its JavaScript
-handles the mobile menu, sample-dashboard views and window controls, command copying, and
-scroll reveals, sample-number entrances, animated disclosures and optional ambient
-motion. All page assets are served from this directory. CSS and JavaScript URLs carry
-content versions so browser caches do not hide preview updates.
+Then open <http://127.0.0.1:8788>. The page has no build step, package install, or
+runtime app dependencies. It uses the same Google Analytics 4 property as uttamdeb.com
+to measure marketing-page visits; standard page-view details, including the page URL,
+are sent to Google. It makes no AgentTelemetry API calls and does not send app usage,
+logs, or dashboard data. Its JavaScript handles the mobile menu, sample-dashboard views
+and window controls, command copying, and scroll reveals, sample-number entrances,
+animated disclosures and optional ambient motion. All non-analytics page assets are
+served from this directory. CSS and JavaScript URLs carry content versions so browser
+caches do not hide preview updates.
 
 ## Vercel hosting
 
@@ -58,9 +61,10 @@ confirms it. The stdio MCP bridge is off by default, requires a running dashboar
 returns requested analytics to the configured client after the user enables access in
 Settings. A cloud-backed client may forward those results to its provider. Project/device
 display names and connected-device usage have separate opt-ins; MCP results exclude
-prompts, session titles, native IDs, paths, credentials, and account identities. The editor extension
-shows recorded usage and does not start monitoring on installation or opening. The
-marketing preview does none of these things and never reads a real ledger.
+prompts, session titles, native IDs, paths, credentials, and account identities. The editor
+extension shows recorded usage and does not start monitoring on installation or opening.
+The marketing page uses Google Analytics only for page-visit measurement; it does not
+read the ledger or send product telemetry, logs, or dashboard data.
 
 ## Assets
 
@@ -132,7 +136,7 @@ its full design.
 - Check download links, text contrast, and both regular and reduced-motion settings.
   With JavaScript disabled, verify the navigation, sample panels, native install chooser,
   source command and uvx disclosure, and page content remain readable. The preview
-  should not contact the dashboard or send analytics requests.
+  should not contact the dashboard; Google Analytics page-view requests are expected.
 - Check normal-motion entrances, sample counters, chart drawing, sliding tab selection,
   accordion opening/closing and button feedback. Rapidly toggle a disclosure and change
   reduced-motion preference while it animates; final native open/closed state must agree
