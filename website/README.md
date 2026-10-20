@@ -15,13 +15,22 @@ python3 -m http.server 8788 --bind 127.0.0.1 --directory website
 
 Then open <http://127.0.0.1:8788>. The page has no build step, package install, or
 runtime app dependencies. It uses the same Google Analytics 4 property as uttamdeb.com
-to measure marketing-page visits; standard page-view details, including the page URL,
-are sent to Google. It makes no AgentTelemetry API calls and does not send app usage,
+to measure marketing-page visits and install interactions; standard page-view details,
+including the page URL, are sent to Google. It makes no AgentTelemetry API calls and does not send app usage,
 logs, or dashboard data. Its JavaScript handles the mobile menu, sample-dashboard views
 and window controls, command copying, and scroll reveals, sample-number entrances,
 animated disclosures and optional ambient motion. All non-analytics page assets are
 served from this directory. CSS and JavaScript URLs carry content versions so browser
 caches do not hide preview updates.
+
+## Analytics events
+
+The marketing page sends `at_install_cta_click`, `at_install_option_click`,
+`at_install_menu_open`, and `at_install_command_copy` to GA4. Install events use
+fixed option, method, placement, destination, release asset, and version parameters
+where applicable; they measure interactions, not completed installations. The `at_`
+prefix distinguishes these events in the shared property. Previously collected
+unprefixed events remain historical data; new interactions use only the prefixed names.
 
 ## Vercel hosting
 
@@ -63,7 +72,7 @@ Settings. A cloud-backed client may forward those results to its provider. Proje
 display names and connected-device usage have separate opt-ins; MCP results exclude
 prompts, session titles, native IDs, paths, credentials, and account identities. The editor
 extension shows recorded usage and does not start monitoring on installation or opening.
-The marketing page uses Google Analytics only for page-visit measurement; it does not
+The marketing page uses Google Analytics for visits and install interactions; it does not
 read the ledger or send product telemetry, logs, or dashboard data.
 
 ## Assets
