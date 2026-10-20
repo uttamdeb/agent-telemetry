@@ -11,8 +11,9 @@ for (const [filename, source] of [['analytics.js', analytics], ['site.js', site]
   const expected = require('crypto').createHash('sha256').update(source).digest('hex').slice(0, 12);
   assert.match(html, new RegExp(`${filename}\\?v=${expected}`), `${filename} must use a content-derived cache key`);
 }
-assert.match(html, /data-analytics-event="install_option_click"/);
-assert.match(html, /data-analytics-event="install_cta_click"/);
+assert.match(html, /data-analytics-event="at_install_option_click"/);
+assert.match(html, /data-analytics-event="at_install_cta_click"/);
+assert.doesNotMatch(html, /data-analytics-event="(?!at_)/, 'all landing-page events use the AT namespace');
 assert.match(html, /data-analytics-option="macos_arm64"/);
 assert.match(html, /data-analytics-option="macos_intel"/);
 assert.match(html, /data-analytics-option="windows_x64"/);
@@ -25,7 +26,7 @@ assert.match(html, /data-release-asset="AgentTelemetry-2\.1\.0-windows-x64-setup
 assert.match(html, /install interactions, including opening the install chooser, which install option and page placement/);
 assert.ok(html.indexOf("gtag('config'") < html.indexOf('analytics.js?'), 'the analytics helper loads after the GA tag setup');
 assert.ok(html.indexOf('analytics.js?') < html.indexOf('site.js?'), 'the analytics helper loads before interaction code');
-assert.match(site, /install_command_copy/);
+assert.match(site, /at_install_command_copy/);
 assert.doesNotMatch(analytics, /link_url|command_text|textContent/);
 
 function makeContext({ hasGtag = true } = {}) {
@@ -55,11 +56,25 @@ function clickEvent(link, extra = {}) {
 
 {
   const ctx = makeContext();
+  const eventNames = [
+    'at_install_cta_click', 'at_install_option_click',
+    'at_install_menu_open', 'at_install_command_copy',
+  ];
+  for (const eventName of eventNames) {
+    ctx.window.AgentTelemetryAnalytics.track(eventName);
+    ctx.window.AgentTelemetryAnalytics.track(eventName.slice(3));
+  }
+  assert.deepEqual(ctx.calls.map((call) => call[1]), eventNames,
+    'emit each prefixed event once and reject unprefixed event names');
+}
+
+{
+  const ctx = makeContext();
   const link = {
     href: 'https://github.com/uttamdeb/agent-telemetry/releases/download/v2.1.0/AgentTelemetry-2.1.0-macos-arm64.dmg',
     target: '',
     dataset: {
-      analyticsEvent: 'install_option_click',
+      analyticsEvent: 'at_install_option_click',
       analyticsOption: 'macos_arm64',
       analyticsPlacement: 'hero_menu',
       analyticsDestination: 'github_release',
@@ -71,7 +86,7 @@ function clickEvent(link, extra = {}) {
   ctx.listeners.click(event);
   assert.equal(event.defaultPrevented, true, 'same-tab downloads wait briefly for GA delivery');
   assert.equal(ctx.calls[0][0], 'event');
-  assert.equal(ctx.calls[0][1], 'install_option_click');
+  assert.equal(ctx.calls[0][1], 'at_install_option_click');
   assert.deepEqual({ ...ctx.calls[0][2], event_callback: undefined, event_timeout: undefined }, {
     install_option: 'macos_arm64',
     placement: 'hero_menu',
@@ -94,12 +109,12 @@ function clickEvent(link, extra = {}) {
   const link = {
     href: 'https://open-vsx.org/extension/agenttelemetry-team/agenttelemetry',
     target: '_blank',
-    dataset: { analyticsEvent: 'install_option_click', analyticsOption: 'open_vsx', analyticsPlacement: 'download_section' },
+    dataset: { analyticsEvent: 'at_install_option_click', analyticsOption: 'open_vsx', analyticsPlacement: 'download_section' },
   };
   const event = clickEvent(link);
   ctx.listeners.click(event);
   assert.equal(event.defaultPrevented, false, 'new-tab marketplace links keep their normal behavior');
-  assert.equal(ctx.calls[0][1], 'install_option_click');
+  assert.equal(ctx.calls[0][1], 'at_install_option_click');
   assert.equal(ctx.calls[0][2].install_option, 'open_vsx');
 }
 
@@ -108,7 +123,7 @@ function clickEvent(link, extra = {}) {
   const link = {
     href: 'https://github.com/uttamdeb/agent-telemetry/releases/download/v2.1.0/asset.exe',
     target: '',
-    dataset: { analyticsEvent: 'install_option_click', analyticsOption: 'windows_x64' },
+    dataset: { analyticsEvent: 'at_install_option_click', analyticsOption: 'windows_x64' },
   };
   const event = clickEvent(link);
   ctx.listeners.click(event);
@@ -118,13 +133,13 @@ function clickEvent(link, extra = {}) {
 
 {
   const ctx = makeContext();
-  ctx.window.AgentTelemetryAnalytics.track('install_command_copy', {
+  ctx.window.AgentTelemetryAnalytics.track('at_install_command_copy', {
     install_option: 'python_package',
     install_method: 'pip',
     placement: 'faq',
     command_text: 'pip install private-example',
   });
-  assert.equal(ctx.calls[0][1], 'install_command_copy');
+  assert.equal(ctx.calls[0][1], 'at_install_command_copy');
   assert.deepEqual({ ...ctx.calls[0][2] }, {
     install_option: 'python_package', install_method: 'pip', placement: 'faq',
   }, 'copy events include only the fixed command method, option, and placement');

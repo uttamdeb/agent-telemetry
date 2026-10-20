@@ -50,7 +50,7 @@
     installMenus.forEach((menu) => {
       menu.addEventListener("toggle", () => {
         if (menu.open) {
-          window.AgentTelemetryAnalytics?.track("install_menu_open", { placement: "hero" });
+          window.AgentTelemetryAnalytics?.track("at_install_menu_open", { placement: "hero" });
         }
       });
 
@@ -304,7 +304,7 @@
         announce("The command is unavailable.");
         return;
       }
-      window.AgentTelemetryAnalytics?.track("install_command_copy", {
+      window.AgentTelemetryAnalytics?.track("at_install_command_copy", {
         install_option: button.dataset.analyticsOption,
         install_method: button.dataset.analyticsMethod,
         placement: button.dataset.analyticsPlacement,
