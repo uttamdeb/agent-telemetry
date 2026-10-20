@@ -20,11 +20,13 @@ Covers **Claude Code · Claude Desktop · Codex · GitHub Copilot · Cursor · O
 
 ## Download the app
 
-| Platform | Download |
+Choose the installer for your platform from the release's **Assets** section.
+
+| Platform | Release downloads |
 | --- | --- |
-| macOS 13+ · Apple Silicon | **[Download DMG](https://github.com/uttamdeb/agent-telemetry/releases/download/v2.1.0/AgentTelemetry-2.1.0-macos-arm64.dmg)** |
-| macOS 13+ · Intel | **[Download DMG](https://github.com/uttamdeb/agent-telemetry/releases/download/v2.1.0/AgentTelemetry-2.1.0-macos-x86_64.dmg)** |
-| Windows 10/11 · x64 | **[Download EXE installer](https://github.com/uttamdeb/agent-telemetry/releases/download/v2.1.0/AgentTelemetry-2.1.0-windows-x64-setup.exe)** |
+| macOS 13+ · Apple Silicon | **[Find the Apple Silicon DMG](https://github.com/uttamdeb/agent-telemetry/releases/latest)** |
+| macOS 13+ · Intel | **[Find the Intel DMG](https://github.com/uttamdeb/agent-telemetry/releases/latest)** |
+| Windows 10/11 · x64 | **[Find the Windows EXE installer](https://github.com/uttamdeb/agent-telemetry/releases/latest)** |
 
 **Python is bundled — no terminal setup needed.** macOS: open the DMG, drag the app to
 Applications and open it. Windows: run the installer and open AgentTelemetry from Start.
@@ -40,7 +42,7 @@ Security → Open Anyway**; Windows SmartScreen may require **More info → Run 
 [Product and install page](https://agenttelemetry-app.vercel.app/) ·
 [All releases](https://github.com/uttamdeb/agent-telemetry/releases) ·
 [What's new in 2.1.0](docs/releases/v2.1.0.md) ·
-[SHA-256 checksums](https://github.com/uttamdeb/agent-telemetry/releases/download/v2.1.0/SHA256SUMS.txt) ·
+[SHA-256 checksums in release assets](https://github.com/uttamdeb/agent-telemetry/releases/latest) ·
 [PyPI package 2.1.0](https://pypi.org/project/agenttelemetry-app/2.1.0/)
 
 ---
