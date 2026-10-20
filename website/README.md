@@ -41,7 +41,7 @@ and links to those assets, the editor card, and the Linux/source alternative. Li
 the browser dashboard; a native tray app is available for macOS and Windows. The editor
 card links to the [Visual Studio Marketplace extension](https://marketplace.visualstudio.com/items?itemName=agenttelemetry-team.agenttelemetry),
 the [Open VSX extension](https://open-vsx.org/extension/agenttelemetry-team/agenttelemetry),
-and the [universal 2.1.0 VSIX](https://github.com/uttamdeb/agent-telemetry/releases/download/v2.1.0/agenttelemetry-2.1.0.vsix)
+and the [universal VSIX in GitHub Releases](https://github.com/uttamdeb/agent-telemetry/releases/latest)
 with its desktop editor install guide. It supports desktop VS Code 1.85+ and compatible
 desktop forks. Starting local monitoring from the editor needs Python 3.9+ or a supported
 installed AgentTelemetry runtime; the extension does not bundle or install Python or

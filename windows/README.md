@@ -1,7 +1,7 @@
 # AgentTelemetry for Windows
 
 The native notification-area app uses Python's standard library (`ctypes`) and
-Windows APIs. The [Windows x64 EXE installer](https://github.com/uttamdeb/agent-telemetry/releases/download/v2.1.0/AgentTelemetry-2.1.0-windows-x64-setup.exe)
+Windows APIs. The [Windows x64 EXE installer in GitHub Releases](https://github.com/uttamdeb/agent-telemetry/releases/latest)
 includes Python and supports Windows 10/11; no separate Python installation is needed.
 There are no pip packages, Electron runtime or additional GUI toolkit. The EXE is
 unsigned, so SmartScreen may show a first-run warning (**More info → Run anyway**).
