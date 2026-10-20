@@ -2,10 +2,10 @@
   "use strict";
 
   const EVENTS = new Set([
-    "install_cta_click",
-    "install_command_copy",
-    "install_menu_open",
-    "install_option_click",
+    "at_install_cta_click",
+    "at_install_command_copy",
+    "at_install_menu_open",
+    "at_install_option_click",
   ]);
   const PARAMETERS = [
     "install_option",
