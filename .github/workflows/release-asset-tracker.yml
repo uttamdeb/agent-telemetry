@@ -1,0 +1,41 @@
+name: Snapshot release asset downloads
+
+on:
+  schedule:
+    - cron: '17 12 * * *'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Optional release tag (blank selects the latest stable release)
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-asset-tracker-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Fetch cumulative GitHub asset counts
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: python3 scripts/track_release_assets.py --output release-asset-downloads.json
+      - name: Save the dated snapshot for comparison
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-asset-downloads-${{ github.run_id }}
+          path: release-asset-downloads.json
+          if-no-files-found: error
+          retention-days: 90

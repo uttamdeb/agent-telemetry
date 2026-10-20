@@ -48,6 +48,12 @@
     });
 
     installMenus.forEach((menu) => {
+      menu.addEventListener("toggle", () => {
+        if (menu.open) {
+          window.AgentTelemetryAnalytics?.track("install_menu_open", { placement: "hero" });
+        }
+      });
+
       menu.addEventListener("click", (event) => {
         if (event.target.closest("a[href]")) menu.open = false;
       });
@@ -298,6 +304,11 @@
         announce("The command is unavailable.");
         return;
       }
+      window.AgentTelemetryAnalytics?.track("install_command_copy", {
+        install_option: button.dataset.analyticsOption,
+        install_method: button.dataset.analyticsMethod,
+        placement: button.dataset.analyticsPlacement,
+      });
 
       if (!navigator.clipboard || typeof navigator.clipboard.writeText !== "function") {
         manualCopy();
