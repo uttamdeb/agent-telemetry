@@ -6,6 +6,7 @@
   const EFFORT_LABELS = {none: 'None', minimal: 'Minimal', low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max', ultra: 'Ultra', unrecorded: 'Not recorded'};
   const n = value => typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : 0;
   const text = value => typeof value === 'string' ? value : '';
+  const QUALITY_STATES = new Set(['recorded', 'partial', 'unavailable', 'unknown']);
   const sourceLabel = source => SOURCE_LABELS[source] || text(source) || 'Unknown tool';
   const effortLabel = value => EFFORT_LABELS[value] || text(value) || 'Not recorded';
   function compact(value) {
@@ -28,9 +29,78 @@
     const date = new Date(value + 'T12:00:00');
     return Number.isFinite(date.getTime()) ? date.toLocaleDateString([], {month: 'short', day: 'numeric'}) : '';
   }
+  function usageState(value) {
+    if (value && QUALITY_STATES.has(value.usage_status)) return value.usage_status;
+    return value && value.source === 'cursor' ? 'unknown' : 'recorded';
+  }
+  function sessionUsageDisplay(session) {
+    const usage = usageState(session);
+    const costState = session && QUALITY_STATES.has(session.cost_status) ? session.cost_status : usage;
+    const tokens = ['unavailable', 'unknown'].includes(usage) ? '—' : compact(session && session.tokens);
+    const cost = costState === 'unavailable' ? 'Unavailable' : costState === 'unknown' ? 'Not recorded'
+      : costState === 'partial' ? 'Partial · ' + money(session && session.cost) : money(session && session.cost);
+    const tokenLabel = usage === 'unavailable' ? 'unavailable' : usage === 'unknown' ? 'coverage unknown'
+      : usage === 'partial' ? 'partial tokens' : 'recorded tokens';
+    const costLabel = costState === 'unavailable' ? 'unavailable' : costState === 'unknown' ? 'coverage unknown'
+      : costState === 'partial' ? 'partial estimate' : 'estimated API cost';
+    const notes = [];
+    if (usage === 'unavailable') notes.push('Token usage is unavailable in the recorded data. Zero fields are not a known zero.');
+    else if (usage === 'unknown') notes.push('Token coverage is not recorded for this older session entry. Zero fields are not a known zero.');
+    else if (usage === 'partial') notes.push('Recorded token usage is incomplete; the figures include recorded values only.');
+    if (costState === 'unavailable') notes.push('Estimated API cost is unavailable.');
+    else if (costState === 'unknown') notes.push('Estimated API cost coverage is not recorded.');
+    else if (costState === 'partial' && usage !== 'partial') notes.push('Only the cost of usage with a verified model and price is included.');
+    return {usage, costState, tokens, cost, tokenLabel, costLabel, note: notes.join(' ')};
+  }
+  function summaryUsageDisplay(summary) {
+    const usage = summary && QUALITY_STATES.has(summary.usage_status) ? summary.usage_status : 'recorded';
+    const costState = summary && QUALITY_STATES.has(summary.cost_status) ? summary.cost_status : usage;
+    const tokens = ['unavailable', 'unknown'].includes(usage) ? '—' : compact(summary && summary.tokens);
+    const cost = costState === 'unavailable' ? 'Unavailable' : costState === 'unknown' ? 'Not recorded'
+      : costState === 'partial' ? 'Partial · ' + money(summary && summary.cost) : money(summary && summary.cost);
+    const tokenLabel = usage === 'unavailable' ? 'usage unavailable' : usage === 'unknown' ? 'coverage not recorded'
+      : usage === 'partial' ? 'recorded tokens · partial' : 'tokens';
+    const notes = [];
+    if (usage === 'unavailable') notes.push('Token usage is unavailable for these sessions. Zero fields are not a known zero.');
+    else if (usage === 'unknown') notes.push('Token coverage is not recorded in an older session entry. Zero fields are not a known zero.');
+    else if (usage === 'partial') notes.push('Some session usage is partial or unavailable. Totals include recorded values only and may be lower bounds.');
+    if (costState === 'unavailable' && usage !== 'unavailable') notes.push('Estimated API cost is unavailable for some recorded usage.');
+    else if (costState === 'unknown' && usage !== 'unknown') notes.push('Estimated API cost coverage is not recorded for some sessions.');
+    else if (costState === 'partial' && usage === 'recorded') notes.push('Estimated API cost includes only usage with a verified model and price.');
+    return {usage, costState, tokens, cost, tokenLabel, note: notes.join(' ')};
+  }
+  function modelDisplay(session) {
+    const status = session && (session.model_status || session.response_model_status);
+    if (status === 'unavailable') return 'Unavailable';
+    if (status === 'unknown') return 'Not recorded';
+    const model = text(session && session.model);
+    if (!model || model === 'Unknown') return 'Unknown';
+    return status === 'partial' ? 'Partial · ' + model : model;
+  }
+  function contextSnapshot(session) {
+    const values = [];
+    if (Number.isSafeInteger(session && session.current_context_tokens) && session.current_context_tokens >= 0)
+      values.push(compact(session.current_context_tokens) + ' used');
+    if (typeof (session && session.current_context_percent) === 'number' && Number.isFinite(session.current_context_percent)
+        && session.current_context_percent >= 0 && session.current_context_percent <= 100)
+      values.push(session.current_context_percent.toLocaleString('en-US', {maximumFractionDigits: 1}) + '%');
+    if (Number.isSafeInteger(session && session.current_context_limit) && session.current_context_limit > 0)
+      values.push(compact(session.current_context_limit) + ' limit');
+    const asof = text(session && session.current_context_asof);
+    if (/^\d{4}-\d{2}-\d{2}(?:T|$)/.test(asof)) values.push('as of ' + shortDate(asof.slice(0, 10)));
+    return values.join(' · ');
+  }
   function composition(value) {
-    return [['input', 'Input'], ['output', 'Output'], ['cache_read', 'Cache read'], ['cache_write', 'Cache write']]
-      .map(([key, label]) => ({key, label, value: n(value[key])}));
+    const usage = usageState(value);
+    const availability = value && value.usage_availability && typeof value.usage_availability === 'object'
+      ? value.usage_availability : {};
+    return [['input', 'Input', 'input_output'], ['output', 'Output', 'input_output'],
+      ['cache_read', 'Cache read', 'cache_read'], ['cache_write', 'Cache write', 'cache_write']]
+      .map(([key, label, field]) => {
+        const fieldStatus = availability[field];
+        const status = QUALITY_STATES.has(fieldStatus) ? fieldStatus : usage;
+        return {key, label, status, value: ['unavailable', 'unknown'].includes(status) ? 0 : n(value[key])};
+      });
   }
   // Never infer an edge from titles, chronology, counts or tool identity.
   function forest(sessions) {
@@ -59,7 +129,8 @@
     return {byKey, parent, children, roots: [...byKey.values()].filter(session => !parent.has(session.key))};
   }
 
-  if (typeof module !== 'undefined' && module.exports) module.exports = {compact, money, composition, forest, effortLabel, sourceLabel};
+  if (typeof module !== 'undefined' && module.exports) module.exports = {compact, money, composition, forest,
+    effortLabel, sourceLabel, sessionUsageDisplay, summaryUsageDisplay, modelDisplay, contextSnapshot};
   if (typeof document === 'undefined') return;
 
   const api = acquireVsCodeApi();
@@ -149,9 +220,17 @@
     set('scope-caption', state.scope === 'all' ? 'LOCAL MACHINE BRIEF' : 'WORKSPACE BRIEF');
     set('workspace-title', label || (state.scope === 'all' ? 'All local projects' : 'Your recorded agent work'));
     set('date-label', snapshot ? shortDate(snapshot.from) + (snapshot.from !== snapshot.to ? ' — ' + shortDate(snapshot.to) : '') : RANGE_LABELS[state.range]);
-    set('total-tokens', summary ? compact(summary.tokens) : '—');
-    byId('total-tokens').title = summary ? n(summary.tokens).toLocaleString('en-US') + ' recorded tokens, including cache reads and writes' : 'Waiting for recorded usage';
-    set('total-cost', summary ? money(summary.cost) : '—');
+    const usageDisplay = summary ? summaryUsageDisplay(summary) : null;
+    set('total-tokens', usageDisplay ? usageDisplay.tokens : '—');
+    byId('total-tokens').title = !usageDisplay ? 'Waiting for recorded usage'
+      : ['unavailable', 'unknown'].includes(usageDisplay.usage) ? usageDisplay.note
+      : n(summary.tokens).toLocaleString('en-US') + ' recorded tokens, including cache reads and writes'
+        + (usageDisplay.usage === 'partial' ? ' · coverage is partial' : '');
+    const unit = document.querySelector('.hero-unit');
+    if (unit) unit.textContent = usageDisplay ? usageDisplay.tokenLabel : 'tokens';
+    set('total-cost', usageDisplay ? usageDisplay.cost : '—');
+    byId('total-cost').title = usageDisplay ? usageDisplay.costState === 'recorded'
+      ? 'Estimated API cost at recorded list prices' : usageDisplay.note : 'Waiting for recorded usage';
     const evidence = byId('brief-evidence');
     if (!summary) replace(evidence, [el('p', 'muted', 'A local view of the usage your tools record.')]);
     else {
@@ -161,25 +240,39 @@
       }
       const unassigned = n(snapshot.scope && snapshot.scope.unassigned_sessions);
       const note = state.scope === 'workspace' ? unassigned ? `${unassigned} local sessions lack workspace attribution and are excluded. See All local projects for their history.` : 'Matched to recorded working directories in this workspace.' : 'All recorded projects on this machine. Paired devices are excluded.';
-      replace(evidence, [counts, el('p', 'evidence-note', note)]);
+      const nodes = [counts];
+      if (usageDisplay.note) nodes.push(el('p', 'detail-note', usageDisplay.note));
+      nodes.push(el('p', 'evidence-note', note));
+      replace(evidence, nodes);
     }
-    renderDays(snapshot && snapshot.days || []);
+    renderDays(snapshot && snapshot.days || [], usageDisplay && usageDisplay.usage);
     const since = state.since;
     const current = state.connection.status === 'connected';
     set('since-heading', 'Recorded in this window');
     set('since-description', since ? 'Since ' + time(since.since) + ' · this scope & range · in memory only' : 'Newly recorded usage · resets on scope or range changes');
     const value = byId('since-value');
-    replace(value, since ? [document.createTextNode('+' + compact(since.tokens) + ' tokens'), el('span', '', money(since.cost) + ' estimated' + (current ? '' : ' · stale'))] : [document.createTextNode('—')]);
+    const sinceUnavailable = usageDisplay && ['unavailable', 'unknown'].includes(usageDisplay.usage);
+    const sinceTokens = !since ? '—' : sinceUnavailable ? '—'
+      : '+' + compact(since.tokens) + (usageDisplay.usage === 'partial' ? ' recorded tokens · partial' : ' tokens');
+    const sinceCost = !since ? '' : usageDisplay && usageDisplay.costState === 'unavailable' ? 'Cost unavailable'
+      : usageDisplay && usageDisplay.costState === 'unknown' ? 'Cost coverage not recorded'
+      : (usageDisplay && usageDisplay.costState === 'partial' ? 'Partial · ' : '') + money(since.cost) + ' estimated' + (current ? '' : ' · stale');
+    replace(value, since ? [document.createTextNode(sinceTokens), el('span', '', sinceUnavailable
+      ? 'Usage coverage unavailable' + (current ? '' : ' · stale') : sinceCost)] : [document.createTextNode('—')]);
     set('snapshot-time', snapshot ? 'Snapshot ' + time(snapshot.generated_at) + (current ? '' : ' · stale') : 'Waiting for a local snapshot');
     const limitations = (snapshot && Array.isArray(snapshot.limitations) ? snapshot.limitations : []).filter(item => typeof item === 'string' && !/costs are estimates at api list prices\.?$/i.test(item));
     replace(byId('limitations'), limitations.slice(0, 20).map(item => el('li', '', item)));
   }
-  function renderDays(days) {
+  function renderDays(days, usageStatus) {
     const strip = byId('day-strip');
+    if (['unavailable', 'unknown'].includes(usageStatus)) {
+      strip.hidden = true; strip.replaceChildren(); return;
+    }
     const data = days.filter(day => day && /^\d{4}-\d{2}-\d{2}$/.test(text(day.date))).slice(-30);
     strip.hidden = data.length < 2;
     if (strip.hidden) { strip.replaceChildren(); return; }
-    const chart = svg('svg', {viewBox: '0 0 600 38', preserveAspectRatio: 'none', role: 'img', 'aria-label': 'Recorded tokens by day. ' + data.map(day => `${shortDate(day.date)}: ${compact(day.tokens)}`).join('; ')});
+    const coverage = usageStatus === 'partial' ? ' Partial coverage; values include recorded tokens only.' : '';
+    const chart = svg('svg', {viewBox: '0 0 600 38', preserveAspectRatio: 'none', role: 'img', 'aria-label': 'Recorded tokens by day.' + coverage + ' ' + data.map(day => `${shortDate(day.date)}: ${compact(day.tokens)}`).join('; ')});
     const maximum = Math.max(...data.map(day => n(day.tokens)), 1);
     chart.append(svg('line', {x1: 0, x2: 600, y1: 37, y2: 37, stroke: 'currentColor', 'stroke-opacity': '.3'}));
     const step = 600 / data.length;
@@ -189,7 +282,7 @@
       const title = svg('title'); title.textContent = shortDate(day.date) + ': ' + n(day.tokens).toLocaleString('en-US') + ' tokens'; bar.append(title); chart.append(bar);
     });
     const wrap = el('div'); const labels = el('div', 'day-labels'); labels.append(el('span', '', shortDate(data[0].date)), el('span', '', shortDate(data[data.length - 1].date))); wrap.append(chart, labels);
-    replace(strip, [el('p', '', 'Recorded tokens by day'), wrap]);
+    replace(strip, [el('p', '', 'Recorded tokens by day' + (usageStatus === 'partial' ? ' · partial coverage' : '')), wrap]);
   }
   function renderTree() {
     const snapshot = state.snapshot;
@@ -244,8 +337,10 @@
     const role = session.subagent ? 'Subagent' : 'Main agent';
     const relation = session.subagent && !graph.parent.has(session.key) ? allGraph.parent.has(session.key) ? ' · parent hidden by filter' : session.parent_status === 'outside_scope' ? ' · parent outside scope' : session.parent_status === 'linked' ? ' · parent outside shown list' : ' · parent unavailable' : '';
     copy.append(el('span', 'tree-title', title), el('span', 'tree-meta', role + ' · ' + sourceLabel(session.source) + relation));
-    const amount = el('span', 'tree-amount', session.usage_status === 'unavailable' ? '—' : compact(session.tokens)); amount.append(el('small', '', session.usage_status === 'unavailable' ? 'unavailable' : 'tokens'));
-    line.append(copy, amount); line.title = title + '\n' + role + ' · ' + sourceLabel(session.source) + relation + '\n' + (session.usage_status === 'unavailable' ? 'Usage unavailable' : n(session.tokens).toLocaleString('en-US') + ' recorded tokens');
+    const usage = sessionUsageDisplay(session);
+    const amount = el('span', 'tree-amount', usage.tokens); amount.append(el('small', '', usage.tokenLabel));
+    line.append(copy, amount); line.title = title + '\n' + role + ' · ' + sourceLabel(session.source) + relation
+      + '\n' + (usage.note || n(session.tokens).toLocaleString('en-US') + ' recorded tokens');
     item.append(line);
     if (children.length) { const group = el('div', 'tree-group'); group.setAttribute('role', 'group'); group.hidden = !expanded; for (const child of children) group.append(treeItem(child, level + 1)); item.append(group); }
     return item;
@@ -280,19 +375,24 @@
       const owner = allGraph.byKey.get(allGraph.parent.get(session.key)); const parent = el('p', 'detail-parent', 'Recorded parent: ');
       const button = el('button', 'text-button', text(owner.title) || 'Untitled session'); button.type = 'button'; button.dataset.parent = owner.key; button.dataset.focus = 'parent:' + session.key; parent.append(button); nodes.push(parent);
     } else if (session.subagent) nodes.push(el('p', 'detail-parent', session.parent_status === 'outside_scope' ? 'Parent is outside the selected workspace or date range.' : session.parent_status === 'linked' ? 'The recorded parent is not included in this session list.' : 'Parent link unavailable in the recorded local metadata.'));
+    const usage = sessionUsageDisplay(session);
     const stats = el('div', 'detail-stats');
-    for (const [value, label] of [[session.usage_status === 'unavailable' ? '—' : compact(session.tokens), 'recorded tokens'], [session.usage_status === 'unavailable' ? '—' : money(session.cost), 'estimated API cost']]) { const stat = el('p'); stat.append(el('strong', '', value), el('span', '', label)); stats.append(stat); }
+    for (const [value, label] of [[usage.tokens, usage.tokenLabel], [usage.cost, usage.costLabel]]) { const stat = el('p'); stat.append(el('strong', '', value), el('span', '', label)); stats.append(stat); }
     nodes.push(stats);
     const metadata = el('dl', 'metadata');
     const efforts = Array.isArray(session.efforts) ? session.efforts.filter(value => typeof value === 'string') : [];
     const compactions = typeof session.compactions === 'number' && Number.isFinite(session.compactions) && session.compactions >= 0 ? n(session.compactions).toLocaleString('en-US') + ' recorded' : 'Unavailable';
-    const entries = [['Model', text(session.model) || 'Not recorded'], ['Recorded effort', efforts.length ? efforts.map(effortLabel).join(' · ') : 'Not recorded'], ['Compactions', compactions], ['Last record', session.end ? shortDate(session.end.slice(0, 10)) + ' · ' + time(session.end) : 'Unavailable']];
+    const entries = [['Model', modelDisplay(session)], ['Recorded effort', efforts.length ? efforts.map(effortLabel).join(' · ') : 'Not recorded'], ['Compactions', compactions], ['Last record', session.end ? shortDate(session.end.slice(0, 10)) + ' · ' + time(session.end) : 'Unavailable']];
+    if (text(session.current_model)) entries.splice(1, 0, ['Current composer setting · whole session', text(session.current_model)]);
+    const context = contextSnapshot(session);
+    if (context) entries.push(['Current context snapshot', context]);
     for (const [label, value] of entries) metadata.append(el('dt', '', label), el('dd', '', value));
     nodes.push(metadata);
-    if (session.usage_status !== 'unavailable') nodes.push(renderComposition(session));
+    if (text(session.current_model)) nodes.push(el('p', 'detail-note', 'The current composer setting is separate from historical model attribution.'));
+    if (context) nodes.push(el('p', 'detail-note', 'Context is a saved snapshot, not billed tokens or a history of requests.'));
+    if (!['unavailable', 'unknown'].includes(usage.usage)) nodes.push(renderComposition(session));
     if (session.usage_in_parent) nodes.push(el('p', 'detail-note', 'This child’s recorded usage is already included in its Copilot parent and the overall totals. Do not add it again.'));
-    if (session.usage_status === 'unavailable') nodes.push(el('p', 'detail-note', 'Token usage is unavailable in the recorded data. This is not a known zero.'));
-    if (session.usage_status === 'partial') nodes.push(el('p', 'detail-note', 'Recorded usage is incomplete; these figures are a lower bound.'));
+    if (usage.note) nodes.push(el('p', 'detail-note', usage.note));
     if (session.source === 'copilot' && session.usage_status !== 'unavailable') nodes.push(el('p', 'detail-note', 'Cache figures reflect Copilot’s saved report. Custom-model bridges can record zero when provider cache usage is unavailable. Zero does not prove there were no cache hits; estimated cost may overstate the provider’s charge.'));
     const scope = state.snapshot && state.snapshot.from !== state.snapshot.to ? shortDate(state.snapshot.from) + ' — ' + shortDate(state.snapshot.to) : RANGE_LABELS[state.range];
     nodes.push(el('p', 'detail-scope', 'Usage & compactions: ' + scope + ' · ' + (state.scope === 'all' ? 'all local projects' : 'this workspace') + '. Effort reflects recorded metadata, never your current settings.'));
@@ -303,21 +403,31 @@
   }
   function renderComposition(session) {
     const parts = composition(session); const total = parts.reduce((sum, part) => sum + part.value, 0);
+    const complete = parts.every(part => part.status === 'recorded');
     const section = el('section', 'composition'); section.setAttribute('aria-label', 'Token composition'); section.append(el('h3', '', 'How the tokens are composed'));
-    const bar = svg('svg', {viewBox: '0 0 1000 8', preserveAspectRatio: 'none', 'aria-hidden': 'true'});
-    const defs = svg('defs'); const pattern = svg('pattern', {id: 'cache-hatch', patternUnits: 'userSpaceOnUse', width: 4, height: 4}); pattern.append(svg('path', {d: 'M-1,1 l2,-2 M0,4 l4,-4 M3,5 l2,-2', stroke: 'var(--desk-fg)', 'stroke-width': 1})); defs.append(pattern); bar.append(defs);
-    let x = 0;
-    for (const part of parts) {
-      const width = total ? part.value / total * 1000 : 0;
-      const fill = part.key === 'cache_read' ? 'url(#cache-hatch)' : part.key === 'output' ? 'var(--k-out)' : part.key === 'cache_write' ? 'var(--desk-subtle)' : 'var(--desk-fg)';
-      bar.append(svg('rect', {x, width, height: 8, fill, stroke: part.key === 'cache_write' ? 'var(--desk-fg)' : 'none'})); x += width;
+    if (complete) {
+      const bar = svg('svg', {viewBox: '0 0 1000 8', preserveAspectRatio: 'none', 'aria-hidden': 'true'});
+      const defs = svg('defs'); const pattern = svg('pattern', {id: 'cache-hatch', patternUnits: 'userSpaceOnUse', width: 4, height: 4}); pattern.append(svg('path', {d: 'M-1,1 l2,-2 M0,4 l4,-4 M3,5 l2,-2', stroke: 'var(--desk-fg)', 'stroke-width': 1})); defs.append(pattern); bar.append(defs);
+      let x = 0;
+      for (const part of parts) {
+        const width = total ? part.value / total * 1000 : 0;
+        const fill = part.key === 'cache_read' ? 'url(#cache-hatch)' : part.key === 'output' ? 'var(--k-out)' : part.key === 'cache_write' ? 'var(--desk-subtle)' : 'var(--desk-fg)';
+        bar.append(svg('rect', {x, width, height: 8, fill, stroke: part.key === 'cache_write' ? 'var(--desk-fg)' : 'none'})); x += width;
+      }
+      section.append(bar);
+    } else {
+      section.append(el('p', 'detail-note', 'Only recorded fields are shown below; missing composition values remain unavailable.'));
     }
-    section.append(bar);
     const table = el('table'); table.setAttribute('aria-label', 'Recorded input, output and cache tokens'); const tbody = el('tbody');
     for (const part of parts) {
       const row = el('tr'); const heading = el('th'); heading.scope = 'row'; heading.append(el('span', 'composition-key ' + part.key), document.createTextNode(part.label));
-      const value = el('td', '', compact(part.value)); value.title = part.value.toLocaleString('en-US') + ' tokens';
-      row.append(heading, value, el('td', '', total ? Math.round(part.value / total * 100) + '%' : '—')); tbody.append(row);
+      const valueText = part.status === 'unavailable' ? 'Unavailable' : part.status === 'unknown' ? 'Not recorded'
+        : part.status === 'partial' ? 'Partial · ' + compact(part.value) : compact(part.value);
+      const value = el('td', '', valueText); value.title = part.status === 'recorded'
+        ? part.value.toLocaleString('en-US') + ' tokens' : part.status === 'partial'
+          ? 'Partial · ' + part.value.toLocaleString('en-US') + ' recorded tokens' : valueText;
+      const percent = complete && total ? Math.round(part.value / total * 100) + '%' : '—';
+      row.append(heading, value, el('td', '', percent)); tbody.append(row);
     }
     table.append(tbody); section.append(table); return section;
   }

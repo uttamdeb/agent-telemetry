@@ -11,6 +11,7 @@ const {buildBackend} = require('../scripts/build-backend');
 
 const dashboardRuntimeFiles = [
   'editor_snapshot.py',
+  'cursor_data.py',
   'mcp_access.py', 'mcp_backend.py', 'mcp_protocol.py', 'mcp_server.py',
   'mcp_tools.py', 'telemetry_query.py', 'telemetry_insights.py',
   'static/mcp.js'

@@ -12,6 +12,31 @@ let active;
 const COMMAND = 'agentTelemetry.';
 const compact = value => Intl.NumberFormat(undefined, {notation: 'compact', maximumFractionDigits: 1}).format(value || 0);
 const money = value => Intl.NumberFormat(undefined, {style: 'currency', currency: 'USD', maximumFractionDigits: 2}).format(value || 0);
+const COVERAGE_STATES = new Set(['recorded', 'partial', 'unavailable', 'unknown']);
+function statusSummaryText(summary) {
+  const usage = COVERAGE_STATES.has(summary.usage_status) ? summary.usage_status : null;
+  const cost = COVERAGE_STATES.has(summary.cost_status) ? summary.cost_status : usage;
+  if (!usage && !COVERAGE_STATES.has(summary.cost_status)) return `$(pulse) ${compact(summary.tokens)} · ${money(summary.cost)}`;
+  if (usage === 'unavailable') return '$(pulse) Unavailable';
+  if (usage === 'unknown') return '$(pulse) Coverage not recorded';
+  const tokenText = `${usage === 'partial' ? 'Partial · ' : ''}${compact(summary.tokens)} tokens`;
+  if (cost === 'unavailable') return `$(pulse) ${tokenText} · Cost unavailable`;
+  if (cost === 'unknown') return `$(pulse) ${tokenText} · Cost not recorded`;
+  if (cost === 'partial' && usage !== 'partial') return `$(pulse) ${tokenText} · Partial cost ${money(summary.cost)}`;
+  return `$(pulse) ${tokenText} · ${cost === 'partial' ? 'Partial ' : ''}${money(summary.cost)} est.`;
+}
+function statusCoverageLines(summary) {
+  const usage = COVERAGE_STATES.has(summary.usage_status) ? summary.usage_status : null;
+  const cost = COVERAGE_STATES.has(summary.cost_status) ? summary.cost_status : usage;
+  const lines = [];
+  if (usage === 'unavailable') lines.push('Token usage is unavailable for this scope. Zero fields are not a known zero.');
+  else if (usage === 'unknown') lines.push('Token coverage is not recorded for this older session data. Zero fields are not a known zero.');
+  else if (usage === 'partial') lines.push('Token coverage is partial. Totals include recorded values only and may be lower bounds.');
+  if (cost === 'unavailable') lines.push('Estimated API cost is unavailable for some recorded usage.');
+  else if (cost === 'unknown') lines.push('Estimated API cost coverage is not recorded.');
+  else if (cost === 'partial') lines.push('Estimated API cost includes only usage with a verified model and price.');
+  return lines;
+}
 function localRoots() {
   if (vscode.env.remoteName) return [];
   const roots = [];
@@ -71,8 +96,19 @@ function activate(context) {
     tree.update(state);
     if (panel) void panel.webview.postMessage({type: 'state', state});
     const snapshot = state.snapshot;
-    status.text = snapshot ? `$(pulse) ${compact(snapshot.summary.tokens)} · ${money(snapshot.summary.cost)}${state.connection.status === 'connected' ? '' : ' $(warning)'}` : `$(pulse) AgentTelemetry${state.connection.status === 'starting' ? '…' : state.connection.status === 'error' || state.connection.status === 'offline' ? ' $(warning)' : ''}`;
-    status.tooltip = snapshot ? `${snapshot.scope.label} · ${snapshot.from} to ${snapshot.to}\n${snapshot.summary.tokens.toLocaleString()} tokens · ${money(snapshot.summary.cost)} estimated API cost\n${state.connection.status === 'connected' ? 'Local machine only' : 'Stale: ' + state.connection.message}` : state.connection.message || 'Open local agent usage';
+    status.text = snapshot ? `${statusSummaryText(snapshot.summary)}${state.connection.status === 'connected' ? '' : ' $(warning)'}` : `$(pulse) AgentTelemetry${state.connection.status === 'starting' ? '…' : state.connection.status === 'error' || state.connection.status === 'offline' ? ' $(warning)' : ''}`;
+    const coverage = snapshot ? statusCoverageLines(snapshot.summary) : [];
+    const usageLine = snapshot && (snapshot.summary.usage_status === 'unavailable' || snapshot.summary.usage_status === 'unknown')
+      ? snapshot.summary.usage_status === 'unknown' ? 'Token coverage not recorded' : 'Token usage unavailable'
+      : snapshot ? `${snapshot.summary.tokens.toLocaleString()} recorded tokens${snapshot.summary.usage_status === 'partial' ? ' · partial coverage' : ''}` : '';
+    const costLine = snapshot && (snapshot.summary.cost_status === 'unavailable' || snapshot.summary.cost_status === 'unknown')
+      ? snapshot.summary.cost_status === 'unknown' ? 'Estimated API cost coverage not recorded' : 'Estimated API cost unavailable'
+      : snapshot ? `${money(snapshot.summary.cost)} estimated API cost${snapshot.summary.cost_status === 'partial' ? ' · partial estimate' : ''}` : '';
+    const hasCoverage = snapshot && (COVERAGE_STATES.has(snapshot.summary.usage_status) || COVERAGE_STATES.has(snapshot.summary.cost_status));
+    status.tooltip = snapshot ? hasCoverage
+      ? `${snapshot.scope.label} · ${snapshot.from} to ${snapshot.to}\n${[usageLine, costLine].filter(Boolean).join('\n')}${coverage.length ? '\n' + coverage.join('\n') : ''}\n${state.connection.status === 'connected' ? 'Local machine only' : 'Stale: ' + state.connection.message}`
+      : `${snapshot.scope.label} · ${snapshot.from} to ${snapshot.to}\n${snapshot.summary.tokens.toLocaleString()} tokens · ${money(snapshot.summary.cost)} estimated API cost\n${state.connection.status === 'connected' ? 'Local machine only' : 'Stale: ' + state.connection.message}`
+      : state.connection.message || 'Open local agent usage';
     status.accessibilityInformation = {label: `AgentTelemetry. ${status.tooltip}`};
     appSetting('showStatusBar', true) ? status.show() : status.hide();
   }});
@@ -140,4 +176,4 @@ function activate(context) {
   return Object.freeze({getState: () => structuredClone(monitor.state), refresh: () => monitor.poll(true), setScope: scope => monitor.setScope(scope), setRange: range => monitor.setRange(range)});
 }
 function deactivate() { if (active) active.dispose(); active = undefined; }
-module.exports = {activate, deactivate, ActivityTree, appSetting, localRoots};
+module.exports = {activate, deactivate, ActivityTree, appSetting, localRoots, statusSummaryText, statusCoverageLines};

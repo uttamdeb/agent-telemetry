@@ -3111,24 +3111,13 @@ def parse_antigravity(agg, path):
 # ===========================================================================
 # CURSOR  (native AI chat bubbles in a SQLite key-value store)
 # ===========================================================================
-# Home-relative source dirs on any OS: /Users/x/... (macOS), /home/x/... (Linux)
-# and C:\Users\x\... (Windows). Either separator, either drive — a Cursor DB can
-# be read on a different machine than the one that wrote it.
-_CURSOR_PATH_RE = re.compile(
-    r'(?:/Users/|/home/|[A-Za-z]:[\\/]{1,2}Users[\\/]{1,2})[^/\\"]+[\\/]{1,2}'
-    r'(?:Documents[\\/]{1,2}GitHub|Documents|Desktop|repos?|code|dev|projects|src|work)'
-    r'[\\/]{1,2}([^/\\"\s]+)', re.I)
-
-
 def _normalize_cursor_model(raw):
-    """Cursor names models its own way ("claude-4.6-opus-high-thinking",
-    "gpt-5-nano", "composer-1"). Map them onto the display names every other
-    source already uses so one model reads the same everywhere."""
-    if not raw:
-        return "Cursor (default)"
-    first = str(raw).split(",")[0].strip()          # multi-model sessions list them
-    if not first or first == "default":
-        return "Cursor (default)"
+    """Normalize a concrete Cursor model identifier for display."""
+    if not isinstance(raw, str) or not raw.strip():
+        return "Unknown"
+    first = raw.split(",")[0].strip()          # multi-model sessions list them
+    if not first or first.lower() == "default":
+        return "Unknown"
     base = re.sub(r"-(?:high-)?(?:thinking|reasoning|max|fast)$", "", first.lower())
     m = re.match(r"claude-(\d+(?:\.\d+)?)-(opus|sonnet|haiku)$", base)
     if m:
@@ -3144,26 +3133,48 @@ def _cursor_ai_lines(con):
     """Cursor's own AI-code accounting: lines it suggested vs. lines you kept,
     per day, split by tab-completion and composer. No other tool records this."""
     out = {}
+    import sqlite3
+    max_rows = 100_000
     try:
+        count = con.execute(
+            "SELECT COUNT(*) FROM ItemTable WHERE key LIKE 'aiCodeTracking.dailyStats%'"
+        ).fetchone()[0]
+        if count > max_rows:
+            raise ValueError("Cursor code-tracking summary exceeds bounded row budget")
         rows = con.execute(
-            "SELECT key, value FROM ItemTable WHERE key LIKE 'aiCodeTracking.dailyStats%'"
-        ).fetchall()
-    except Exception:
-        return out
-    for _k, v in rows:
+            "SELECT key, CASE WHEN length(value) <= 2097152 THEN value ELSE NULL END, "
+            "(length(value) > 2097152) FROM ItemTable "
+            "WHERE key LIKE 'aiCodeTracking.dailyStats%' LIMIT ?", (max_rows,)
+        )
+    except sqlite3.OperationalError as exc:
+        if "no such table" in str(exc).lower():
+            return out
+        raise
+    for _k, v, oversized in rows:
+        if oversized:
+            raise ValueError("Cursor code-tracking summary is oversized")
+        if v is None:
+            continue
         try:
             o = json.loads(v)
-        except Exception:
+        except (json.JSONDecodeError, TypeError, UnicodeDecodeError):
+            continue
+        if not isinstance(o, dict):
             continue
         d = o.get("date")
-        if not d:
+        if not isinstance(d, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", d) or _from_iso(d) is None:
             continue
-        out[d] = {
-            "tab_suggested": int(o.get("tabSuggestedLines", 0) or 0),
-            "tab_accepted": int(o.get("tabAcceptedLines", 0) or 0),
-            "composer_suggested": int(o.get("composerSuggestedLines", 0) or 0),
-            "composer_accepted": int(o.get("composerAcceptedLines", 0) or 0),
-        }
+        fields = {}
+        for source, target in (("tabSuggestedLines", "tab_suggested"),
+                               ("tabAcceptedLines", "tab_accepted"),
+                               ("composerSuggestedLines", "composer_suggested"),
+                               ("composerAcceptedLines", "composer_accepted")):
+            value = o.get(source)
+            if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 10**15:
+                fields[target] = value
+        if fields:
+            out[d] = {name: fields.get(name, 0) for name in (
+                "tab_suggested", "tab_accepted", "composer_suggested", "composer_accepted")}
     return out
 
 
@@ -3196,189 +3207,400 @@ def _open_ro_sqlite(db_path):
 
 def parse_cursor(agg, db_path):
     from contextlib import closing
+    if __package__:
+        from . import cursor_data as CD
+    else:
+        import cursor_data as CD
     with closing(_open_ro_sqlite(db_path)) as con:
-        _parse_cursor_store(agg, con)
+        con.execute("PRAGMA query_only=ON")
+        con.execute("BEGIN")  # one consistent snapshot across metadata/bubble queries
+        snapshot = CD.read_store(db_path, max_scan_rows=CD.MAX_STORE_ROWS,
+                                 strict=True, _connection=con)
+        ai_lines = _cursor_ai_lines(con)
+    snapshot, history = _cursor_retain_history(snapshot, agg.get("_cursor_history"), CD)
+    agg["_cursor_history"] = history
+    agg["cursor_schema"] = CD.CURSOR_SCHEMA
+    _parse_cursor_store(agg, snapshot, ai_lines, CD)
 
 
-def _parse_cursor_store(agg, con):
-    import sqlite3
+
+def _cursor_retain_history(snapshot, previous, CD):
+    """Keep numeric/message metadata when Cursor tombstones source rows.
+
+    This private state contains the reader's allowlisted summaries only. Hash
+    bubble/request/tool identities before persistence; no source content or raw
+    join IDs is kept. Current rows replace their old summaries, never add twins.
+    """
+    previous = previous if isinstance(previous, dict) and previous.get("version") == 1 else {}
+    bubbles = copy.deepcopy(previous.get("bubbles", {}))
+    current_ids = set()
+
+    def digest(kind, value):
+        return hashlib.sha256(("cursor-history-v1\0" + kind + "\0" + value).encode()).hexdigest()
+
+    for cid, rows in snapshot.get("bubbles", {}).items():
+        bucket = bubbles.setdefault(cid, {})
+        for row in rows:
+            safe = copy.deepcopy(row)
+            bubble_id = digest("bubble:" + cid, safe["bubble_id"])
+            safe["bubble_id"] = bubble_id
+            for field in ("request_id", "tool_call_id", "model_call_id"):
+                if safe.get(field):
+                    safe[field] = digest(field, safe[field])
+            for tool in safe.get("extra_tools", []):
+                if tool.get("tool_call_id"):
+                    tool["tool_call_id"] = digest("tool_call_id", tool["tool_call_id"])
+            older = bucket.get(bubble_id, {})
+            # A later zero placeholder is not evidence that a known receipt was
+            # free. Keep known counters until a real replacement receipt exists.
+            if (not (safe.get("input_tokens") or safe.get("output_tokens"))
+                    and (older.get("input_tokens") or older.get("output_tokens"))):
+                for field in ("input_tokens", "output_tokens", "input_present", "output_present"):
+                    safe[field] = older.get(field)
+            for field in ("created_at", "model"):
+                if not safe.get(field) and older.get(field):
+                    safe[field] = older[field]
+            bucket[bubble_id] = safe
+            current_ids.add((cid, bubble_id))
+    if sum(len(rows) for rows in bubbles.values()) > CD.MAX_STORE_ROWS:
+        raise CD.CursorReadError("Cursor retained history exceeds the safe row limit; previous ledger retained")
+    merged = dict(snapshot)
+    for field in ("composers", "workspace", "parents"):
+        merged[field] = {**copy.deepcopy(previous.get(field, {})), **snapshot.get(field, {})}
+    merged["bubbles"] = {cid: list(rows.values()) for cid, rows in bubbles.items()}
+    retained = {cid for cid, rows in bubbles.items()
+                if any((cid, key) not in current_ids for key in rows)}
+    merged["retained_sessions"] = retained
+    history = {"version": 1, "bubbles": bubbles,
+               **{field: copy.deepcopy(merged[field]) for field in ("composers", "workspace", "parents")}}
+    return merged, history
+
+
+def _cursor_status(total, recorded, complete=None):
+    if not total or not recorded:
+        return "unavailable"
+    if complete is None:
+        complete = recorded
+    return "recorded" if recorded == total and complete == recorded else "partial"
+
+
+def _cursor_combine_status(values):
+    states = [value for value in values if value in ("recorded", "partial", "unavailable")]
+    if not states:
+        return "unavailable"
+    return states[0] if all(value == states[0] for value in states) else "partial"
+
+
+def _cursor_availability(usage_status):
+    return {
+        "input_output": usage_status,
+        "cache_read": "unavailable",
+        "cache_write": "unavailable",
+        "reasoning": "unavailable",
+        "response_output": "unavailable",
+    }
+
+
+def _parse_cursor_store(agg, snapshot, ai_lines, CD):
     agg["source"] = "cursor"
     agg["editor"] = "Cursor"
     agg["project"] = "Cursor"
-    cur = con.cursor()
-
-    def _loads(v):
-        try:
-            return json.loads(v) if v else None
-        except Exception:
-            return None
-
-    # ---- session metadata -------------------------------------------------
-    # composerData holds most sessions; newer Cursor builds migrate the header
-    # into its own table, so read both and let composerData win on conflicts.
-    comp = {}
-    try:
-        for cid, created, updated, archived, val in cur.execute(
-                "SELECT composerId, createdAt, lastUpdatedAt, isArchived, value "
-                "FROM composerHeaders").fetchall():
-            o = _loads(val) or {}
-            comp[cid] = {"created": created, "updated": updated or created,
-                         "name": o.get("name") or o.get("subtitle"),
-                         "model": None, "maxmode": False,
-                         "mode": o.get("unifiedMode"),
-                         "added": int(o.get("totalLinesAdded") or 0),
-                         "removed": int(o.get("totalLinesRemoved") or 0),
-                         "archived": bool(archived or o.get("isArchived")),
-                         "subs": int(o.get("numSubComposers") or 0)}
-    except sqlite3.OperationalError as e:
-        if not str(e).startswith("no such table:"):
-            con.close()
-            raise
-    try:
-        rows = cur.execute("SELECT value FROM cursorDiskKV "
-                           "WHERE key LIKE 'composerData:%'").fetchall()
-    except sqlite3.OperationalError as e:
-        con.close()
-        if str(e).startswith("no such table:"):
-            return                              # no native chats on this install
-        raise
-    for (v,) in rows:
-        o = _loads(v)
-        if not o:
-            continue
-        cid = o.get("composerId")
-        created = o.get("createdAt") or o.get("lastUpdatedAt")
-        if not cid or not created:
-            continue
-        mc = o.get("modelConfig") if isinstance(o.get("modelConfig"), dict) else {}
-        c = comp.setdefault(cid, {})
-        c.update({
-            "created": created,
-            "updated": o.get("lastUpdatedAt") or created,
-            "name": o.get("name") or c.get("name"),
-            "model": mc.get("modelName"),
-            "maxmode": bool(mc.get("maxMode")),
-            "mode": o.get("unifiedMode") or c.get("mode"),
-            "added": int(o.get("totalLinesAdded") or 0),
-            "removed": int(o.get("totalLinesRemoved") or 0),
-            "archived": bool(o.get("isArchived")),
-            "subs": len(o.get("subComposerIds") or []) or c.get("subs", 0),
-        })
-
-    sess = {}
-    # Per-session last-event timestamp for active-time gaps. A local dict, not
-    # agg-level: this file holds MANY unrelated sessions and is always fully
-    # reparsed on change (see update_file), so nothing needs to persist across
-    # calls — it just must not bridge a gap across two different sessions.
+    composers = snapshot.get("composers", {})
+    bubbles = snapshot.get("bubbles", {})
+    workspace = snapshot.get("workspace", {})
+    session_data = {}
     active_last = {}
-    path_re = _CURSOR_PATH_RE
+    quality_by_session = {}
+    tool_seen = {}
+    response_models_by_session = {}
+    global_first = None
+    global_last = None
+    summary_usage_states = []
+    summary_model_states = []
 
-    def _top(d):
-        return max(d, key=d.get) if d else None
+    def top(counter):
+        return max(counter, key=lambda key: (counter[key], key)) if counter else None
 
-    # ---- messages ---------------------------------------------------------
-    try:
-        rows = cur.execute("SELECT key, value FROM cursorDiskKV "
-                           "WHERE key LIKE 'bubbleId:%'")
-        for k, v in rows:
-            kp = k.split(":")
-            cid = kp[1] if len(kp) >= 3 else None
-            c = comp.get(cid)
-            if not c:
+    def new_session():
+        return {
+            "in": 0, "out": 0, "asst": 0, "user": 0, "tools": 0,
+            "think": 0, "projects": {}, "days": {}, "active": 0.0,
+            "start": None, "end": None, "assistant_total": 0,
+            "usage_evidence": 0, "usage_complete": 0, "undated_usage": 0,
+            "undated_counts": {"in": 0, "out": 0, "asst": 0},
+            "response_models": {}, "requested_models": {}, "user_total": 0,
+        }
+
+    for cid in composers:
+        session_data[cid] = new_session()
+
+    # Sort by UTC before gap-capped active-time accounting. Source key order is
+    # lexical and can be wrong when offsets differ or bubbles interleave.
+    for cid, rows in bubbles.items():
+        session = session_data.setdefault(cid, new_session())
+        sorted_rows = sorted(rows, key=lambda row: (
+            CD._event_time({"timestamp": row.get("created_at")}), row.get("bubble_id") or ""))
+        for bubble in sorted_rows:
+            typ = bubble.get("type")
+            if typ not in (1, 2):
                 continue
-            o = _loads(v)
-            if not o:
-                continue
-            typ = o.get("type")            # 1 = user, 2 = AI
-            tc = o.get("tokenCount") or {}
-            it = int(tc.get("inputTokens", 0) or 0)
-            ot = int(tc.get("outputTokens", 0) or 0)
-            # Messages carry their own ISO timestamp; only fall back to the
-            # session's creation time when one is genuinely missing, otherwise
-            # a months-long session lands entirely on the day it started.
-            dt = _from_iso(o["createdAt"]) if isinstance(o.get("createdAt"), str) else None
-            if dt is None:
-                dt = _from_ms(c["created"])
-            if not dt:
-                continue
-            date = _buckets(dt)[0]
-            model = _normalize_cursor_model(c.get("model"))
-            agg["_record_session"] = cid
-            r = _rec(agg, date, model)
-            r["in"] += it
-            r["out"] += ot
-            T = agg["totals"]
-            T["in"] += it
-            T["out"] += ot
-            s = sess.setdefault(cid, {"in": 0, "out": 0, "asst": 0, "user": 0, "tools": 0,
-                                      "think": 0, "proj": {}, "days": {}, "active": 0.0,
-                                      "start": dt.isoformat(), "end": dt.isoformat()})
-            dd = s["days"].setdefault(date, {"in": 0, "out": 0, "cr": 0, "cc": 0,
-                                             "asst": 0, "user": 0, "tools": 0, "active": 0.0})
-            dd["in"] += it; dd["out"] += ot
-            gap = _active_gap(active_last.get(cid), dt)
-            active_last[cid] = dt.isoformat()
-            r["active"] += gap; s["active"] += gap; dd["active"] += gap
-            iso = dt.isoformat()
-            if iso < s["start"]:
-                s["start"] = iso
-            if iso > s["end"]:
-                s["end"] = iso
-            s["in"] += it
-            s["out"] += ot
+            dt = _from_iso(bubble.get("created_at")) if bubble.get("created_at") else None
+            model_name = _normalize_cursor_model(bubble.get("model")) if typ == 2 else None
+            requested_model = _normalize_cursor_model(bubble.get("requested_model")) if typ == 1 else None
+            token_in, token_out = bubble.get("input_tokens"), bubble.get("output_tokens")
+            positive_usage = bool(typ == 2 and ((token_in or 0) > 0 or (token_out or 0) > 0))
+
             if typ == 2:
-                r["asst"] += 1; T["asst"] += 1; s["asst"] += 1; dd["asst"] += 1
-            elif typ == 1:
-                r["user"] += 1; T["user"] += 1; s["user"] += 1; dd["user"] += 1
-            s["think"] += int(o.get("thinkingDurationMs") or 0)
-            # tool calls — Cursor persists each as toolFormerData on the bubble
-            tf = o.get("toolFormerData")
-            if isinstance(tf, dict):
-                name = tf.get("name") or tf.get("tool")
-                if name:
-                    _tool(agg, date, name)
-                    r["tools"] += 1
-                    s["tools"] += 1; dd["tools"] += 1
-            # infer project from paths in the bubble's context fields
-            for fld in ("attachedFolders", "attachedFoldersNew", "relevantFiles",
-                        "recentlyViewedFiles", "gitDiffs", "context"):
-                fv = o.get(fld)
-                if fv:
-                    for m in path_re.finditer(json.dumps(fv)):
-                        s["proj"][m.group(1)] = s["proj"].get(m.group(1), 0) + 1
-            _bump_time(agg, dt, it + ot, 1 if typ == 2 else 0)
-        agg["state"]["ai_lines"] = _cursor_ai_lines(con)
-    finally:
-        con.close()
+                session["assistant_total"] += 1
+                if model_name and model_name != "Unknown":
+                    session["response_models"][model_name] = session["response_models"].get(model_name, 0) + 1
+            else:
+                session["user_total"] += 1
+                if requested_model and requested_model != "Unknown":
+                    session["requested_models"][requested_model] = session["requested_models"].get(requested_model, 0) + 1
+            if positive_usage:
+                session["usage_evidence"] += 1
+                if bubble.get("input_present") and bubble.get("output_present"):
+                    session["usage_complete"] += 1
 
-    # dominant inferred project across sessions drives the Projects-chart bucket
-    tally = {}
-    for s in sess.values():
-        p = _top(s["proj"])
-        if p:
-            tally[p] = tally.get(p, 0) + 1
-    agg["project"] = _top(tally) or "Cursor"
+            tool_specs = []
+            if typ == 2:
+                if bubble.get("tool"):
+                    tool_specs.append((bubble["tool"], bubble.get("tool_call_id")))
+                for extra in bubble.get("extra_tools", []):
+                    tool_specs.append((extra.get("tool"), extra.get("tool_call_id")))
+            accepted_tools = []
+            seen = tool_seen.setdefault(cid, set())
+            for index, (tool_name, tool_id) in enumerate(tool_specs):
+                identity = ("id", tool_id) if tool_id else (
+                    "bubble", bubble.get("bubble_id"), index, tool_name)
+                if not tool_name or identity in seen:
+                    continue
+                seen.add(identity)
+                accepted_tools.append(tool_name)
 
-    out = []
-    for cid, s in sess.items():
-        c = comp.get(cid, {})
-        mode = {1: "chat", 2: "agent"}.get(c.get("mode"), c.get("mode"))
-        out.append({
-            "_sid": cid, "id": (cid or "")[:8], "source": "cursor", "ide": IDE_FIXED["cursor"], "editor": "Cursor",
-            "title": c.get("name"),   # Cursor stores the current name
-            "project": _top(s["proj"]) or "Cursor",
-            "model": _normalize_cursor_model(c.get("model")),
-            "start": s["start"], "end": s["end"],
-            "in": s["in"], "out": s["out"], "cr": 0, "cc": 0, "cc5": 0, "cc1": 0,
-            "asst": s["asst"], "user": s["user"], "req": 0, "prem": 0.0,
-            "tools": s["tools"], "side": 0, "days": s["days"], "active": round(s["active"], 1),
-            "mode": ("max " + mode) if (mode and c.get("maxmode")) else mode,
-            "lines_add": c.get("added", 0), "lines_del": c.get("removed", 0),
-            "think_ms": s["think"], "subagents": c.get("subs", 0),
-            "archived_session": bool(c.get("archived")),
+            for hint in bubble.get("project_hints", []):
+                if isinstance(hint, str) and hint:
+                    session["projects"][hint] = session["projects"].get(hint, 0) + 1
+            if bubble.get("thinking_ms") is not None:
+                session["think"] += bubble["thinking_ms"]
+
+            # A date is required for dated ledger attribution. Keep source model
+            # coverage, but do not invent a date when the bubble lacks one.
+            if dt is None:
+                if positive_usage:
+                    session["undated_usage"] += 1
+                    session["undated_counts"]["in"] += token_in or 0
+                    session["undated_counts"]["out"] += token_out or 0
+                    session["undated_counts"]["asst"] += 1
+                continue
+
+            date = _buckets(dt)[0]
+            iso = dt.isoformat()
+            event_time = CD._event_time({"timestamp": iso})
+            if global_first is None or event_time < global_first[0]:
+                global_first = (event_time, iso)
+            if global_last is None or event_time > global_last[0]:
+                global_last = (event_time, iso)
+            if session["start"] is None or event_time < CD._event_time({"timestamp": session["start"]}):
+                session["start"] = iso
+            if session["end"] is None or event_time > CD._event_time({"timestamp": session["end"]}):
+                session["end"] = iso
+            session["tools"] += len(accepted_tools)
+            day = session["days"].setdefault(date, {
+                "in": 0, "out": 0, "cr": 0, "cc": 0, "asst": 0, "user": 0,
+                "tools": 0, "active": 0.0,
+            })
+            gap = _active_gap(active_last.get(cid), dt)
+            active_last[cid] = iso
+            session["active"] += gap
+            day["active"] += gap
+
+            row = None
+            if typ == 2:
+                row_model = model_name or "Unknown"
+                agg["_record_session"] = cid
+                row = _rec(agg, date, row_model)
+                row["asst"] += 1
+                day["asst"] += 1
+                if positive_usage:
+                    in_value = token_in if bubble.get("input_present") else 0
+                    out_value = token_out if bubble.get("output_present") else 0
+                    row["in"] += in_value
+                    row["out"] += out_value
+                    day["in"] += in_value
+                    day["out"] += out_value
+                    session["in"] += in_value
+                    session["out"] += out_value
+                    agg["totals"]["in"] += in_value
+                    agg["totals"]["out"] += out_value
+                key = f"{date}\t{row_model}"
+                stats = quality_by_session.setdefault((cid, key), {
+                    "total": 0, "evidence": 0, "complete": 0,
+                })
+                stats["total"] += 1
+                if positive_usage:
+                    stats["evidence"] += 1
+                    if bubble.get("input_present") and bubble.get("output_present"):
+                        stats["complete"] += 1
+                session["asst"] += 1
+                agg["totals"]["asst"] += 1
+            else:
+                agg["_record_session"] = cid
+                row = _rec(agg, date, "(user)")
+                row["user"] += 1
+                day["user"] += 1
+                session["user"] += 1
+                agg["totals"]["user"] += 1
+
+            if typ == 2:
+                for tool_name in accepted_tools:
+                    _tool(agg, date, tool_name)
+                    if row is not None:
+                        row["tools"] += 1
+                    day["tools"] += 1
+            token_sum = ((token_in or 0) + (token_out or 0)) if positive_usage else 0
+            _bump_time(agg, dt, token_sum, 1 if typ == 2 else 0)
+            if row is not None:
+                row["active"] += gap
+
+    for cid in composers:
+        session_data.setdefault(cid, new_session())
+
+    # Prefer explicit workspaceStorage association; publish only its leaf. The
+    # full cwd is retained in a private aggregate map for local matching.
+    project_counts = {}
+    private_cwds = {}
+    for cid, session in session_data.items():
+        meta = composers.get(cid, {})
+        for hint in meta.get("project_hints", []):
+            if isinstance(hint, str) and hint:
+                session["projects"][hint] = session["projects"].get(hint, 0) + 1
+        cwd = workspace.get(cid)
+        project = _leaf(cwd) if cwd else None
+        project = project or top(session["projects"]) or "Cursor"
+        session["project"] = project
+        project_counts[project] = project_counts.get(project, 0) + 1
+        if cwd:
+            private_cwds[cid] = cwd
+    agg["_cursor_cwds"] = private_cwds
+    agg["state"]["ai_lines"] = ai_lines
+    agg["project"] = top(project_counts) or "Cursor"
+
+    sessions = []
+    for cid, session in session_data.items():
+        meta = composers.get(cid, {})
+        if session["start"] is None:
+            session["start"] = meta.get("created") or meta.get("updated")
+        if session["end"] is None:
+            session["end"] = meta.get("updated") or meta.get("created")
+        usage_status = _cursor_status(
+            session["assistant_total"], session["usage_evidence"],
+            session["usage_complete"] if not session["undated_usage"] else -1)
+        if session["undated_usage"] and usage_status == "recorded":
+            usage_status = "partial"
+        response_model_status = _cursor_status(
+            session["assistant_total"], sum(session["response_models"].values()))
+        requested_model_status = _cursor_status(
+            session["user_total"], sum(session["requested_models"].values()))
+        if session["assistant_total"]:
+            summary_usage_states.append(usage_status)
+            summary_model_states.append(response_model_status)
+        mode = {1: "chat", 2: "agent"}.get(meta.get("mode"), meta.get("mode"))
+        parent_id = snapshot.get("parents", {}).get(cid)
+        is_subagent = meta.get("subagent") is True or bool(parent_id)
+        current_model = _normalize_cursor_model(meta.get("current_model")) if meta.get("current_model") else None
+        if current_model == "Unknown":
+            current_model = None
+
+        records = agg.get("_session_records", {}).get(cid, {})
+        row_quality = {}
+        for key, row in records.items():
+            if key.endswith("\t(user)"):
+                continue
+            stats = quality_by_session.get((cid, key), {"total": 0, "evidence": 0, "complete": 0})
+            status = _cursor_status(stats["total"], stats["evidence"], stats["complete"])
+            availability = _cursor_availability(status)
+            row["usage_status"] = status
+            row["usage_availability"] = availability
+            row_quality[key] = availability
+        response_models = sorted(session["response_models"],
+                                 key=lambda name: (-session["response_models"][name], name))
+        if session["assistant_total"] > sum(session["response_models"].values()):
+            response_models.append("Unknown")
+        requested_models = sorted(session["requested_models"],
+                                  key=lambda name: (-session["requested_models"][name], name))
+        response_models_by_session[cid] = response_models
+        sessions.append({
+            "_sid": cid, "_cursor_sid": cid, "id": cid[:8], "source": "cursor",
+            "ide": IDE_FIXED["cursor"], "editor": "Cursor", "title": meta.get("title"),
+            "project": session["project"], "model": top(session["response_models"]) or "Unknown",
+            "models": response_models[:6], "nmodels": len(response_models),
+            "current_model": current_model,
+            "current_context_tokens": meta.get("context_tokens"),
+            "current_context_percent": meta.get("context_percent"),
+            "current_context_limit": meta.get("context_limit"),
+            "current_context_asof": meta.get("context_asof"),
+            "requested_models": requested_models[:6],
+            "requested_model_status": requested_model_status,
+            "response_model_status": response_model_status, "model_status": response_model_status,
+            "start": session["start"], "end": session["end"],
+            "in": session["in"], "out": session["out"], "cr": 0, "cc": 0,
+            "cc5": 0, "cc1": 0, "reason": 0, "response_out": 0,
+            "asst": session["asst"], "user": session["user"], "req": 0, "prem": 0.0,
+            "tools": session["tools"], "side": 0, "days": session["days"],
+            "active": round(session["active"], 1),
+            "mode": ("max " + mode) if mode and meta.get("max_mode") else mode,
+            "lines_add": meta.get("lines_add", 0), "lines_del": meta.get("lines_del", 0),
+            "think_ms": session["think"], "subagents": meta.get("subagents", 0),
+            "subagent": is_subagent,
+            "subagent_type": meta.get("subagent_type") if is_subagent else None,
+            "parent_id": parent_id,
+            "archived_session": bool(meta.get("archived")),
+            "retained_history": cid in snapshot.get("retained_sessions", set()),
+            "undated_usage": dict(session["undated_counts"]),
+            "usage_status": usage_status, "usage_availability": _cursor_availability(usage_status),
+            "detail_status": "partial" if snapshot.get("detail_partial") else "recorded",
+            "record_availability": row_quality,
         })
-    agg["sessions"] = out
+    agg["sessions"] = sessions
     _finish_store_records(agg)
+
+    # _finish_store_records consumes _sid while building per-session records.
+    # Restore Cursor's full native composerId for names and timeline lookup.
+    for session in agg["sessions"]:
+        session["_sid"] = session.pop("_cursor_sid", None) or session.get("_sid") or session.get("id")
+        session["id"] = session["_sid"][:8]
+        session["models"] = response_models_by_session.get(session["_sid"], session.get("models", []))[:6]
+        session["nmodels"] = len(response_models_by_session.get(session["_sid"], session.get("models", [])))
+        if not session.get("model") or session.get("model") == "Unknown":
+            known = [model for model in session.get("models", []) if model != "Unknown"]
+            if known:
+                session["model"] = known[0]
+
+    global_states = {}
+    for session in agg["sessions"]:
+        for key, fields in (session.get("record_availability") or {}).items():
+            global_states.setdefault(key, []).append(fields.get("input_output", "unavailable"))
+    global_quality = {}
+    for key, states in global_states.items():
+        status = _cursor_combine_status(states)
+        availability = _cursor_availability(status)
+        global_quality[key] = availability
+        if key in agg["records"]:
+            agg["records"][key]["usage_status"] = status
+            agg["records"][key]["usage_availability"] = availability
+    detail_status = "partial" if snapshot.get("detail_partial") else "recorded"
+    summary_usage = _cursor_combine_status(summary_usage_states)
+    agg["cursor"] = {
+        "usage_status": summary_usage,
+        "usage_availability": _cursor_availability(summary_usage),
+        "model_status": _cursor_combine_status(summary_model_states),
+        "detail_status": detail_status,
+        "record_availability": global_quality,
+    }
+    agg["first_ts"] = global_first[1] if global_first else None
+    agg["last_ts"] = global_last[1] if global_last else None
 
 
 # ===========================================================================
@@ -4387,10 +4609,36 @@ def update_file(agg, source, path, editor_hint, proj_map):
         fresh["mtime"] = max((x[2] for x in sig), default=mtime)
         return fresh
 
-    if source in ("gemini", "cursor", "hermes"):
+    if source == "cursor":
+        if __package__:
+            from . import cursor_data as CD
+        else:
+            import cursor_data as CD
+        wal = path + "-wal"
+        try:
+            wst = os.stat(wal)
+        except OSError:
+            wst = None
+        workspace_sig = CD.workspace_signature(path)
+        sig = [size, st.st_mtime_ns, wst.st_size if wst else 0,
+               wst.st_mtime_ns if wst else 0, workspace_sig]
+        if agg and agg.get("_sig") == sig and agg.get("cursor_schema") == CD.CURSOR_SCHEMA:
+            return agg
+        fresh = _blank_agg(source, path)
+        fresh["editor"] = editor_hint
+        if agg and isinstance(agg.get("_cursor_history"), dict):
+            fresh["_cursor_history"] = agg["_cursor_history"]
+        parse_cursor(fresh, path)
+        fresh["_sig"] = sig
+        fresh["cursor_schema"] = CD.CURSOR_SCHEMA
+        fresh["size"] = size + (wst.st_size if wst else 0)
+        fresh["mtime"] = max(mtime, wst.st_mtime if wst else 0)
+        return fresh
+
+    if source in ("gemini", "hermes"):
         # A live SQLite writer can append to the WAL without touching the main
         # database. Include it, or Cursor/Hermes stay stale until a checkpoint.
-        wal = path + "-wal" if source in ("cursor", "hermes") else None
+        wal = path + "-wal" if source == "hermes" else None
         try:
             wst = os.stat(wal) if wal else None
         except FileNotFoundError:
@@ -4403,8 +4651,6 @@ def update_file(agg, source, path, editor_hint, proj_map):
         if source == "gemini":
             parse_gemini(fresh, path)
             _finalize_session(fresh, source, path)
-        elif source == "cursor":
-            parse_cursor(fresh, path)   # sets its own per-composer sessions
         else:
             parse_hermes(fresh, path)   # sets its own per-session sessions
         fresh["_sig"] = sig

@@ -109,26 +109,29 @@ def discover_conversations(roots=None):
 
 
 def legacy_pb_inventory(roots=None):
-    """Count unsupported legacy ``.pb`` files without reading their contents."""
+    """Count unsupported conversation/implicit ``.pb`` files, without opening them."""
     roots = conversation_roots() if roots is None else roots
     seen, count = set(), 0
     for entry in roots:
         root, _editor = _root_entry(entry)
-        directory = os.path.join(root, "conversations")
-        if os.path.islink(root) or os.path.islink(directory):
+        if os.path.islink(root):
             continue
-        for path in glob.glob(os.path.join(directory, "*.pb")):
-            try:
-                if os.path.islink(path) or not _under_root(path, root):
-                    continue
-                st = os.stat(path, follow_symlinks=False)
-                if stat.S_ISREG(st.st_mode):
-                    inode = (st.st_dev, st.st_ino)
-                    if inode not in seen:
-                        seen.add(inode)
-                        count += 1
-            except OSError:
+        for leaf in ("conversations", "implicit"):
+            directory = os.path.join(root, leaf)
+            if os.path.islink(directory):
                 continue
+            for path in glob.glob(os.path.join(directory, "*.pb")):
+                try:
+                    if os.path.islink(path) or not _under_root(path, root):
+                        continue
+                    st = os.stat(path, follow_symlinks=False)
+                    if stat.S_ISREG(st.st_mode):
+                        inode = (st.st_dev, st.st_ino)
+                        if inode not in seen:
+                            seen.add(inode)
+                            count += 1
+                except OSError:
+                    continue
     return count
 
 

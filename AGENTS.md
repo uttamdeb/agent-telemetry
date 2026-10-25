@@ -137,6 +137,7 @@ accurately. Keep the existing public tag intact when adding packaging metadata/a
 |---|---|
 | `dashboard.py` | stdlib `http.server`. Serves `/`, `/static/*`, `/chart.js`, `/manifest.json`, `/sw.js`, `/api/{data,storage,refresh,settings,cache,update,release-notes,devices}`. Owns the cache, the aggregate merge, `_cost()` and the device sharing listener. |
 | `parser.py` | `discover()` lists log files; `update_file()` routes each to a `parse_*`. Holds `PRICING` and the model-name normalizers. |
+| `cursor_data.py` | Bounded read-only Cursor metadata and conversation-event projection; no raw content retained. |
 | `antigravity.py` | Read-only Antigravity SQLite conversation snapshot and bounded safe event reader; parser integration routes the same records to every client. |
 | `static/core.js` | `SRC`/`ORDER`, state `S`, formatting, date ranges, filtering. |
 | `static/tool-icons/` | Bundled tool/provider SVG marks, pinned sources and licenses. |
@@ -662,11 +663,24 @@ existing guarded `GET /api/local-servers` for the separate local server list.
   `SubAgentActivity` "started" markers into `subagents` (a count, the same field
   Cursor uses) — read that, not `side` (which Codex never sets: its subagents are
   wholly separate sessions, not sidechain records mixed into the parent's stream).
-- **Cursor** (`state.vscdb`): sessions in `cursorDiskKV` under `composerData:*` (newer
-  builds also `composerHeaders`); messages are `bubbleId:*`. Each bubble has its **own**
-  `createdAt` — use it, not the session's, or a months-long session lands on day one.
-  `ItemTable` holds `aiCodeTracking.dailyStats.*` (AI lines suggested vs accepted). Only
-  ~2% of bubbles carry tokens; that's Cursor, not a parsing gap.
+- **Cursor** (`state.vscdb`): `cursor_data.py` reads bounded, read-only snapshots of
+  `composerHeaders`, `composerData:*` and `bubbleId:*`. Explicit workspace mappings
+  come from sibling `workspaceStorage` metadata; cwd remains private. Preserve full
+  composer IDs, per-message dates, safe tool labels/status, explicit parent links and
+  recorded usage only. Current model/context settings are separate from historical
+  response/model/token attribution. Zero token placeholders mean unavailable, not
+  free usage. `agentKv` enrichment requires unambiguous request/tool-call IDs; no
+  arbitrary row-order inheritance, text-length estimates, context-meter billing or
+  DB-mtime activity dates. Unknown binary detail stays unavailable. Timeline output
+  is whitelisted, bounded and resolved from the full ledger identity/discovered DB.
+  Private hashed bubble summaries preserve telemetry after source tombstones;
+  restored rows replace their original contribution. Undated receipts remain
+  whole-session supplements outside dated totals. Cache 63 retains v53–62 ledgers
+  and v52–62 peers; do not rebuild.
+  Cursor peer exports use explicit safe allowlists and opaque store keys, never
+  workspace paths, raw events, request joins, blobs or source content. See
+  docs/cursor.md and docs/cursor-codeburn-comparison.md. Metadata-only activity
+  remains visible separately from Overview's token/cost shares.
 - **Copilot** logs real `promptTokens`/`completionTokens` on finished requests in current
   VS Code builds; older chats have none, so their tokens are estimated from message text
   (chars/4). It also logs a premium-request multiplier in `result.details` ("… • 1x") —

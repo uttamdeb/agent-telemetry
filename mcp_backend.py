@@ -33,7 +33,9 @@ _TIMELINE_NUMBERS = {
 }
 _TIMELINE_STATUSES = {
     "unknown", "pending", "running", "done", "invalid", "cleared", "canceled",
-    "error", "generating", "waiting", "queued", "interrupted",
+    "error", "generating", "waiting", "queued", "interrupted", "completed", "success",
+    "failed", "cancelled", "skipped", "accepted", "rejected", "partial", "started",
+    "finished", "blocked",
 }
 _TIMELINE_USAGE_AVAILABILITY = {
     "input_output", "cache_read", "cache_write", "reasoning", "response_output",
@@ -284,6 +286,10 @@ def _safe_timeline(raw):
             safe = _safe_text(event.get(field))
             if safe is not None:
                 item[field] = safe
+        if kind == "user_turn":
+            requested_model = _safe_text(event.get("requested_model"))
+            if requested_model is not None:
+                item["requested_model"] = requested_model
         for field in ("subagent_role", "subagent_type"):
             safe = _safe_text(event.get(field), 80)
             if safe is not None:
@@ -299,6 +305,9 @@ def _safe_timeline(raw):
         status = event.get("status")
         if kind == "tool" and isinstance(status, str) and status in _TIMELINE_STATUSES:
             item["status"] = status
+        usage_status = event.get("usage_status")
+        if isinstance(usage_status, str) and usage_status in ("recorded", "partial", "unavailable"):
+            item["usage_status"] = usage_status
         availability = event.get("usage_availability")
         if isinstance(availability, dict):
             safe_availability = {
@@ -484,7 +493,7 @@ def _timeline(payload, arguments, policy, builder):
         return _safe_timeline({"available": False, "events": [], "detail": "remote_source"})
     if selected.get("archived") is True:
         return _safe_timeline({"available": False, "events": [], "detail": "archived_source"})
-    if source not in ("claude", "claude-desktop", "codex", "antigravity"):
+    if source not in ("claude", "claude-desktop", "codex", "antigravity", "cursor"):
         return _safe_timeline({"available": False, "events": [], "detail": "unsupported_tool"})
     try:
         result = builder(device, source, native_id,

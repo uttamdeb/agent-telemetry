@@ -12,7 +12,7 @@ import zipfile
 
 
 MODULES = {
-    "__init__.py", "__main__.py", "cli.py", "dashboard.py", "editor_snapshot.py", "parser.py", "antigravity.py",
+    "__init__.py", "__main__.py", "cli.py", "dashboard.py", "editor_snapshot.py", "parser.py", "antigravity.py", "cursor_data.py",
     "native.py", "accounts.py", "session_names.py", "release_notes.py",
     "local_servers.py", "local_servers_windows.py",
     "ledger_backups.py", "diagnostics.py", "session_timeline.py", "native_activity.py",

@@ -267,7 +267,7 @@ instead of cloning, delete `.usage_cache.json` first — that file is your perso
 | **Claude Desktop** (agent mode) | `Claude/local-agent-mode-sessions/**` under App Support / `%APPDATA%` / `~/.config` | exact |
 | **Codex** | `~/.codex/sessions/**`, `~/.codex/archived_sessions/**` | exact (in/cached/out/reasoning); subagents are identified and labelled |
 | **GitHub Copilot** | VS Code-family `chatSessions/*.{json,jsonl}`; SDK/CLI `~/.copilot/session-state/*/events.jsonl`, enriched from VS Code `agentSessionData/*/session.db` | recorded request/turn tokens where available; SDK shutdown totals where safely dated. SDK gaps show a warning tooltip and unavailable/partial usage; older non-SDK chats retain text estimates. Premium multipliers are separate from estimated dollars. |
-| **Cursor** (native AI) | `Cursor/User/globalStorage/state.vscdb` under App Support / `%APPDATA%` / `~/.config` | partial — model, mode, timestamps, tool calls and AI-line stats are exact; tokens are on only ~2% of messages |
+| **Cursor** (native AI) | `Cursor/User/globalStorage/state.vscdb` under App Support / `%APPDATA%` / `~/.config` | recorded, partial or unavailable per session/model: explicit message input/output tokens, models, tools and AI-line stats where the local records expose them |
 | **Google Antigravity** | `~/.gemini/antigravity/conversations/*.db`, `~/.gemini/antigravity-ide/conversations/*.db`, `~/.gemini/antigravity-cli/conversations/*.db` | recorded SQLite usage with per-field availability; standalone legacy `.pb` files are unsupported |
 | **OpenCode** | `~/.local/share/opencode/opencode.db`, `%LOCALAPPDATA%\opencode\opencode.db`, `~/.opencode/opencode.db` (or `$OPENCODE_DATA_DIR`) | V1/V2 SQLite; exact (in/out/reasoning/cache), prompts and tools; cost is read from OpenCode's own per-message value |
 | **Hermes Agent** | `~/.hermes/state.db` (or `$HERMES_HOME`, `%LOCALAPPDATA%\hermes`) | exact (in/out/cache/reasoning, per model) |
@@ -279,6 +279,9 @@ Models table lists each `model × tool` row separately.
 
 Antigravity's supported SQLite schema, duplicate-row handling, recorded checkpoint detail,
 and format limits are documented in [Google Antigravity support](docs/antigravity.md).
+
+Cursor's local conversation metadata is documented in [Cursor support](docs/cursor.md),
+including its model/token coverage states, workspace associations, subagents, and limits.
 
 Copilot's newer SDK-based agent sessions use a different store from older Copilot Chat.
 AgentTelemetry joins their event history to VS Code's saved per-turn usage using native
@@ -476,10 +479,15 @@ dollars**, so cost is always derived. Rates live in `parser.py → PRICING` as
   see `parser.py → PRICE_HISTORY`.
 - **These are API-equivalent values.** If you're on a subscription (Claude Max/Pro, Codex,
   Copilot), you don't pay per token — the $ is "what this would cost at API rates."
-- **Cursor** rarely logs token counts, and **older Copilot chats** have none, so their tokens
-  (and thus $) are rough. Current Copilot builds log real per-request tokens, which are used.
-  Copilot's honest metric is **request count** and its **premium-request** total (both shown);
-  Cursor's is **messages, tool calls and AI lines kept** (also shown).
+- **Cursor** exposes explicit input/output token receipts for some messages; missing and
+  placeholder values are unavailable, and usage coverage can be partial. Cache and reasoning
+  values remain unavailable unless recorded. Overview shows observed Cursor prompts, replies,
+  and tool calls separately when they have no token/cost coverage. It does not estimate tokens
+  from text or context meters, infer subscription charges, or count metadata as tokens. The
+  **Exact tokens only** filter omits Cursor because local token coverage is incomplete. See
+  [Cursor support](docs/cursor.md). **Older Copilot chats** may have no token data; current
+  Copilot builds log real per-request tokens. Copilot's honest metric is **request count** and
+  its **premium-request** total (both shown); Cursor also exposes **AI lines kept**.
 - **Billing details that change the price are applied**: prompt-cache writes at their own
   rate (Claude and GPT-5.6/GPT-6), Claude fast mode, US-only inference (1.1x) and web
   searches ($10/1K). A forked or subagent Codex thread's replay of its parent is skipped,

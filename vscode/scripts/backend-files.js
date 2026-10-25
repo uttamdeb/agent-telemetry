@@ -3,7 +3,7 @@
 // Deliberately list every distributable file. Never copy a checkout directory:
 // it may contain a user's sole remaining ledger or private device metadata.
 module.exports = Object.freeze([
-  'dashboard.py', 'editor_snapshot.py', 'parser.py', 'antigravity.py', 'native.py',
+  'dashboard.py', 'editor_snapshot.py', 'parser.py', 'antigravity.py', 'cursor_data.py', 'native.py',
   'session_names.py', 'accounts.py', 'release_notes.py', 'local_servers.py',
   'local_servers_windows.py', 'ledger_backups.py', 'session_timeline.py', 'native_activity.py',
   'diagnostics.py', 'mcp_access.py', 'mcp_backend.py', 'mcp_protocol.py',
