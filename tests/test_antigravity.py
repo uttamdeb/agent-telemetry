@@ -489,6 +489,16 @@ class AntigravityReaderTests(unittest.TestCase):
         self.assertEqual({label for _, label in found}, {"Antigravity IDE", "Antigravity CLI"})
         self.assertEqual(AG.legacy_pb_inventory(roots), 1)
 
+        implicit = first_root / "implicit"
+        implicit.mkdir()
+        (implicit / "background.pb").write_bytes(b"opaque implicit history")
+        nested = implicit / "unrelated"
+        nested.mkdir()
+        (nested / "not-scanned.pb").write_bytes(b"outside the direct inventory")
+        # Inventory is metadata-only: do not attempt to decode opaque transcripts.
+        with patch("builtins.open", side_effect=AssertionError("must not read .pb content")):
+            self.assertEqual(AG.legacy_pb_inventory(roots), 2)
+
     def test_read_only_connection_and_wal_snapshot(self):
         path = self.make_db(steps=[(1, 15, 3, step_metadata(self.seconds + 1,
             usage=usage_proto(input_tokens=2, output_tokens=1, request_id="wal-response")), None)])

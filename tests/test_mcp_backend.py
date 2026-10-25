@@ -77,6 +77,8 @@ class MCPBackendTests(unittest.TestCase):
         mcp_access.configure(self.url, self.data, {"enabled": True, "confirmed": True})
         self.token = mcp_access.credentials(self.url)
         self.calls = {"payload": 0, "health": 0, "accounts": 0, "timeline": 0}
+        self.timeline_expectation = (LOCAL, "codex", NATIVE_ID)
+        self.timeline_expected_dates = {"date_from": None, "date_to": None}
         self.payload = _payload()
         self.builders = {
             "payload": self._payload,
@@ -100,7 +102,23 @@ class MCPBackendTests(unittest.TestCase):
 
     def _timeline(self, device, source, session_id, **kwargs):
         self.calls["timeline"] += 1
-        self.assertEqual((device, source, session_id), (LOCAL, "codex", NATIVE_ID))
+        self.assertEqual((device, source, session_id), self.timeline_expectation)
+        self.assertEqual(kwargs, self.timeline_expected_dates)
+        if source == "cursor":
+            return {
+                "available": True, "truncated": False, "detail": "source log",
+                "events": [
+                    {"kind": "user_turn", "timestamp": TODAY + "T10:00:00Z",
+                     "requested_model": "cursor-requested-model", "prompt": "CURSOR_PROMPT_SENTINEL",
+                     "path": "/Users/private/Cursor/state.vscdb"},
+                    {"kind": "request", "timestamp": TODAY + "T10:00:01Z",
+                     "model": "cursor-observed-model", "input": 12, "output": 3,
+                     "usage_status": "partial",
+                     "usage_availability": {"input_output": "partial", "cache_read": "unavailable"},
+                     "source_path": "/Users/private/Cursor/state.vscdb",
+                     "request_id": "CURSOR_REQUEST_ID_SENTINEL"},
+                ],
+            }
         return {
             "available": True, "truncated": False, "detail": "source log",
             "events": [{
@@ -144,6 +162,52 @@ class MCPBackendTests(unittest.TestCase):
         for secret in (NATIVE_ID, "PROMPT_SENTINEL", "SENTINEL", "secret.log"):
             self.assertNotIn(secret, rendered)
         self.assertEqual(timeline["detail"], "source log")
+
+    def test_cursor_mcp_timeline_forwards_date_bounds_and_never_path_or_source_content(self):
+        cursor_id = "cursor-full-composer-id-123456789"
+        cursor_session = {
+            "source": "cursor", "device": LOCAL, "rename_id": cursor_id,
+            "project": PROJECT, "ide": "Cursor", "model": "cursor-observed-model",
+            "title": "private Cursor title", "path": "/Users/private/Cursor/state.vscdb",
+            "start": TODAY + "T10:00:00Z", "end": TODAY + "T10:01:00Z",
+            "archived": False, "usage_status": "partial",
+            "undated_usage": {"in": 90, "out": 12, "asst": 2,
+                              "model": "PRIVATE-UNDATED-MODEL",
+                              "prompt": "PRIVATE-UNDATED-PROMPT"},
+        }
+        self.payload["sessions"].append(cursor_session)
+        sessions = self.execute("list_sessions", {"from": "2026-10-17", "to": TODAY})
+        cursor_item = next(item for item in sessions["sessions"] if item["tool"] == "cursor")
+        self.assertEqual(cursor_item["undated_usage"], {"in": 90, "out": 12, "asst": 2})
+        self.assertEqual(cursor_item["undated_usage_scope"],
+                         "whole-session (not filtered by date range)")
+        self.assertNotIn("model", cursor_item["undated_usage"])
+        self.assertIsNone(cursor_item["tokens"])
+        self.assertEqual(sessions["totals"]["tokens"], 135,
+                         "undated Cursor usage is excluded from selected-range MCP totals")
+        listed_json = json.dumps(sessions)
+        self.assertNotIn("PRIVATE-UNDATED-MODEL", listed_json)
+        self.assertNotIn("PRIVATE-UNDATED-PROMPT", listed_json)
+        policy = {"include_peers": False, "alias_key": "cursor-safe-timeline-test-key"}
+        selector = telemetry_query.session_alias(cursor_session, policy)
+        self.timeline_expectation = (LOCAL, "cursor", cursor_id)
+        self.timeline_expected_dates = {"date_from": "2026-10-17", "date_to": TODAY}
+
+        result = mcp_backend._timeline(self.payload, {
+            "session": selector, "from": "2026-10-17", "to": TODAY,
+        }, policy, self._timeline)
+        self.assertEqual(result["detail"], "source log")
+        self.assertEqual(result["events"][0]["requested_model"], "cursor-requested-model")
+        self.assertEqual(result["events"][1]["usage_status"], "partial")
+        self.assertEqual(result["events"][1]["usage_availability"]["cache_read"], "unavailable")
+        rendered = json.dumps(result)
+        for secret in (cursor_id, "private Cursor title", "CURSOR_PROMPT_SENTINEL",
+                       "CURSOR_REQUEST_ID_SENTINEL", "/Users/private", "state.vscdb"):
+            self.assertNotIn(secret, rendered)
+        with self.assertRaises(mcp_backend.mcp_tools.ToolArgumentError):
+            mcp_backend.mcp_tools.validate_arguments("get_session_timeline", {
+                "session": selector, "path": "/Users/private/Cursor/state.vscdb",
+            })
 
     def test_timeline_reasons_are_fixed_and_remote_or_archived_sources_are_never_read(self):
         remote_session = {

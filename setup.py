@@ -10,6 +10,7 @@ ALLOWED_MODULES = {
     "accounts",
     "antigravity",
     "cli",
+    "cursor_data",
     "dashboard",
     "editor_snapshot",
     "ledger_backups",

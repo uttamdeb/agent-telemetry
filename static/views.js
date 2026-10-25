@@ -540,6 +540,29 @@ async function refreshAccount(source){
   finally{accountBusy=false;renderAccountLimits();}
 }
 
+function cursorActivityNoteHTML(sessions){
+  // Cursor's message/tool metadata can exist without usable token receipts.
+  // Keep that observed activity beside the share chart, never in its total.
+  if(S.exactOnly||S.models.size||S.provs.size||!(S.metric==="tokens"||S.metric==="cost")) return "";
+  const rows=(sessions||[]).filter(s=>s.source==="cursor"
+    &&["partial","unavailable","unknown"].includes(sessionUsageStatus(s))
+    &&["user","asst","tools"].some(k=>Number.isSafeInteger(s[k])&&s[k]>0));
+  if(!rows.length) return "";
+  const count=key=>rows.reduce((sum,s)=>sum+(Number.isSafeInteger(s[key])&&s[key]>0?s[key]:0),0);
+  const parts=[];
+  for(const [key,label] of [["user","prompts"],["asst","replies"],["tools","tool calls"]]){
+    const value=count(key);if(value) parts.push(`${fmtNum(value)} ${label}`);
+  }
+  const unavailable=rows.filter(s=>sessionUsageStatus(s)==="unavailable").length;
+  const partial=rows.filter(s=>sessionUsageStatus(s)==="partial").length;
+  const unknown=rows.filter(s=>sessionUsageStatus(s)==="unknown").length;
+  const coverage=[];
+  if(unavailable) coverage.push(`${fmtNum(unavailable)} unavailable`);
+  if(partial) coverage.push(`${fmtNum(partial)} partial`);
+  if(unknown) coverage.push(`${fmtNum(unknown)} with coverage not recorded`);
+  return `<p class="hint cursor-activity-note" role="note">${toolLabel("cursor")} activity observed in ${fmtNum(rows.length)} session${rows.length===1?"":"s"}${parts.length?`: ${parts.join(" · ")}`:""}. Token coverage is ${coverage.join(" · ")}. These activity counts are separate from the share; only recorded token and cost values contribute to it.</p>`;
+}
+
 function viewOverview(d){
   renderUsageChange("overview",d);
   const pd = hasPrev() ? slice(prevRange()) : null;
@@ -609,6 +632,7 @@ function viewOverview(d){
   barList("toolShare", bySrcOrder(bySrc).map(s=>({source:s,label:SRC[s].label, value:bySrc[s], color:srcColor(s),
       sub:`${fmtNum(sBy[s]||0)} session${sBy[s]===1?"":"s"} · ${fmtNum(uBy[s]||0)} prompts`}))
     .sort((a,b)=>b.value-a.value), {fmt});
+  document.getElementById("toolShare").innerHTML+=cursorActivityNoteHTML(d.sessions);
 
   // model mix
   document.getElementById("modelMixSub").textContent = `share of ${metricNoun()}, and the tools that ran each`;
@@ -830,6 +854,32 @@ function viewCost(d){
 }
 
 /* ---------------- MODELS ---------------- */
+const MODEL_QUALITY_STATES=new Set(["recorded","partial","unavailable"]);
+function modelRecordQuality(records,field=null){
+  const states=(records||[]).map(record=>{
+    const value=field?record.usage_availability?.[field]:record.usage_status;
+    if(MODEL_QUALITY_STATES.has(value)) return value;
+    if(MODEL_QUALITY_STATES.has(record.usage_status)) return record.usage_status;
+    return record.source==="cursor"?"unknown":"recorded";
+  });
+  if(!states.length||states.every(state=>state==="recorded")) return "recorded";
+  if(states.every(state=>state==="unavailable")) return "unavailable";
+  if(states.every(state=>state==="unknown")) return "unknown";
+  if(states.includes("unknown")) return "unknown";
+  return "partial";
+}
+function modelUsageValue(value,state){
+  if(state==="unavailable") return "Unavailable";
+  if(state==="unknown") return value>0?`Coverage not recorded · ${fmtTok(value)}`:"Not recorded";
+  if(state==="partial") return `Partial · ${fmtTok(value)}`;
+  return fmtTok(value);
+}
+function modelCostValue(cost,state,unpriced){
+  if(state==="unavailable") return "Unavailable";
+  if(state==="unknown") return cost>0?`Coverage not recorded · ${fmtUSD2(cost)}`:"Not recorded";
+  if(unpriced) return modelCostCoverage(cost,true,fmtUSD2);
+  return state==="partial"?`Partial · ${fmtUSD2(cost)}`:fmtUSD2(cost);
+}
 function viewModels(d){
   renderModelEff(d);
   const val = metricOf(), fmt = fmtOf();
@@ -841,11 +891,13 @@ function viewModels(d){
     (provModels[p]=provModels[p]||{})[r.model]=(provModels[p][r.model]||0)+v;
     (provTools[p]=provTools[p]||{})[r.source]=(provTools[p][r.source]||0)+v;
     const unknownPrice=unpricedUsageRow(r);
-    const e=byModel[r.model]||(byModel[r.model]={model:r.model,tok:0,cost:0,msgs:0,in:0,out:0,cr:0,cc:0,unpriced:false,tools:{}});
+    const e=byModel[r.model]||(byModel[r.model]={model:r.model,tok:0,cost:0,msgs:0,in:0,out:0,cr:0,cc:0,unpriced:false,tools:{},records:[]});
     e.tok+=tk; e.cost+=r.cost||0; e.msgs+=r.asst||0; e.in+=r.in||0; e.out+=r.out||0; e.cr+=r.cr||0; e.cc+=r.cc||0;
+    e.records.push(r);
     e.unpriced ||= unknownPrice;
-    const te=e.tools[r.source]||(e.tools[r.source]={source:r.source,tok:0,cost:0,msgs:0,in:0,out:0,cr:0,cc:0,unpriced:false});
+    const te=e.tools[r.source]||(e.tools[r.source]={source:r.source,tok:0,cost:0,msgs:0,in:0,out:0,cr:0,cc:0,unpriced:false,records:[]});
     te.tok+=tk; te.cost+=r.cost||0; te.msgs+=r.asst||0; te.in+=r.in||0; te.out+=r.out||0; te.cr+=r.cr||0; te.cc+=r.cc||0;
+    te.records.push(r);
     te.unpriced ||= unknownPrice;
   }
   const provs = PROVIDERS.filter(p=>prov[p]);
@@ -866,20 +918,25 @@ function viewModels(d){
 
   // model table — one row per model; several tools → expandable per-tool split
   const tokGrand = Object.values(byModel).reduce((a,x)=>a+x.tok,0) || 1;
+  const shareQuality=(S.metric==="tokens"||S.metric==="cost")?modelRecordQuality(recs):"recorded";
   const rows = Object.values(byModel).filter(e=>e.tok||e.cost||e.msgs).map(e=>{
     const toolList = Object.values(e.tools).sort((a,b)=>b.tok-a.tok);
+    const usageStatus=modelRecordQuality(e.records);
     return {...e, toolList, toolsKey:toolList.map(t=>SRC[t.source].label).join(","),
+      usageStatus,outputStatus:modelRecordQuality(e.records,"input_output"),cacheReadStatus:modelRecordQuality(e.records,"cache_read"),
       share:e.tok/tokGrand, rate:e.tok?e.cost/e.tok*1e6:0, prov:providerOf(e.model)};
   });
   const cols=[["model","Model"],["toolsKey","Tool"],["prov","Provider"],["tok","Tokens"],
     ["out","Output"],["cr","Cache read"],["cost","Est. $"],["msgs","Replies"],
-    ["rate","$/Mtok","effective blended rate"],["share","Share","share of tokens"]];
+    ["rate","$/Mtok","effective blended rate"],["share","Share",shareQuality==="recorded"?"share of tokens":"share of recorded tokens; usage coverage is incomplete"]];
   const subRow = t=>{
     const rate = t.tok?t.cost/t.tok*1e6:0;
+    const usageStatus=modelRecordQuality(t.records),outputStatus=modelRecordQuality(t.records,"input_output"),
+      cacheReadStatus=modelRecordQuality(t.records,"cache_read");
     return `<tr class="sub-row"><td colspan="2" class="dim">└ ${srcBadge(t.source)}</td><td></td>
-      <td class="r dim">${fmtTok(t.tok)}</td><td class="r dim">${fmtTok(t.out)}</td>
-      <td class="r dim">${fmtTok(t.cr)}</td><td class="r dim">${modelCostCoverage(t.cost,t.unpriced)}</td>
-      <td class="r dim">${fmtNum(t.msgs)}</td><td class="r dim">${t.unpriced?(t.cost>0?`Partial · $${rate.toFixed(2)}`:"Unavailable"):`$${rate.toFixed(2)}`}</td><td></td></tr>`;
+      <td class="r dim">${modelUsageValue(t.tok,usageStatus)}</td><td class="r dim">${modelUsageValue(t.out,outputStatus)}</td>
+      <td class="r dim">${modelUsageValue(t.cr,cacheReadStatus)}</td><td class="r dim">${modelCostValue(t.cost,usageStatus,t.unpriced)}</td>
+      <td class="r dim">${fmtNum(t.msgs)}</td><td class="r dim">${usageStatus==="unavailable"?"Unavailable":usageStatus==="unknown"?"Not recorded":t.unpriced?(t.cost>0?`Partial · $${rate.toFixed(2)}`:"Unavailable"):usageStatus==="partial"?`Partial · $${rate.toFixed(2)}`:`$${rate.toFixed(2)}`}</td><td></td></tr>`;
   };
   document.getElementById("modelTable").innerHTML = thead(cols,S.modelSort,"model")+"<tbody>"+
     sortRows(rows, S.modelSort).map(r=>{
@@ -887,10 +944,10 @@ function viewModels(d){
       const main = `<tr class="${multi?"clickable":""}" ${multi?`data-model="${esc(r.model)}"`:""}>
         <td class="name">${multi?`<span class="caret">${expanded?"▾":"▸"}</span>`:'<span class="caret"></span>'}<span class="sw" style="background:${modelColor(r.model)};margin-right:8px"></span>${esc(r.model)}${modelPriceWarning(r.model,r.unpriced,r.cost)}</td>
         <td>${r.toolList.map(t=>srcBadge(t.source)).join(" ")}</td><td class="dim">${esc(r.prov)}</td>
-        <td class="r">${fmtTok(r.tok)}</td><td class="r">${fmtTok(r.out)}</td>
-        <td class="r">${fmtTok(r.cr)}</td><td class="r"><b>${modelCostCoverage(r.cost,r.unpriced)}</b></td>
-        <td class="r">${fmtNum(r.msgs)}</td><td class="r">${r.unpriced?(r.cost>0?`Partial · $${r.rate.toFixed(2)}`:"Unavailable"):`$${r.rate.toFixed(2)}`}</td>
-        <td class="r dim">${fmtPct(r.share)}</td></tr>`;
+        <td class="r">${modelUsageValue(r.tok,r.usageStatus)}</td><td class="r">${modelUsageValue(r.out,r.outputStatus)}</td>
+        <td class="r">${modelUsageValue(r.cr,r.cacheReadStatus)}</td><td class="r"><b>${modelCostValue(r.cost,r.usageStatus,r.unpriced)}</b></td>
+        <td class="r">${fmtNum(r.msgs)}</td><td class="r">${r.usageStatus==="unavailable"?"Unavailable":r.usageStatus==="unknown"?"Not recorded":r.unpriced?(r.cost>0?`Partial · $${r.rate.toFixed(2)}`:"Unavailable"):r.usageStatus==="partial"?`Partial · $${r.rate.toFixed(2)}`:`$${r.rate.toFixed(2)}`}</td>
+        <td class="r dim">${(S.metric==="tokens"||S.metric==="cost")&&["unavailable","unknown"].includes(r.usageStatus)?"—":(S.metric==="tokens"||S.metric==="cost")&&shareQuality!=="recorded"?r.tok?`Partial · ${fmtPct(r.share)}`:"—":fmtPct(r.share)}</td></tr>`;
       return expanded ? main+r.toolList.map(subRow).join("") : main;
     }).join("")+"</tbody>";
 
@@ -1199,6 +1256,16 @@ function sessionModelSummary(s){ return s.model_scoped||sessionModelsInRange(s,r
 function sessionUnpricedModels(s){
   if(!(Number(s?.tok)>0)) return [];
   const summary=sessionModelSummary(s);
+  if(s.source==="cursor"&&["partial","unavailable"].includes(summary.availability)){
+    const selected=range(),unknownDays=s.model_days?.Unknown;
+    const hasUnknownTokens=unknownDays&&typeof unknownDays==="object"&&!Array.isArray(unknownDays)
+      ?Object.entries(unknownDays).some(([date,row])=>isDay(date)&&date>=selected.from&&date<=selected.to
+        &&passModel("Unknown")&&Array.isArray(row)&&[1,2,3,4].some(index=>Number(row[index])>0))
+      :(RAW.records||[]).some(row=>row.source==="cursor"&&row.model==="Unknown"&&passModel("Unknown")
+        &&(!s.device||!row.device||row.device===s.device)&&(!s.project||!row.project||row.project===s.project)
+        &&(!selected||row.date>=selected.from&&row.date<=selected.to)&&recTokens(row)>0);
+    return hasUnknownTokens?["Unknown"]:[];
+  }
   const models=Array.isArray(summary.models)?summary.models:summary.model?[summary.model]:[];
   const selected=range();
   return [...new Set(models)].filter(model=>{
@@ -1211,12 +1278,15 @@ function sessionUnpricedModels(s){
   });
 }
 function sessionCostNote(s){
+  if(s.source==="cursor"&&sessionUsageStatus(s)==="unknown")
+    return "Cursor token coverage is not recorded in this older ledger entry. A zero total does not establish that the session used no tokens.";
   const models=sessionUnpricedModels(s);
   return models.length?`No API price row for ${models.join(", ")}. Estimated cost and rate are unavailable, not free.`:"";
 }
 function sessionCostValue(s){
   const status=sessionUsageStatus(s), cost=Number(s?.cost)||0;
   if(status==="unavailable") return "Unavailable";
+  if(status==="unknown") return cost>0?`Coverage not recorded · ${fmtUSD2(cost)}`:"Not recorded";
   const unknown=sessionUnpricedModels(s).length>0;
   if(unknown) return modelCostCoverage(cost,true,fmtUSD2);
   return status==="partial"?`Partial · ${fmtUSD2(cost)}`:fmtUSD2(cost);
@@ -1224,6 +1294,7 @@ function sessionCostValue(s){
 function sessionCacheRate(s){
   const availability=s?.usage_availability||{};
   if(sessionUsageStatus(s)==="unavailable"||["input_output","cache_read","cache_write"].some(k=>availability[k]==="unavailable")) return "Unavailable";
+  if(sessionUsageStatus(s)==="unknown"||["input_output","cache_read","cache_write"].some(k=>availability[k]==="not_recorded")) return "Not recorded";
   const value=s.cache?fmtPct(s.cache):"—";
   return (sessionUsageStatus(s)==="partial"||["input_output","cache_read","cache_write"].some(k=>availability[k]==="partial"))&&value!=="—"?`Partial · ${value}`:value;
 }
@@ -1238,11 +1309,37 @@ function sessionModelList(summary){
 }
 function sessionModelHTML(s){
   const summary=sessionModelSummary(s), limited=summary.scope==="whole-session";
-  const description=limited?"Whole-session model. This older entry has no model-by-day detail for the current range.":
-    summary.nmodels?"Models with recorded usage in the selected date range and model/provider filters.":"No model usage was recorded in the selected date range and model/provider filters.";
+  const cursorNote=s.source==="cursor"&&summary.availability==="unavailable"
+    ?"Cursor did not record explicit assistant-message model labels. Usage with no verified model remains Unknown; the composer’s current model setting is not used as historical attribution."
+    :s.source==="cursor"&&summary.availability==="partial"
+      ?"Cursor recorded model labels for some assistant messages only. Missing labels are not inferred from the composer’s current model setting."
+      :s.source==="cursor"&&summary.availability==="not_recorded"
+        ?"Model coverage is not recorded in this older ledger entry. The composer’s current model setting is not used as historical attribution."
+        :"";
+  const description=cursorNote||(limited?"Whole-session model. This older entry has no model-by-day detail for the current range.":
+    summary.nmodels?"Models with recorded usage in the selected date range and model/provider filters.":"No model usage was recorded in the selected date range and model/provider filters.");
   return `<span title="${esc(description)}">${esc(summary.model)}</span>`
     +(summary.nmodels>1?` <span class="dim" title="${esc(sessionModelList(summary))}">+${summary.nmodels-1}</span>`:"")
-    +(limited?'<small class="session-model-scope">Whole session</small>':"");
+    +(summary.availability==="partial"?'<small class="session-model-scope">Partial model labels</small>':
+      limited?'<small class="session-model-scope">Whole session</small>':"");
+}
+function sessionModelAvailabilityDetails(s){
+  if(s.source!=="cursor") return "";
+  const status=(s.model_scoped||sessionModelsInRange(s,range())).availability;
+  const note=status==="unavailable"
+    ?"Cursor did not record explicit assistant-message model labels. Usage without a verified model remains Unknown; the current composer model is not substituted."
+    :status==="partial"
+      ?"Cursor recorded model labels for some assistant messages only. Other messages have no verified model label; the current composer model is not substituted."
+      :status==="not_recorded"
+        ?"Model coverage is not recorded in this older ledger entry. The current composer model is not used as historical attribution."
+        :"";
+  return note?`<p class="hint">${esc(note)}</p>`:"";
+}
+function sessionTokenValue(s){
+  const status=sessionUsageStatus(s), tokens=Number(s?.tok)||0;
+  if(status==="unavailable") return "Unavailable";
+  if(status==="unknown") return tokens?`Coverage not recorded · ${fmtTok(tokens)}`:"Not recorded";
+  return status==="partial"?`Partial · ${fmtTok(tokens)}`:fmtTok(tokens);
 }
 function sessionTypeCounts(rows){
   const subagents=rows.filter(s=>s.subagent).length;
@@ -1321,7 +1418,7 @@ function sdkUsageNote(s){
   return notes.join(" ");
 }
 function sessionUsageStatus(s){
-  return s?.usage_status || s?.copilot_sdk?.usage_status || "recorded";
+  return s?.usage_status || s?.copilot_sdk?.usage_status || (s?.source==="cursor"?"unknown":"recorded");
 }
 function sessionUsageNote(s){
   const notes=[];
@@ -1329,6 +1426,7 @@ function sessionUsageNote(s){
     const status=sessionUsageStatus(s), source=(SRC[s.source]||{label:s.source||"Source"}).label;
     if(status==="unavailable") notes.push(`${source} usage is unavailable, not zero. Token totals and estimated cost cannot be calculated from this session log; message counts remain separate.`);
     else if(status==="partial") notes.push(`${source} usage is partial. Only recorded counts are included; totals and estimated cost may undercount.`);
+    else if(status==="unknown") notes.push("Cursor token coverage is not recorded in this older ledger entry. Zero token fields do not mean there was no usage.");
   }
   const cost=sessionCostNote(s);
   if(cost) notes.push(cost);
@@ -1342,9 +1440,30 @@ function sessionUsageDetails(s){
   const note=sessionUsageNote(s);
   return note?`<div class="warnbar">${esc(note)}</div>`:"";
 }
+function cursorDetailStatusDetails(s){
+  if(s?.source!=="cursor"||s.detail_status==="recorded") return "";
+  const note=s.detail_status==="partial"
+    ?"Some Cursor conversation details are incomplete in the supported local records. Missing events are not inferred. This detail status does not change token totals."
+    :s.detail_status==="unavailable"
+      ?"Detailed Cursor conversation events are unavailable from this session's supported local records. This does not establish zero usage."
+      :"Cursor conversation detail coverage is not recorded in this older ledger entry.";
+  return `<div class="warnbar" role="note">${esc(note)}</div>`;
+}
+function sessionUndatedUsageDetails(s){
+  if(s?.source!=="cursor") return "";
+  const undated=s.undated_usage;
+  if(!undated||typeof undated!=="object"||Array.isArray(undated)) return "";
+  const count=value=>Number.isSafeInteger(value)&&value>0?value:0;
+  const input=count(undated.in),output=count(undated.out),total=input+output;
+  if(!Number.isSafeInteger(total)||total<=0) return "";
+  const model=typeof undated.model==="string"&&undated.model.trim()?esc(undated.model.trim()):"Unavailable";
+  return `<div class="warnbar" role="note">Additional undated recorded usage (whole session): ${fmtNum(total)} tokens (input ${fmtNum(input)}; output ${fmtNum(output)}). Model: ${model}. Not included in selected range.</div>`;
+}
 function sessionUsageField(s,key,value){
   const tokenField=["in","out","cr","cc","reason","response_out"].includes(key);
   if(tokenField&&sessionUsageStatus(s)==="unavailable") return "Unavailable";
+  if(tokenField&&sessionUsageStatus(s)==="unknown")
+    return Number(s?.[key])>0?`Coverage not recorded · ${value}`:"Not recorded";
   const field={in:"input_output",out:"input_output",cr:"cache_read",cc:"cache_write",reason:"reasoning",response_out:"response_output"}[key];
   const availability=field&&s.usage_availability?.[field];
   if(availability==="unavailable") return "Unavailable";
@@ -1488,7 +1607,7 @@ function viewSessions(d){
         ${sessionMeta?`<div class="session-name-meta">${sessionMeta}</div>`:""}</td>
       <td class="dim">${esc(s.project||"—")}</td>
       <td>${sessionModelHTML(s)}${reasoningEffortLabel(s)}</td>
-      <td class="r">${sessionUsageStatus(s)==="unavailable"?'<span class="dim" title="Token usage is unavailable, not zero">Unavailable</span>':fmtTok(s.tok)}</td><td class="r"><b>${sessionCostValue(s)}</b></td>
+      <td class="r">${sessionTokenValue(s)}</td><td class="r"><b>${sessionCostValue(s)}</b></td>
       <td class="r">${s.usage_in_parent?'<span class="dim" title="Not recorded for this child">—</span>':fmtNum(s.user)}</td><td class="r">${s.usage_in_parent?'<span class="dim" title="Not recorded for this child">—</span>':fmtNum(s.copilot_sdk?s.asst:(s.asst||s.req))}</td>
       <td class="r">${s.usage_in_parent?'<span class="dim" title="Not recorded for this child">—</span>':fmtNum(s.tools)}</td>
       <td class="r">${s.active?fmtDur(s.active):'<span class="dim">—</span>'}</td>
@@ -1525,7 +1644,7 @@ function openSessionParent(identity){
 function openSessionDetails(s,related=false){
   const relatedLimited=related&&!sessionDays(s);
   const row=(k,v)=>v==null||v===""?"":`<div class="kv"><span class="k">${k}</span><span class="v">${v}</span></div>`;
-  const responseOutputRecorded=s.source==="antigravity"&&(s.response_out!=null
+  const responseOutputRecorded=["antigravity","cursor"].includes(s.source)&&(s.response_out!=null
     ||Object.prototype.hasOwnProperty.call(s.usage_availability||{},"response_output"));
   const responseOutput=responseOutputRecorded
     ?sessionUsageField(s,"response_out",s.response_out==null?"Not recorded":fmtNum(s.response_out)):null;
@@ -1537,12 +1656,15 @@ function openSessionDetails(s,related=false){
     ${related&&!activeInRange(s,range())?'<div class="warnbar">This parent has no recorded activity matching the selected date and model filters.</div>':''}
     ${sessionTypeDetails(s)}
     ${sessionUsageDetails(s)}
+    ${cursorDetailStatusDetails(s)}
+    ${sessionUndatedUsageDetails(s)}
     ${row("Name scope",s.rename_scope==='display'?'AgentTelemetry only — Claude and its parent session are unchanged.':null)}
     ${row("Source title",s.display_alias?esc(s.original_title):null)}
     ${sessionDelegationDetails(s)}
     ${row("Device",multiDevice()?esc(deviceName(s.device||RAW.device.id)):null)}
     ${row("Project",esc(s.project||"—"))}
     ${row(sessionModelSummary(s).scope==="whole-session"?"Models (whole session)":"Models in selected range",esc(sessionModelList(sessionModelSummary(s))))}
+    ${sessionModelAvailabilityDetails(s)}
     ${sessionModelSummary(s).scope==="whole-session"?'<p class="hint">Model detail for this range is unavailable in this older entry. The model names cover the whole session.</p>':""}
     ${reasoningEffortDetails(s)}
     ${row("Git branch",s.branch?esc(s.branch):null)}
@@ -1555,12 +1677,12 @@ function openSessionDetails(s,related=false){
     ${row("Started",s.start?s.start.slice(0,19).replace("T"," "):"—")}
     ${row("Last activity",s.end?s.end.slice(0,19).replace("T"," "):"—")}
     ${row("Est. cost",sessionCostValue(s))}
-    ${row("Tokens",sessionUsageStatus(s)==="unavailable"?"Unavailable":fmtNum(s.tok))}
+    ${row("Tokens",sessionTokenValue(s))}
     ${row("· input",sdkField(s,"in",fmtNum(s.in)))}
     ${row("· cache read",sdkField(s,"cr",fmtNum(s.cr)))}
     ${row("· cache write",sdkField(s,"cc",fmtNum(s.cc)))}
     ${row("· output",sdkField(s,"out",fmtNum(s.out)))}
-    ${row("· reasoning (within output)",s.copilot_sdk||s.source==="antigravity"?sdkField(s,"reason",fmtNum(s.reason||0)):null)}
+    ${row("· reasoning (within output)",s.copilot_sdk||["antigravity","cursor"].includes(s.source)?sdkField(s,"reason",fmtNum(s.reason||0)):null)}
     ${row("· response output token subtype (whole session)",responseOutput)}
     ${row("Cache hit rate",sessionCacheRate(s))}
     ${row("Your prompts",s.usage_in_parent?null:fmtNum(s.user))}

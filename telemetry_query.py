@@ -742,9 +742,9 @@ def result_meta(payload: dict[str, Any], selection: dict[str, Any], *, policy: d
         else:
             precision, note = "unknown", "This source has no declared precision classification."
         source_info = {"tool": _KNOWN_TOOLS.get(safe_source, safe_source), "precision": precision, "note": note}
-        if safe_source == "antigravity":
+        if safe_source in ("antigravity", "cursor"):
             source_usage = context.get("source_usage") if isinstance(context.get("source_usage"), dict) else {}
-            quality = source_usage.get("antigravity") if isinstance(source_usage.get("antigravity"), dict) else {}
+            quality = source_usage.get(safe_source) if isinstance(source_usage.get(safe_source), dict) else {}
             status = quality.get("usage_status")
             availability = quality.get("usage_availability")
             if isinstance(status, str) and status in _USAGE_STATES:
@@ -754,10 +754,14 @@ def result_meta(payload: dict[str, Any], selection: dict[str, Any], *, policy: d
                     field: state for field, state in availability.items()
                     if field in _USAGE_AVAILABILITY_FIELDS and isinstance(state, str) and state in _USAGE_STATES
                 }
-            if status == "partial":
+            if safe_source == "antigravity" and status == "partial":
                 source_info["note"] = "Antigravity records usage partially; missing token fields are not inferred."
-            elif status == "unavailable":
+            elif safe_source == "antigravity" and status == "unavailable":
                 source_info["note"] = "Antigravity usage is unavailable; missing token fields are not inferred."
+            elif safe_source == "cursor" and status == "partial":
+                source_info["note"] = "Cursor records token usage for only a small share of messages; reported tokens are a lower bound, and missing fields are not inferred."
+            elif safe_source == "cursor" and status == "unavailable":
+                source_info["note"] = "Cursor usage is unavailable for the selected messages; missing token fields are not inferred."
         precision_by_source[safe_source] = source_info
     source_precision = [precision_by_source[key] for key in sorted(precision_by_source)]
     for source_info in source_precision:
@@ -985,6 +989,7 @@ def _session_model_summary(model_map: Any, session_model: str, session: dict[str
                 "model": None, "models": None, "nmodels": None,
                 "model_scope": "unavailable", "models_truncated": False,
             }
+
         # Legacy sessions can retain only their whole-session dominant model. Keep
         # that limitation explicit instead of presenting it as range-scoped detail.
         source_models = session.get("models") if isinstance(session, dict) else None
@@ -1066,6 +1071,18 @@ def _session_model_summary(model_map: Any, session_model: str, session: dict[str
     }
 
 
+def _cursor_undated_usage(value: Any) -> dict[str, int]:
+    """Return only safe integer Cursor counters; never infer a model or a date."""
+    if not isinstance(value, dict):
+        return {}
+    safe: dict[str, int] = {}
+    for field in ("in", "out", "asst"):
+        number = value.get(field)
+        if type(number) is int and 0 <= number <= 10**15:
+            safe[field] = number
+    return safe
+
+
 def _session_public_item(session: dict[str, Any], sums: dict[str, Any], payload: dict[str, Any],
                          policy: dict[str, Any], unknown: bool, missing_vector: bool,
                          model_summary: dict[str, Any]) -> dict[str, Any]:
@@ -1086,9 +1103,49 @@ def _session_public_item(session: dict[str, Any], sums: dict[str, Any], payload:
         "usage_available": not unknown,
         "range_scope": "unknown" if unknown else "daily",
     }
-    if source == "antigravity":
+    if source == "cursor":
+        for field in ("model_status", "response_model_status", "requested_model_status", "detail_status"):
+            status = session.get(field)
+            if isinstance(status, str) and status in _USAGE_STATES:
+                item[field] = status
+        current_model = session.get("current_model")
+        if isinstance(current_model, str):
+            safe_current_model = _raw_text(current_model)
+            if safe_current_model != "(unknown)":
+                item["current_model"] = safe_current_model
+        requested_models = session.get("requested_models")
+        if isinstance(requested_models, list):
+            safe_requested = list(dict.fromkeys(
+                safe for value in requested_models[:6]
+                if (safe := _raw_text(value)) != "(unknown)"))
+            if safe_requested:
+                item["requested_models"] = safe_requested
+        context_tokens = session.get("current_context_tokens")
+        if type(context_tokens) is int and 0 <= context_tokens <= 10**15:
+            item["current_context_tokens"] = context_tokens
+        context_limit = session.get("current_context_limit")
+        if type(context_limit) is int and 0 <= context_limit <= 10**15:
+            item["current_context_limit"] = context_limit
+        context_percent = _finite_number(session.get("current_context_percent"))
+        if context_percent is not None and 0 <= context_percent <= 100:
+            item["current_context_percent"] = context_percent
+        context_asof = session.get("current_context_asof")
+        if isinstance(context_asof, str) and len(context_asof) <= 80:
+            try:
+                datetime.fromisoformat(context_asof.replace("Z", "+00:00"))
+            except ValueError:
+                pass
+            else:
+                item["current_context_asof"] = context_asof
+        undated_usage = _cursor_undated_usage(session.get("undated_usage"))
+        if undated_usage:
+            item["undated_usage"] = undated_usage
+            item["undated_usage_scope"] = "whole-session (not filtered by date range)"
+    usage_status = None
+    if source in ("antigravity", "cursor"):
         status = session.get("usage_status")
         if isinstance(status, str) and status in _USAGE_STATES:
+            usage_status = status
             item["usage_status"] = status
             if status == "unavailable":
                 item["usage_available"] = False
@@ -1146,6 +1203,18 @@ def _session_public_item(session: dict[str, Any], sums: dict[str, Any], payload:
             "active_seconds": val("active"),
             "missing_fields": ["legacy_day_vector_fields"] if missing_vector else [],
         })
+    if source == "cursor" and usage_status == "unavailable":
+        # Cursor placeholder counters are not evidence of a zero-token request.
+        # Keep recorded message/tool activity, while marking all token-derived
+        # session measures unavailable for this session.
+        for field in (
+            "tokens", "known_tokens", "input_tokens", "fresh_input_tokens", "output_tokens",
+            "cache_read_tokens", "cache_write_tokens", "cache_write_5m_tokens",
+            "cache_write_1h_tokens", "reasoning_tokens", "estimated_cost_usd",
+        ):
+            item[field] = None
+        missing = item.get("missing_fields") if isinstance(item.get("missing_fields"), list) else []
+        item["missing_fields"] = sorted(set(missing + ["cursor_token_usage"]))
     return item
 
 

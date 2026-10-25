@@ -161,7 +161,7 @@ class NativeActivityTests(unittest.TestCase):
             finally:
                 connection.close()
             cursor_agg = P.update_file(None, "cursor", str(cursor_db), "Cursor", {})
-            self.assertNotIn("_sid", cursor_agg["sessions"][0])
+            self.assertEqual(cursor_agg["sessions"][0]["_sid"], sid)
 
             open_db = root / "opencode.db"
             connection = sqlite3.connect(open_db)
@@ -198,7 +198,11 @@ class NativeActivityTests(unittest.TestCase):
                 rows.extend(NA.project([(str(path), source_agg)], observed_at=NOW)["sessions"])
             self.assertEqual({row["source"] for row in rows}, {"cursor", "opencode", "copilot"})
             self.assertEqual({row["title"] for row in rows}, {"Cursor title", "OpenCode title", "Copilot title"})
-            self.assertTrue(all(row["tokens"] is not None for row in rows))
+            cursor_row = next(row for row in rows if row["source"] == "cursor")
+            self.assertIsNone(cursor_row["tokens"], "Cursor has no recorded cache-read/write fields")
+            self.assertEqual(cursor_row["usage_availability"]["input_output"], "recorded")
+            self.assertEqual(cursor_row["usage_availability"]["cache_read"], "unavailable")
+            self.assertTrue(all(row["tokens"] is not None for row in rows if row["source"] != "cursor"))
             self.assertEqual({row["provider"] for row in rows if row["source"] == "opencode"}, {None})
             self.assertEqual(len({row["key"] for row in rows}), 3)
             # Identical native IDs in different log profiles remain separate.

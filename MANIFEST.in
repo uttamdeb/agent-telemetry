@@ -15,6 +15,7 @@ include local_servers.py
 include local_servers_windows.py
 include parser.py
 include antigravity.py
+include cursor_data.py
 include release_notes.py
 include native.py
 include accounts.py

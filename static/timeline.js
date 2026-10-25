@@ -122,15 +122,20 @@ function sessionTimelineHTML(session){
     const values=Array.isArray(v)?v:[];
     const inTok=values[1]||0, outTok=values[2]||0, cache=values[3]||0;
     const cost=values[0]||0, calls=values[10]||0;
-    const callsLabel=!session.usage_in_parent&&values.length>10?fmtTok(calls):"Not recorded";
     const usageStatus=typeof sessionUsageStatus==="function"?sessionUsageStatus(session):session.copilot_sdk?.usage_status||"recorded";
     const unavailable=usageStatus==="unavailable";
     const partial=usageStatus==="partial";
+    const unknown=usageStatus==="unknown";
+    const callsLabel=!session.usage_in_parent&&session.source!=="cursor"&&values.length>10?fmtTok(calls):"Not recorded";
     const costCoverage=typeof sessionCostValue==="function"?sessionCostValue(session):"";
     const costUnavailable=unavailable||costCoverage==="Unavailable";
     const costPartial=partial||String(costCoverage).startsWith("Partial ·");
+    const costUnknown=unknown||costCoverage==="Not recorded"||String(costCoverage).startsWith("Coverage not recorded ·");
     const tokenValue=fmtTok(inTok+outTok+cache+(values[4]||0));
-    return `<tr><th scope="row">${esc(day)}</th><td>${unavailable?"Unavailable":partial?`Partial · ${tokenValue}`:tokenValue}</td><td>${costUnavailable?"Unavailable":costPartial?`Partial · ${fmtUSD(cost)}`:fmtUSD(cost)}</td><td>${callsLabel}</td></tr>`;
+    const tokenCell=unavailable?"Unavailable":partial?`Partial · ${tokenValue}`
+      :unknown?(inTok+outTok+cache+(values[4]||0)?`Coverage not recorded · ${tokenValue}`:"Not recorded"):tokenValue;
+    const costCell=costUnavailable?"Unavailable":costUnknown?costCoverage:costPartial?`Partial · ${fmtUSD(cost)}`:fmtUSD(cost);
+    return `<tr><th scope="row">${esc(day)}</th><td>${esc(tokenCell)}</td><td>${esc(costCell)}</td><td>${callsLabel}</td></tr>`;
   }).join("");
   const compactions=typeof compactionsInRange==="function"&&r?compactionsInRange(session,r):session.compactions;
   const id=session.rename_id||session._sid||"";
@@ -138,7 +143,7 @@ function sessionTimelineHTML(session){
   return `<section class="session-timeline" aria-label="Session timeline">
     <h3>Timeline</h3>
     <p class="hint">${session.usage_in_parent?"Recorded child usage is already included in its parent. Open the parent session for detailed subagent activity.":"Daily usage comes from the ledger. Events use the local session date and model filters where recorded."}</p>
-    ${dayRows.length?`<div class="session-timeline-table"><table><caption>Daily usage in the selected range</caption><thead><tr><th scope="col">Day</th><th scope="col">${typeof sessionUsageStatus==="function"&&sessionUsageStatus(session)==="partial"?"Recorded tokens":"Tokens"}</th><th scope="col">Est. cost</th><th scope="col">Calls</th></tr></thead><tbody>${daily}</tbody></table></div>`:`<p class="hint">${days?"No daily usage in the selected range.":"Daily detail was not recorded in this ledger entry."}</p>`}
+    ${dayRows.length?`<div class="session-timeline-table"><table><caption>Daily usage in the selected range</caption><thead><tr><th scope="col">Day</th><th scope="col">${typeof sessionUsageStatus==="function"&&sessionUsageStatus(session)==="partial"?"Recorded tokens":typeof sessionUsageStatus==="function"&&sessionUsageStatus(session)==="unknown"?"Token coverage":"Tokens"}</th><th scope="col">Est. cost</th><th scope="col">Calls</th></tr></thead><tbody>${daily}</tbody></table></div>`:`<p class="hint">${days?"No daily usage in the selected range.":"Daily detail was not recorded in this ledger entry."}</p>`}
     ${compactions===null?'<p class="hint">Compaction detail was not recorded in this ledger entry.</p>':""}
     <label class="session-timeline-controls">Show <select class="session-timeline-view" aria-label="Timeline events"><option value="activity">Activity</option><option value="all">All events</option><option value="requests">Model requests</option><option value="tools">Tools</option><option value="compactions">Compactions</option></select></label>
     <div class="session-timeline-detail"${identity} aria-live="polite">${timelineEventsHTML({available:false},session)}</div>
@@ -152,7 +157,7 @@ async function loadSessionTimeline(session,target,view="activity"){
   if(select){select.value=view; select.onchange=()=>loadSessionTimeline(session,node,select.value);}
   const id=session&&(session.rename_id||session._sid);
   const localDevice=typeof RAW!=="undefined"&&RAW.device?RAW.device.id:null;
-  if(!id || session.archived || session.usage_in_parent || (localDevice&&session.device&&session.device!==localDevice) || !["claude","claude-desktop","codex","copilot","antigravity"].includes(session.source)){
+  if(!id || session.archived || session.usage_in_parent || (localDevice&&session.device&&session.device!==localDevice) || !["claude","claude-desktop","codex","copilot","cursor","antigravity"].includes(session.source)){
     node.innerHTML=timelineEventsHTML(null,session,view); return;
   }
   node.innerHTML='<p class="hint">Loading detailed events…</p>';

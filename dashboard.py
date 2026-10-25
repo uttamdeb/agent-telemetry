@@ -15,8 +15,8 @@ an interactive dashboard.
 Stdlib only. First run parses everything (one large Codex log makes that take a
 moment); results are cached, and subsequent refreshes are incremental & instant.
 """
-import os, re, sys, json, time, glob, threading, argparse, shutil, mimetypes, platform, subprocess, copy
-import gzip, hmac, io, ipaddress, secrets, socket, uuid, signal, urllib.parse, urllib.request, urllib.error
+import os, re, sys, json, time, glob, threading, argparse, shutil, mimetypes, platform, subprocess, copy, hashlib, math
+import gzip, hmac, io, ipaddress, secrets, socket, uuid, signal, urllib.parse, urllib.request, urllib.error, unicodedata
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 if __package__:
@@ -54,7 +54,7 @@ else:
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = HERE
 CACHE_PATH = os.path.join(DATA_DIR, ".usage_cache.json")
-CACHE_VERSION = 62
+CACHE_VERSION = 63
 
 
 def _configure_data_dir(path):
@@ -69,8 +69,8 @@ def _configure_data_dir(path):
 
 def _peer_cache_ok(version):
     # Mirrors from every supported ledger generation remain readable. Newer
-    # Antigravity source rows use the same generic aggregate shape as existing tools.
-    return type(version) is int and version in (52, 53, 54, 55, 56, 57, 58, 59, 60, 61, CACHE_VERSION)
+    # Cursor/Antigravity optional metadata does not invalidate retained history.
+    return type(version) is int and version in (52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, CACHE_VERSION)
 
 # ---------------------------------------------------------------------------
 # In-memory store of per-file aggregates, refreshed on a background interval.
@@ -333,9 +333,9 @@ def load_cache():
     if data.get("version") == CACHE_VERSION:
         _state["files"] = files
         return
-    if data.get("version") in (53, 54, 55, 56, 57, 58, 59, 60, 61):
-        # Keep all compatible entries through v62. New Antigravity files are
-        # discovered incrementally; archives have no source file to re-read.
+    if data.get("version") in (53, 54, 55, 56, 57, 58, 59, 60, 61, 62):
+        # Keep all compatible entries through v63. Cursor backfills available
+        # stores transactionally via its parser marker; archives cannot be re-read.
         _state["files"] = files
         _dirty["v"] = True
         sys.stderr.write("[cache] retaining compatible entries during migration; existing ledger retained\n")
@@ -591,7 +591,7 @@ def build_session_timeline(device, source, session_id, date_from=None, date_to=N
     """Resolve a full native id from this ledger, never a caller-supplied filename."""
     if view not in ("all", "activity", "requests", "tools", "compactions"):
         raise ValueError("Unknown timeline event view.")
-    if source not in ("claude", "codex", "claude-desktop", "copilot", "antigravity") or not isinstance(session_id, str) or not 0 < len(session_id) <= 512:
+    if source not in ("claude", "codex", "claude-desktop", "copilot", "antigravity", "cursor") or not isinstance(session_id, str) or not 0 < len(session_id) <= 512:
         raise ValueError("Select a supported session with its full native identity.")
     if device != _local_id():
         return {"available": False, "events": [], "truncated": False, "detail": "Source events are available on the original device."}
@@ -602,7 +602,7 @@ def build_session_timeline(device, source, session_id, date_from=None, date_to=N
                 continue
             if source == "copilot" and not isinstance(aggregate.get("copilot_sdk"), dict):
                 continue
-            if any(SN.identity(aggregate, s) == session_id for s in aggregate.get("sessions", [])):
+            if any(_session_identity(aggregate, s) == session_id for s in aggregate.get("sessions", [])):
                 selected.append(aggregate.get("path", ""))
         if not selected:
             return {"available": False, "events": [], "truncated": False, "detail": "The source log is unavailable; retained daily detail is unchanged."}
@@ -713,6 +713,19 @@ def _conversation_key(path, agg):
         if _UUID.fullmatch(leaf):
             return (device, "antigravity", leaf.lower())
     return None
+
+
+def _session_identity(aggregate, session):
+    """Return a source-native id without falling back to Cursor's short display id."""
+    if aggregate.get("source") == "cursor":
+        for field in ("native_id", "_sid"):
+            value = session.get(field)
+            if (isinstance(value, str) and 0 < len(value) <= 512
+                    and not any(ord(char) < 32 or ord(char) == 127 for char in value)
+                    and "/" not in value and "\\" not in value):
+                return value
+        return ""
+    return SN.identity(aggregate, session)
 
 
 def _one_per_conversation(items):
@@ -1333,6 +1346,17 @@ def _build_payload_locked():
                         quality["status"].append(record_status)
                     for field, status in availability.items():
                         quality["fields"].setdefault(field, []).append(status)
+                elif source == "cursor":
+                    # Cursor's one SQLite store can contain many independent
+                    # composer sessions. Preserve only quality recorded on this
+                    # dated model row; there is no meaningful store-wide status.
+                    record_status = r.get("usage_status")
+                    availability = _ag_availability(r.get("usage_availability"))
+                    quality = record_quality.setdefault(rk, {"status": [], "fields": {}})
+                    if isinstance(record_status, str) and record_status in _AG_USAGE_STATES:
+                        quality["status"].append(record_status)
+                    for field, status in availability.items():
+                        quality["fields"].setdefault(field, []).append(status)
                 if "exact" in r:
                     exact = slot.setdefault("exact", _zero())
                     _sum_usage(exact, _priced_usage(source, model, date, r["exact"], False))
@@ -1471,6 +1495,59 @@ def _build_payload_locked():
                     s2["subagent_requests"] = count
                 else:
                     s2.pop("subagent_requests", None)
+            elif source == "cursor":
+                for field in ("usage_status", "model_status", "detail_status",
+                              "requested_model_status", "response_model_status"):
+                    status = s2.get(field)
+                    if not isinstance(status, str) or status not in _AG_USAGE_STATES:
+                        s2.pop(field, None)
+                for field in ("current_model",):
+                    value = _cursor_export_text(s2.get(field), 160)
+                    if value:
+                        s2[field] = value
+                    else:
+                        s2.pop(field, None)
+                requested_models = s2.get("requested_models")
+                if isinstance(requested_models, list):
+                    s2["requested_models"] = list(dict.fromkeys(
+                        value for raw in requested_models[:6]
+                        if (value := _cursor_export_text(raw, 160))))
+                else:
+                    s2.pop("requested_models", None)
+                context_tokens = _cursor_export_number(s2.get("current_context_tokens"))
+                if context_tokens is None:
+                    s2.pop("current_context_tokens", None)
+                else:
+                    s2["current_context_tokens"] = int(context_tokens)
+                context_limit = _cursor_export_number(s2.get("current_context_limit"))
+                if context_limit is None:
+                    s2.pop("current_context_limit", None)
+                else:
+                    s2["current_context_limit"] = int(context_limit)
+                context_percent = s2.get("current_context_percent")
+                safe_context_percent = _cursor_export_number(context_percent)
+                if safe_context_percent is None or safe_context_percent > 100:
+                    s2.pop("current_context_percent", None)
+                else:
+                    s2["current_context_percent"] = safe_context_percent
+                context_asof = s2.get("current_context_asof")
+                if not isinstance(context_asof, str) or len(context_asof) > 80 or P._from_iso(context_asof) is None:
+                    s2.pop("current_context_asof", None)
+                availability = _ag_availability(s2.get("usage_availability"))
+                if availability:
+                    s2["usage_availability"] = availability
+                else:
+                    s2.pop("usage_availability", None)
+                record_availability = _ag_record_availability(s2.get("record_availability"))
+                if record_availability:
+                    s2["record_availability"] = record_availability
+                else:
+                    s2.pop("record_availability", None)
+                undated_usage = _cursor_export_undated_usage(s2.get("undated_usage"))
+                if undated_usage:
+                    s2["undated_usage"] = undated_usage
+                else:
+                    s2.pop("undated_usage", None)
             bucket = session.get("records")
             if bucket is None and len(agg.get("sessions", [])) == 1:
                 bucket = agg.get("records", {})
@@ -1509,7 +1586,7 @@ def _build_payload_locked():
             if not remote and source in ("codex", "claude"):
                 s2["account_metadata"] = A.session_metadata(agg)
             available, reason = SN.availability(source, agg.get("path", ""), remote)
-            s2["rename_id"] = SN.identity(agg, session)
+            s2["rename_id"] = _session_identity(agg, session)
             if not s2["rename_id"]:
                 available, reason = False, "The full native session identity is unavailable."
             if source == "claude" and session.get("subagent"):
@@ -1540,6 +1617,11 @@ def _build_payload_locked():
                 r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", identity):
             key = (session["device"], session["source"], identity.lower())
             parent_candidates.setdefault(key, []).append(session)
+        elif (session.get("source") == "cursor" and isinstance(identity, str)
+              and 0 < len(identity) <= 512):
+            # Composer IDs are opaque and are never shortened or normalized.
+            key = (session["device"], "cursor", identity)
+            parent_candidates.setdefault(key, []).append(session)
     antigravity_child_ids = {}
     for session in sessions:
         parent_id = session.get("parent_id")
@@ -1547,6 +1629,11 @@ def _build_payload_locked():
         if source == "antigravity":
             # Only a recorded subagent role plus its explicit immediate parent
             # link can establish this relationship. root_id is not a substitute.
+            if session.get("subagent") is not True or not isinstance(parent_id, str):
+                continue
+        elif source == "cursor":
+            # The parser sets parent_id only when a native composer child list
+            # explicitly names this composer. Never infer from titles/models.
             if session.get("subagent") is not True or not isinstance(parent_id, str):
                 continue
         elif source != "codex" or not session.get("subagent") or not isinstance(parent_id, str):
@@ -2422,7 +2509,7 @@ def _devices_meta():
 _EXPORT_KEYS = ("source", "path", "mtime", "archived", "project", "title", "branch", "editor",
                 "entry", "cliver", "subagent", "first_ts", "last_ts", "records", "tools",
                 "skills", "ctx", "hourly", "reads", "totals", "sessions", "open_ctx",
-                "opencode_ids", "opencode_messages", "compactions", "copilot_sdk", "antigravity")
+                "opencode_ids", "opencode_messages", "compactions", "copilot_sdk", "antigravity", "cursor")
 _ANTIGRAVITY_SESSION_EXPORT_KEYS = frozenset((
     "_sid", "id", "conversation_id", "title", "project", "branch", "model", "start", "end",
     "subagent", "subagent_type", "subagent_role", "parent_id", "root_id", "nesting_depth",
@@ -2432,10 +2519,314 @@ _ANTIGRAVITY_SESSION_EXPORT_KEYS = frozenset((
     "reason", "response_out", "req", "asst", "user", "tools", "active", "effort", "reasoning_effort",
     "efforts",
 ))
+_CURSOR_SESSION_EXPORT_FIELDS = frozenset((
+    "_sid", "id", "title", "project", "branch", "model", "models", "nmodels",
+    "current_model", "current_context_tokens", "current_context_limit", "current_context_percent", "current_context_asof",
+    "requested_models", "requested_model_status", "response_model_status",
+    "start", "end", "subagent", "subagent_type", "parent_id",
+    "records", "days", "usage_status", "usage_availability", "model_status",
+    "detail_status", "record_availability", "undated_usage", "in", "out", "cr", "cc", "cc5", "cc1",
+    "reason", "req", "asst", "user", "tools", "active", "prem", "cost", "mode",
+    "lines_add", "lines_del", "think_ms", "subagents", "archived_session",
+))
+_CURSOR_EXPORT_NUMERIC_FIELDS = frozenset((
+    "in", "out", "cr", "cc", "cc5", "cc1", "reason", "response_out", "req", "asst",
+    "user", "tools", "active", "prem", "cost", "ws", "lines_add", "lines_del",
+    "think_ms", "subagents",
+))
+_CURSOR_EXPORT_SUMMARY_FIELDS = frozenset((
+    "usage_status", "usage_availability", "model_status", "detail_status", "record_availability",
+))
+
+
+def _cursor_export_text(value, limit=160):
+    if not isinstance(value, str):
+        return None
+    value = " ".join("".join(ch for ch in value if not unicodedata.category(ch).startswith("C")).split())
+    value = value.strip()[:limit]
+    if (not value or value.startswith(("/", "\\", "~/", "~\\"))
+            or re.search(r"(?:^|\s)[A-Za-z]:[\\/].+", value)
+            or re.search(r"(?:^|\s)/(?:Users|home|private|tmp|var|opt)/", value)):
+        return None
+    return value
+
+
+def _cursor_export_id(value):
+    if not isinstance(value, str) or not re.fullmatch(
+            r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", value):
+        return None
+    return value.lower()
+
+
+def _cursor_export_number(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    try:
+        return value if math.isfinite(value) and 0 <= value <= 10**15 else None
+    except (OverflowError, TypeError, ValueError):
+        return None
+
+
+def _cursor_export_undated_usage(value):
+    """Keep only bounded integer counters for Cursor usage without a safe date."""
+    if not isinstance(value, dict):
+        return {}
+    safe = {}
+    for field in ("in", "out", "asst"):
+        number = value.get(field)
+        if type(number) is int and 0 <= number <= 10**15:
+            safe[field] = number
+    return safe
+
+
+def _cursor_export_records(value):
+    if not isinstance(value, dict):
+        return {}
+    result = {}
+    for key, row in list(value.items())[:20_000]:
+        if not isinstance(key, str) or "\t" not in key or not isinstance(row, dict):
+            continue
+        day, model = key.split("\t", 1)
+        if (not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day) or P._from_iso(day) is None
+                or not model or len(model) > 160 or _cursor_export_text(model, 160) != model):
+            continue
+        safe = {}
+        for field in _CURSOR_EXPORT_NUMERIC_FIELDS:
+            if field not in row:
+                continue
+            number = _cursor_export_number(row.get(field))
+            if number is not None:
+                safe[field] = number
+        status = row.get("usage_status")
+        if isinstance(status, str) and status in _AG_USAGE_STATES:
+            safe["usage_status"] = status
+        availability = _ag_availability(row.get("usage_availability"))
+        if availability:
+            safe["usage_availability"] = availability
+        if safe:
+            result[key] = safe
+    return result
+
+
+def _cursor_export_days(value):
+    if not isinstance(value, dict):
+        return {}
+    result = {}
+    for day, row in list(value.items())[:20_000]:
+        if (not isinstance(day, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day)
+                or P._from_iso(day) is None or not isinstance(row, dict)):
+            continue
+        safe = {field: number for field in _CURSOR_EXPORT_NUMERIC_FIELDS
+                if (number := _cursor_export_number(row.get(field))) is not None}
+        if safe:
+            result[day] = safe
+    return result
+
+
+def _cursor_export_session(session):
+    if not isinstance(session, dict):
+        return None
+    out = {field: session[field] for field in _CURSOR_SESSION_EXPORT_FIELDS if field in session}
+    native_id = _cursor_export_id(session.get("_sid"))
+    if native_id:
+        out["_sid"] = native_id
+        out["id"] = native_id[:8]
+    else:
+        out.pop("_sid", None)
+        display_id = session.get("id")
+        if isinstance(display_id, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,8}", display_id):
+            out["id"] = display_id
+        else:
+            out.pop("id", None)
+    for field in ("parent_id",):
+        identity = _cursor_export_id(session.get(field))
+        if identity:
+            out[field] = identity
+        else:
+            out.pop(field, None)
+    for field in ("title", "project", "branch", "model", "current_model", "mode", "subagent_type"):
+        safe_text = _cursor_export_text(out.get(field), 160)
+        if safe_text:
+            out[field] = safe_text
+        else:
+            out.pop(field, None)
+    for field in ("start", "end"):
+        value = out.get(field)
+        if not isinstance(value, str) or len(value) > 80 or P._from_iso(value) is None:
+            out.pop(field, None)
+    models = out.get("models")
+    if isinstance(models, list):
+        out["models"] = [safe for value in models[:6]
+                         if (safe := _cursor_export_text(value, 160))]
+    else:
+        out.pop("models", None)
+    for field in ("nmodels",):
+        value = out.get(field)
+        if type(value) is not int or not 0 <= value <= 10**6:
+            out.pop(field, None)
+    requested = out.get("requested_models")
+    if isinstance(requested, list):
+        out["requested_models"] = list(dict.fromkeys(
+            safe for value in requested[:6] if (safe := _cursor_export_text(value, 160))))
+    else:
+        out.pop("requested_models", None)
+    for field in ("current_context_tokens", "current_context_limit"):
+        if field in out:
+            number = _cursor_export_number(out.get(field))
+            if number is None:
+                out.pop(field, None)
+            else:
+                out[field] = int(number)
+    if "current_context_percent" in out:
+        value = out.get("current_context_percent")
+        number = _cursor_export_number(value)
+        if number is None or number > 100:
+            out.pop("current_context_percent", None)
+        else:
+            out["current_context_percent"] = number
+    if "current_context_asof" in out:
+        value = out.get("current_context_asof")
+        if not isinstance(value, str) or len(value) > 80 or P._from_iso(value) is None:
+            out.pop("current_context_asof", None)
+    if "undated_usage" in out:
+        safe_undated_usage = _cursor_export_undated_usage(out.get("undated_usage"))
+        if safe_undated_usage:
+            out["undated_usage"] = safe_undated_usage
+        else:
+            out.pop("undated_usage", None)
+    for field in ("subagent", "archived_session"):
+        if field in out and not isinstance(out[field], bool):
+            out.pop(field, None)
+    for field in _CURSOR_EXPORT_NUMERIC_FIELDS:
+        if field not in out:
+            continue
+        number = _cursor_export_number(out.get(field))
+        if number is None:
+            out.pop(field, None)
+        else:
+            out[field] = number
+    if "records" in out:
+        out["records"] = _cursor_export_records(out["records"])
+    if "days" in out:
+        out["days"] = _cursor_export_days(out["days"])
+    status = out.get("usage_status")
+    if not isinstance(status, str) or status not in _AG_USAGE_STATES:
+        out.pop("usage_status", None)
+    availability = _ag_availability(out.get("usage_availability"))
+    if availability:
+        out["usage_availability"] = availability
+    else:
+        out.pop("usage_availability", None)
+    for field in ("model_status", "detail_status"):
+        if not isinstance(out.get(field), str) or out[field] not in _AG_USAGE_STATES:
+            out.pop(field, None)
+    for field in ("requested_model_status", "response_model_status"):
+        if not isinstance(out.get(field), str) or out[field] not in _AG_USAGE_STATES:
+            out.pop(field, None)
+    record_availability = _ag_record_availability(out.get("record_availability"))
+    if record_availability:
+        out["record_availability"] = record_availability
+    else:
+        out.pop("record_availability", None)
+    out["source"] = "cursor"
+    return out
+
+
+def _cursor_export_summary(value):
+    if not isinstance(value, dict):
+        return {}
+    out = {field: value[field] for field in _CURSOR_EXPORT_SUMMARY_FIELDS if field in value}
+    for field in ("usage_status", "model_status", "detail_status"):
+        if not isinstance(out.get(field), str) or out[field] not in _AG_USAGE_STATES:
+            out.pop(field, None)
+    availability = _ag_availability(out.get("usage_availability"))
+    if availability:
+        out["usage_availability"] = availability
+    else:
+        out.pop("usage_availability", None)
+    record_availability = _ag_record_availability(out.get("record_availability"))
+    if record_availability:
+        out["record_availability"] = record_availability
+    else:
+        out.pop("record_availability", None)
+    return out
+
+
+def _cursor_export_agg(agg):
+    out = {"source": "cursor"}
+    for field in ("project", "title", "branch", "editor", "ide", "first_ts", "last_ts"):
+        value = _cursor_export_text(agg.get(field), 160)
+        if value:
+            out[field] = value
+    if isinstance(agg.get("archived"), bool):
+        out["archived"] = agg["archived"]
+    out["records"] = _cursor_export_records(agg.get("records"))
+    sessions = agg.get("sessions") if isinstance(agg.get("sessions"), list) else []
+    out["sessions"] = [safe for session in sessions
+                        if (safe := _cursor_export_session(session)) is not None]
+    summary = _cursor_export_summary(agg.get("cursor"))
+    if summary:
+        out["cursor"] = summary
+    raw_tools = agg.get("tools") if isinstance(agg.get("tools"), dict) else {}
+    tools = {}
+    for key, count in list(raw_tools.items())[:20_000]:
+        if not isinstance(key, str) or "\t" not in key:
+            continue
+        day, name = key.split("\t", 1)
+        safe_name = _cursor_export_text(name, 100)
+        number = _cursor_export_number(count)
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", day) and P._from_iso(day) and safe_name and number is not None:
+            tools[day + "\t" + safe_name] = number
+    out["tools"] = tools
+    raw_hourly = agg.get("hourly") if isinstance(agg.get("hourly"), dict) else {}
+    hourly = {}
+    for key, row in list(raw_hourly.items())[:20_000]:
+        if not isinstance(key, str) or "\t" not in key or not isinstance(row, dict):
+            continue
+        day, hour = key.split("\t", 1)
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day) or P._from_iso(day) is None or not hour.isdigit() or int(hour) > 23:
+            continue
+        safe = {field: number for field in ("tokens", "msgs")
+                if (number := _cursor_export_number(row.get(field))) is not None}
+        if safe:
+            hourly[day + "\t" + hour] = safe
+    out["hourly"] = hourly
+    return out
+
+
+def _cursor_export_ai_lines(value):
+    if not isinstance(value, dict):
+        return {}
+    result = {}
+    fields = ("tab_suggested", "tab_accepted", "composer_suggested", "composer_accepted")
+    for day, row in list(value.items())[:20_000]:
+        if (not isinstance(day, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day)
+                or P._from_iso(day) is None or not isinstance(row, dict)):
+            continue
+        safe = {field: number for field in fields
+                if (number := _cursor_export_number(row.get(field))) is not None}
+        if safe:
+            result[day] = safe
+    return result
+
+
+def _cursor_store_export_key(path):
+    if not isinstance(path, (str, os.PathLike)):
+        return None
+    try:
+        normalized = os.path.normcase(os.path.normpath(os.fspath(path)))
+    except (OSError, TypeError, ValueError):
+        return None
+    if not normalized:
+        return None
+    digest = hashlib.sha256(("agent-telemetry-peer-cursor-store-v1\0" + normalized).encode(
+        "utf-8", errors="surrogatepass")).hexdigest()
+    return "cursor:store:" + digest
 
 
 def _export_agg(agg):
-    a = {k: agg[k] for k in _EXPORT_KEYS if k in agg}
+    a = (_cursor_export_agg(agg) if agg.get("source") == "cursor"
+         else {k: agg[k] for k in _EXPORT_KEYS if k in agg})
     if agg.get("source") == "antigravity":
         # Keep only the safe summary contract. In particular, the private
         # workspace cwd used by the local editor projection never leaves here.
@@ -2465,7 +2856,11 @@ def _export_agg(agg):
     # the still-open last turn folded in, so the importer needs no parser state
     a["activity"] = P.activity_of(agg)
     st = agg.get("state") or {}
-    a["state"] = {k: st[k] for k in ("dom_model", "ai_lines") if k in st}
+    if agg.get("source") == "cursor":
+        ai_lines = _cursor_export_ai_lines(st.get("ai_lines"))
+        a["state"] = {"ai_lines": ai_lines} if ai_lines else {}
+    else:
+        a["state"] = {k: st[k] for k in ("dom_model", "ai_lines") if k in st}
     return a
 
 
@@ -2505,6 +2900,10 @@ def _export_body():
                 else:
                     unknown_antigravity += 1
                     export_key = "antigravity:unidentified:" + str(unknown_antigravity)
+            elif source == "cursor":
+                export_key = _cursor_store_export_key(aggregate.get("path", path))
+                if not export_key:
+                    continue
             else:
                 export_key = path
             files[export_key] = _export_agg(aggregate)

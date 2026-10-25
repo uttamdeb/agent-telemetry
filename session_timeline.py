@@ -27,7 +27,7 @@ else:
 
 
 MAX_BYTES = 64 * 1024 * 1024
-_SOURCES = {"claude", "claude-desktop", "codex", "copilot", "antigravity"}
+_SOURCES = {"claude", "claude-desktop", "codex", "copilot", "antigravity", "cursor"}
 _VIEWS = {"all", "activity", "requests", "tools", "compactions"}
 _AG_MAX_EVENTS = 5000
 _AG_STATUSES = frozenset((
@@ -41,11 +41,23 @@ _AG_VIEW_KINDS = {
     "tools": frozenset(("tool",)),
     "compactions": frozenset(("compaction",)),
 }
+_CURSOR_VIEW_KINDS = {
+    "activity": frozenset(("session", "user_turn", "model", "subagent", "checkpoint", "compaction", "error")),
+    "requests": frozenset(("request",)),
+    "tools": frozenset(("tool",)),
+    "compactions": frozenset(("compaction",)),
+}
 _AG_NUMERIC_USAGE = (
     ("in", "input"), ("out", "output"), ("cr", "cache_read"),
     ("cc", "cache_write"), ("reason", "reasoning"),
     ("response_out", "response_output"),
 )
+_CURSOR_KINDS = frozenset(("session", "user_turn", "model", "request", "tool",
+                           "compaction", "checkpoint", "subagent", "error"))
+_CURSOR_STATUSES = _AG_STATUSES | frozenset((
+    "completed", "success", "failed", "cancelled", "skipped", "accepted", "rejected",
+    "partial", "started", "finished", "blocked",
+))
 
 
 class _Events(list):
@@ -316,6 +328,125 @@ def _antigravity_timeline(path, session_id, max_events, date_from, date_to, view
         events = events[:cap]
     detail_status = snapshot.get("detail_status")
     detail = "partial" if truncated or detail_status == "partial" else "source log"
+    result.update(events=events, truncated=truncated, available=True, detail=detail)
+    return result
+
+
+def _cursor_text(value, limit=120):
+    """Bound Cursor labels and exclude local paths from timeline detail."""
+    if not isinstance(value, str):
+        return None
+    value = " ".join("".join(ch for ch in value if not unicodedata.category(ch).startswith("C")).split())
+    value = value.strip()[:limit]
+    if (not value or value.startswith(("/", "\\", "~/", "~\\"))
+            or re.search(r"(?:^|\s)[A-Za-z]:[\\/].+", value)
+            or re.search(r"(?:^|\s)/(?:Users|home|private|tmp|var|opt)/", value)):
+        return None
+    return value
+
+
+def _cursor_event_matches(event, date_from, date_to, view):
+    if not isinstance(event, dict) or event.get("kind") not in _CURSOR_KINDS:
+        return False
+    allowed = _CURSOR_VIEW_KINDS.get(view)
+    if allowed is not None and event.get("kind") not in allowed:
+        return False
+    timestamp = _timestamp(event.get("timestamp"))
+    return bool(timestamp and _in_range(timestamp, date_from, date_to))
+
+
+def _cursor_public_events(snapshot, cap, date_from, date_to, view):
+    result = []
+    raw_events = snapshot.get("events") if isinstance(snapshot.get("events"), list) else []
+    for raw in raw_events[:5001]:
+        if not _cursor_event_matches(raw, date_from, date_to, view):
+            continue
+        timestamp = _timestamp(raw.get("timestamp"))
+        event = {"timestamp": timestamp, "kind": raw["kind"]}
+        status = raw.get("status")
+        if isinstance(status, str) and status in _CURSOR_STATUSES:
+            event["status"] = status
+        usage_status = raw.get("usage_status")
+        if isinstance(usage_status, str) and usage_status in ("recorded", "partial", "unavailable"):
+            event["usage_status"] = usage_status
+        label = _cursor_text(raw.get("label"), 100)
+        model = _cursor_text(raw.get("model"), 120)
+        requested_model = _cursor_text(raw.get("requested_model"), 120)
+        if label:
+            event["label"] = label
+        if model:
+            event["model"] = model
+        if raw.get("kind") == "user_turn" and requested_model:
+            event["requested_model"] = requested_model
+        usage = raw.get("usage") if isinstance(raw.get("usage"), dict) else {}
+        availability = raw.get("usage_availability") if isinstance(raw.get("usage_availability"), dict) else {}
+        safe_availability = {}
+        for field in ("input_output", "cache_read", "cache_write", "reasoning", "response_output"):
+            state = availability.get(field)
+            if state not in ("recorded", "partial", "unavailable"):
+                continue
+            safe_availability[field] = state
+            if state in ("recorded", "partial"):
+                value_fields = ("input", "output") if field == "input_output" else (
+                    {"cache_read": "cache_read", "cache_write": "cache_write",
+                     "reasoning": "reasoning", "response_output": "response_output"}[field],
+                )
+                for value_field in value_fields:
+                    value = _number(usage.get(value_field))
+                    if value is not None:
+                        event[value_field] = value
+        if safe_availability:
+            event["usage_availability"] = safe_availability
+        result.append(event)
+    result.sort(key=_timestamp_order)
+    truncated = snapshot.get("events_truncated") is True or len(result) > cap
+    if len(result) > cap:
+        result = result[:cap]
+    detail_status = snapshot.get("detail_status")
+    detail = "partial" if truncated or detail_status in ("partial", "unavailable") else "source log"
+    return result, truncated, detail
+
+
+def _cursor_timeline(path, session_id, max_events, date_from, date_to, view):
+    result = {"events": [], "truncated": False, "available": False, "detail": "unavailable"}
+    if (not isinstance(session_id, str) or len(session_id) <= 8 or len(session_id) > 512
+            or any(ord(char) < 32 or ord(char) == 127 for char in session_id)
+            or "/" in session_id or "\\" in session_id):
+        return result
+    try:
+        if __package__:
+            from . import cursor_data as CD
+        else:
+            import cursor_data as CD
+    except ImportError:
+        return result
+    try:
+        cap = max(0, min(int(max_events), 2000))
+    except (TypeError, ValueError, OverflowError):
+        cap = 400
+    for name, value in (("date_from", date_from), ("date_to", date_to)):
+        if value is not None:
+            try:
+                if not isinstance(value, str) or len(value) != 10:
+                    raise ValueError
+                _dt.date.fromisoformat(value)
+            except (TypeError, ValueError):
+                if name == "date_from":
+                    date_from = None
+                else:
+                    date_to = None
+    try:
+        if not os.path.isfile(path):
+            return result
+        snapshot = CD.read_conversation(
+            path, session_id, max_events=max(1, min(5001, cap + 1)),
+            event_filter={"date_from": date_from, "date_to": date_to, "view": view},
+        )
+    except (OSError, ValueError, sqlite3.Error, CD.CursorReadError):
+        return result
+    if not isinstance(snapshot, dict) or snapshot.get("conversation_id") != session_id:
+        return result
+    events, truncated, detail = _cursor_public_events(snapshot, cap, date_from, date_to, view)
     result.update(events=events, truncated=truncated, available=True, detail=detail)
     return result
 
@@ -717,6 +848,8 @@ def timeline(source, path, session_id, max_events=400, date_from=None, date_to=N
         return result
     if source == "antigravity":
         return _antigravity_timeline(path, session_id, max_events, date_from, date_to, view)
+    if source == "cursor":
+        return _cursor_timeline(path, session_id, max_events, date_from, date_to, view)
     try:
         size = os.path.getsize(path)
         if not os.path.isfile(path):

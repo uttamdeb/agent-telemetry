@@ -20,7 +20,9 @@ Each recognized database represents one conversation. Discovery does not use a
 wildcard across similarly named Antigravity directories, descend into arbitrary
 subdirectories, or scan backup locations. Standalone legacy `.pb` files are not
 supported; their absence from the supported database scan does not mean those
-older conversations were parsed.
+older conversations were parsed. The unsupported-file inventory also counts direct
+`implicit/*.pb` files under the same known roots, without opening them. These
+background/implicit files add no sessions or token estimates.
 
 The public [Antigravity hooks documentation](https://www.antigravity.google/docs/hooks)
 describes hook configuration and a `transcriptPath` under the product's `brain/`
@@ -72,3 +74,6 @@ parse problem rather than silently treated as a successful empty parse. The
 standalone legacy `.pb` format is not read, and no completeness claim is made
 for it. Google may update the storage format independently of the public hooks
 documentation.
+
+The [CodeBurn comparison](cursor-codeburn-comparison.md) records the reviewed
+local-reader coverage and the distinct RPC, hook and billing-sync approaches.

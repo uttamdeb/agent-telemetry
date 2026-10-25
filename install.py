@@ -10,7 +10,7 @@ import tempfile
 import native
 
 ROOT = Path(__file__).resolve().parent
-BACKEND_FILES = ("dashboard.py", "editor_snapshot.py", "parser.py", "antigravity.py", "native.py", "session_names.py", "accounts.py",
+BACKEND_FILES = ("dashboard.py", "editor_snapshot.py", "parser.py", "antigravity.py", "cursor_data.py", "native.py", "session_names.py", "accounts.py",
                  "release_notes.py",
                  "local_servers.py", "local_servers_windows.py", "ledger_backups.py",
                  "session_timeline.py", "native_activity.py", "diagnostics.py", "index.html", "chart.umd.min.js",
