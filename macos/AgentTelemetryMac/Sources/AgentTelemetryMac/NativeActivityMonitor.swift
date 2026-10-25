@@ -177,6 +177,7 @@ struct NativeActivitySession: Decodable, Identifiable, Equatable, Sendable {
         "claude-desktop": ("Claude Desktop", "Anthropic"),
         "codex": ("Codex", "OpenAI"),
         "copilot": ("Copilot", "GitHub"),
+        "antigravity": ("Antigravity", "Google"),
         "cursor": ("Cursor", "Cursor"),
         "opencode": ("OpenCode", nil),
         "hermes": ("Hermes Agent", nil),

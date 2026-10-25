@@ -14,10 +14,11 @@ const SRC = {
   opencode:         {label:"OpenCode",       v:"--t-opencode",        exact:true, icon:"opencode", provider:"OpenCode", mono:true},
   hermes:           {label:"Hermes Agent",   v:"--t-hermes",          exact:true, icon:"hermes", provider:"Nous Research"},
   openclaw:         {label:"OpenClaw",       v:"--t-openclaw",        exact:true, icon:"openclaw", provider:"OpenClaw"},
+  antigravity:      {label:"Antigravity",    v:"--t-antigravity",     exact:true, icon:"antigravity", provider:"Google", mono:true},
 };
 // adjacency is what the palette validator checks — openclaw's red sits between amber
 // and blue, never beside hermes's olive (red/green fails deutan CVD in dark mode)
-const ORDER = ["claude","codex","copilot","cursor","claude-desktop","openclaw","opencode","hermes"];
+const ORDER = ["claude","codex","copilot","cursor","claude-desktop","openclaw","opencode","hermes","antigravity"];
 const PROVIDERS = ["Anthropic","OpenAI","Google","Other"];
 const PROV_VAR = {Anthropic:"--p-anthropic",OpenAI:"--p-openai",Google:"--p-google",Other:"--p-other"};
 const DOW = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
@@ -318,13 +319,42 @@ function compactionsInRange(s, r){
   if(!Array.isArray(s.compactions)) return null; // older archive/peer: unknown
   return s.compactions.filter(e=>e.date>=r.from && e.date<=r.to);
 }
+/* Antigravity records usage availability by date and model. Keep the full
+   record map, but make the shared detail map match the clipped figures. */
+function antigravityAvailabilityInRange(s,r){
+  const availability=s.usage_availability&&typeof s.usage_availability==="object"&&!Array.isArray(s.usage_availability)
+    ?{...s.usage_availability}:{};
+  const map=s.record_availability;
+  if(s.source!=="antigravity"||!map||typeof map!=="object"||Array.isArray(map)) return availability;
+  const fields=["input_output","cache_read","cache_write","reasoning","response_output"];
+  const states=new Set(["recorded","partial","unavailable"]);
+  const selected=[];
+  for(const [key,value] of Object.entries(map)){
+    const separator=key.indexOf("\t");
+    if(separator<1||separator===key.length-1) continue;
+    const date=key.slice(0,separator),model=key.slice(separator+1);
+    if(!isDay(date)||date<r.from||date>r.to||!passModel(model)
+        ||!value||typeof value!=="object"||Array.isArray(value)) continue;
+    selected.push(value);
+  }
+  if(!selected.length){
+    for(const field of fields) availability[field]="unavailable";
+    return availability;
+  }
+  for(const field of fields){
+    const scoped=selected.map(item=>states.has(item[field])?item[field]:"unavailable");
+    availability[field]=scoped.every(state=>state==="recorded")?"recorded"
+      :scoped.every(state=>state==="unavailable")?"unavailable":"partial";
+  }
+  return availability;
+}
 /* Effort is recorded metadata, never a model identity or another usage metric.
    Keep its original date/model map so a clipped session can be scoped again. */
 const REASONING_EFFORT_LEVELS = ["none","minimal","low","medium","high","xhigh","max","ultra"];
 function reasoningEffortInRange(s, r){
   const result={levels:[],unrecorded:false,entries:[]};
   const metadata=s.reasoning_effort;
-  if(!["claude","codex"].includes(s.source) || !metadata || metadata.version!==1
+  if(!["claude","codex","antigravity"].includes(s.source) || !metadata || metadata.version!==1
       || !metadata.days || typeof metadata.days!=="object" || Array.isArray(metadata.days)) return result;
   const allowed=s.source==="claude"?["low","medium","high","xhigh","max"]:REASONING_EFFORT_LEVELS;
   const observed=new Set();
@@ -386,7 +416,8 @@ function sessionModelsInRange(s, r, nameLimit=6){
 function clipSession(s, r){
   const compactions=compactionsInRange(s,r);
   const events={compactions,compaction_count:compactions===null?null:compactions.length,
-    reasoning_effort_scoped:reasoningEffortInRange(s,r),model_scoped:sessionModelsInRange(s,r)};
+    reasoning_effort_scoped:reasoningEffortInRange(s,r),model_scoped:sessionModelsInRange(s,r),
+    ...(s.source==="antigravity"?{usage_availability:antigravityAvailabilityInRange(s,r)}:{})};
   const D = sessionDays(s);
   if(!D) return Object.assign({}, s, {span:1, clipped:false, detail_limited:true}, events);
   const total=Array(15).fill(0); let inN=0,allN=0,callsKnown=true;

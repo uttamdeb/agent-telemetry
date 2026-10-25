@@ -57,6 +57,11 @@ struct MacNativeRegression {
         precondition(recentActivity.sessions[1].subagent)
         precondition(recentActivity.sessions[2].displayProvider == nil,
                      "Configurable tools must not claim a billing provider")
+        let antigravityFixture = Data(#"{"key":"d","source":"antigravity","tool":"Untrusted label","provider":"Untrusted provider","title":"Synthetic Antigravity fixture","tokens":null,"last_activity_at":"2026-10-25T12:00:00Z","subagent":false,"usage_status":"partial"}"#.utf8)
+        let antigravity = try JSONDecoder().decode(NativeActivitySession.self, from: antigravityFixture)
+        precondition(antigravity.displayTool == "Antigravity")
+        precondition(antigravity.displayProvider == "Google")
+        precondition(antigravity.safeTokens == nil)
         precondition(recentActivity.sessions[0].safeTitle.contains("Fixture session"))
         let newestActivity = recentActivity.sessions[0].activityDate!
         let beforeExpiry = recentActivity.visibleSessions(at: newestActivity.addingTimeInterval(899))

@@ -19,10 +19,10 @@
   --good:#16803c; --warn:#a86a00; --bad:#c9302c;
   --grid:rgba(16,19,24,.07);
   --shadow-lg:0 12px 32px rgba(16,24,40,.14),0 2px 6px rgba(16,24,40,.06);
-  /* categorical — tools (validated order: claude, codex, copilot, cursor, claude-desktop, openclaw, opencode, hermes) */
+  /* categorical — tools (validated order: claude, codex, copilot, cursor, claude-desktop, openclaw, opencode, hermes, antigravity) */
   --t-claude:#eb6834; --t-codex:#1baf7a; --t-copilot:#4a3aa7;
   --t-cursor:#e87ba4; --t-claude-desktop:#eda100; --t-opencode:#2a78d6;
-  --t-hermes:#7a9e1e;
+  --t-hermes:#7a9e1e; --t-antigravity:#3186ff;
   --t-openclaw:#c62f4b;
   /* categorical — providers */
   --p-anthropic:#eb6834; --p-openai:#1baf7a; --p-google:#2a78d6; --p-other:#e87ba4;
@@ -48,7 +48,7 @@
     --shadow-lg:0 18px 44px rgba(0,0,0,.55);
     --t-claude:#d95926; --t-codex:#199e70; --t-copilot:#9085e9;
     --t-cursor:#d55181; --t-claude-desktop:#c98500; --t-opencode:#3987e5;
-    --t-hermes:#6b8a1a;
+    --t-hermes:#6b8a1a; --t-antigravity:#3186ff;
     --t-openclaw:#d9475f;
     --p-anthropic:#d95926; --p-openai:#199e70; --p-google:#3987e5; --p-other:#d55181;
     --k-in:#3987e5; --k-cr:#d95926; --k-cw:#199e70; --k-out:#c98500; --k-think:#d55181;
@@ -68,7 +68,7 @@
   --shadow-lg:0 18px 44px rgba(0,0,0,.55);
   --t-claude:#d95926; --t-codex:#199e70; --t-copilot:#9085e9;
   --t-cursor:#d55181; --t-claude-desktop:#c98500; --t-opencode:#3987e5;
-  --t-hermes:#6b8a1a;
+  --t-hermes:#6b8a1a; --t-antigravity:#3186ff;
   --t-openclaw:#d9475f;
   --p-anthropic:#d95926; --p-openai:#199e70; --p-google:#3987e5; --p-other:#d55181;
   --k-in:#3987e5; --k-cr:#d95926; --k-cw:#199e70; --k-out:#c98500; --k-think:#d55181;

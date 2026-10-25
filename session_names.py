@@ -196,6 +196,20 @@ def identity(aggregate, session):
         try: uuid.UUID(tail)
         except ValueError: return ""
         return tail
+    if aggregate["source"] == "antigravity":
+        # Antigravity's transcript reader records one full UUID per SQLite
+        # conversation. Do not use a path, title, or shortened table id as an
+        # identity; the reader's snapshot ID is only a fallback for old rows.
+        for value in (session.get("_sid"), aggregate.get("conversation_id"), session.get("id")):
+            if not isinstance(value, str) or "/" in value or "\\" in value:
+                continue
+            if value.lower().endswith(".db"):
+                value = value[:-3]
+            try:
+                return str(uuid.UUID(value))
+            except (ValueError, AttributeError):
+                continue
+        return ""
     return session.get("_sid") or session.get("id") or ""
 
 

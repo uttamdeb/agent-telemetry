@@ -1,6 +1,19 @@
 /* Session timeline rendering. Daily ledger figures are always available; the
    optional event detail is fetched from the local source log on drawer open. */
 let SESSION_TIMELINE_INTENT = 0;
+const TIMELINE_TOOL_STATUS_LABELS={unknown:"Status not recorded",pending:"Pending",running:"Running",done:"Done",invalid:"Invalid",cleared:"Cleared",canceled:"Canceled",error:"Error",generating:"Generating",waiting:"Waiting",queued:"Queued",interrupted:"Interrupted"};
+function timelineToolStatus(status){
+  return Object.prototype.hasOwnProperty.call(TIMELINE_TOOL_STATUS_LABELS,status)?TIMELINE_TOOL_STATUS_LABELS[status]:"";
+}
+function timelineUsageDetail(event,key,label,availabilityKey=key){
+  const state=event.usage_availability&&event.usage_availability[availabilityKey];
+  const value=event[key];
+  const recorded=Number.isSafeInteger(value)&&value>=0;
+  if(state==="unavailable") return `${label} unavailable`;
+  if(state==="partial") return `${label} partial${recorded?` · ${fmtTok(value)}`:""}`;
+  if(recorded) return `${label} ${fmtTok(value)}`;
+  return "";
+}
 
 function timelineDate(timestamp){
   if(typeof timestamp!=="string" || !timestamp) return "";
@@ -32,7 +45,7 @@ function timelineCompactionEvents(session){
 }
 function timelineEventsHTML(payload,session,view="all"){
   const available=!!(payload&&payload.available);
-  const kinds={activity:["user_turn","model","reasoning","subagent","session","error","compaction"],requests:["request"],tools:["tool"],compactions:["compaction"]}[view];
+  const kinds={activity:["user_turn","model","reasoning","subagent","session","error","compaction","checkpoint"],requests:["request"],tools:["tool"],compactions:["compaction"]}[view];
   const seenCompactions=new Set();
   const events=[...(available&&Array.isArray(payload.events)?payload.events:[]),...timelineCompactionEvents(session)]
     .filter(e=>timelineInRange(e) && timelineEventModelPass(e))
@@ -55,8 +68,26 @@ function timelineEventsHTML(payload,session,view="all"){
     const when=esc(timelineWhen(e.timestamp));
     let what="", detail="";
     if(e.kind==="user_turn") what=e.subagent?"Agent turn":"Your turn";
-    else if(e.kind==="tool") { what=`Tool · ${esc(e.label||"Tool")}`; detail=e.model?`<span>${esc(e.model)}</span>`:""; }
+    else if(e.kind==="tool") {
+      what=`Tool · ${esc(e.label||"Tool")}`;
+      const details=[];
+      const status=timelineToolStatus(e.status);
+      if(status) details.push(`Status · ${status}`);
+      if(e.model) details.push(`Model · ${e.model}`);
+      detail=details.length?`<span>${details.map(esc).join(" · ")}</span>`:"";
+    }
     else if(e.kind==="subagent") what=esc(e.label||"Subagent started");
+    else if(e.kind==="checkpoint"){
+      what="Recorded checkpoint";
+      const details=[];
+      if(typeof e.label==="string") details.push(e.label);
+      if(e.model) details.push(`Model · ${e.model}`);
+      for(const [key,label,availability] of [["input","Input","input_output"],["cache_read","Cache read","cache_read"],["cache_write","Cache write","cache_write"],["output","Output","input_output"],["reasoning","Reasoning within output","reasoning"],["response_output","Response output subtype","response_output"]]){
+        const value=timelineUsageDetail(e,key,label,availability);
+        if(value) details.push(value);
+      }
+      if(details.length) detail=`<span>${details.map(esc).join(" · ")}</span>`;
+    }
     else if(["model","reasoning","session","error"].includes(e.kind)){
       what=esc(e.label||"Recorded activity");
       if(e.model) detail=`<span>${esc(e.model)}</span>`;
@@ -69,8 +100,9 @@ function timelineEventsHTML(payload,session,view="all"){
     else if(e.kind==="request"){
       what=`Model request${e.model?` · ${esc(e.model)}`:""}`;
       const fields=[];
-      for(const [key,label] of [["input","in"],["cache_read","cache read"],["cache_write","cache write"],["output","out"],["reasoning","reasoning within output"],["web_search","web searches"]]){
-        if(Number.isSafeInteger(e[key]) && e[key]>=0) fields.push(`${label} ${fmtTok(e[key])}`);
+      for(const [key,label,availability] of [["input","in","input_output"],["cache_read","cache read","cache_read"],["cache_write","cache write","cache_write"],["output","out","input_output"],["reasoning","reasoning within output","reasoning"],["response_output","response output subtype","response_output"],["web_search","web searches",null]]){
+        const value=timelineUsageDetail(e,key,label,availability||key);
+        if(value) fields.push(value);
       }
       detail=fields.length?`<span>${fields.map(esc).join(" · ")}</span>`:"<span>Usage not recorded</span>";
     } else return "";
@@ -91,8 +123,14 @@ function sessionTimelineHTML(session){
     const inTok=values[1]||0, outTok=values[2]||0, cache=values[3]||0;
     const cost=values[0]||0, calls=values[10]||0;
     const callsLabel=!session.usage_in_parent&&values.length>10?fmtTok(calls):"Not recorded";
-    const unavailable=session.copilot_sdk?.usage_status==="unavailable";
-    return `<tr><th scope="row">${esc(day)}</th><td>${unavailable?"Unavailable":fmtTok(inTok+outTok+cache+(values[4]||0))}</td><td>${unavailable?"Unavailable":fmtUSD(cost)}</td><td>${callsLabel}</td></tr>`;
+    const usageStatus=typeof sessionUsageStatus==="function"?sessionUsageStatus(session):session.copilot_sdk?.usage_status||"recorded";
+    const unavailable=usageStatus==="unavailable";
+    const partial=usageStatus==="partial";
+    const costCoverage=typeof sessionCostValue==="function"?sessionCostValue(session):"";
+    const costUnavailable=unavailable||costCoverage==="Unavailable";
+    const costPartial=partial||String(costCoverage).startsWith("Partial ·");
+    const tokenValue=fmtTok(inTok+outTok+cache+(values[4]||0));
+    return `<tr><th scope="row">${esc(day)}</th><td>${unavailable?"Unavailable":partial?`Partial · ${tokenValue}`:tokenValue}</td><td>${costUnavailable?"Unavailable":costPartial?`Partial · ${fmtUSD(cost)}`:fmtUSD(cost)}</td><td>${callsLabel}</td></tr>`;
   }).join("");
   const compactions=typeof compactionsInRange==="function"&&r?compactionsInRange(session,r):session.compactions;
   const id=session.rename_id||session._sid||"";
@@ -100,7 +138,7 @@ function sessionTimelineHTML(session){
   return `<section class="session-timeline" aria-label="Session timeline">
     <h3>Timeline</h3>
     <p class="hint">${session.usage_in_parent?"Recorded child usage is already included in its parent. Open the parent session for detailed subagent activity.":"Daily usage comes from the ledger. Events use the local session date and model filters where recorded."}</p>
-    ${dayRows.length?`<div class="session-timeline-table"><table><caption>Daily usage in the selected range</caption><thead><tr><th scope="col">Day</th><th scope="col">${session.copilot_sdk?.usage_status==="partial"?"Recorded tokens":"Tokens"}</th><th scope="col">Est. cost</th><th scope="col">Calls</th></tr></thead><tbody>${daily}</tbody></table></div>`:`<p class="hint">${days?"No daily usage in the selected range.":"Daily detail was not recorded in this ledger entry."}</p>`}
+    ${dayRows.length?`<div class="session-timeline-table"><table><caption>Daily usage in the selected range</caption><thead><tr><th scope="col">Day</th><th scope="col">${typeof sessionUsageStatus==="function"&&sessionUsageStatus(session)==="partial"?"Recorded tokens":"Tokens"}</th><th scope="col">Est. cost</th><th scope="col">Calls</th></tr></thead><tbody>${daily}</tbody></table></div>`:`<p class="hint">${days?"No daily usage in the selected range.":"Daily detail was not recorded in this ledger entry."}</p>`}
     ${compactions===null?'<p class="hint">Compaction detail was not recorded in this ledger entry.</p>':""}
     <label class="session-timeline-controls">Show <select class="session-timeline-view" aria-label="Timeline events"><option value="activity">Activity</option><option value="all">All events</option><option value="requests">Model requests</option><option value="tools">Tools</option><option value="compactions">Compactions</option></select></label>
     <div class="session-timeline-detail"${identity} aria-live="polite">${timelineEventsHTML({available:false},session)}</div>
@@ -114,7 +152,7 @@ async function loadSessionTimeline(session,target,view="activity"){
   if(select){select.value=view; select.onchange=()=>loadSessionTimeline(session,node,select.value);}
   const id=session&&(session.rename_id||session._sid);
   const localDevice=typeof RAW!=="undefined"&&RAW.device?RAW.device.id:null;
-  if(!id || session.archived || session.usage_in_parent || (localDevice&&session.device&&session.device!==localDevice) || !["claude","claude-desktop","codex","copilot"].includes(session.source)){
+  if(!id || session.archived || session.usage_in_parent || (localDevice&&session.device&&session.device!==localDevice) || !["claude","claude-desktop","codex","copilot","antigravity"].includes(session.source)){
     node.innerHTML=timelineEventsHTML(null,session,view); return;
   }
   node.innerHTML='<p class="hint">Loading detailed events…</p>';

@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const {getHtml} = require('../src/webview');
-const {compact, money, forest, composition, effortLabel} = require('../media/desk');
+const {compact, money, forest, composition, effortLabel, sourceLabel} = require('../media/desk');
 const {makeState, scenario} = require('./fixtures/desk-state');
 const {createServer, page} = require('./preview-webview');
 const nonce = 'test-webview-nonce-2026';
@@ -66,6 +66,10 @@ test('recorded effort uses the app labels, including Ultra and partial evidence'
   assert.equal(effortLabel('ultra'), 'Ultra');
   assert.equal(['ultra', 'unrecorded'].map(effortLabel).join(' · '), 'Ultra · Not recorded');
   assert.equal(effortLabel(null), 'Not recorded');
+});
+test('Antigravity sessions use their own source label in the editor UI', () => {
+  assert.equal(sourceLabel('antigravity'), 'Antigravity');
+  assert.equal(sourceLabel('gemini'), 'gemini', 'Model/provider names do not replace the tool source');
 });
 test('webview uses text DOM, exact message actions and no telemetry storage', () => {
   const js = fs.readFileSync(path.join(__dirname, '../media/desk.js'), 'utf8');

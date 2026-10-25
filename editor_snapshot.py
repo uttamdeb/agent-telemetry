@@ -18,6 +18,10 @@ MAX_SESSIONS = 500
 _UUID = re.compile(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}")
 _EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra")
 _FIELDS = {"input": "in", "output": "out", "cache_read": "cr", "cache_write": "cc"}
+_USAGE_STATUSES = frozenset(("recorded", "partial", "unavailable"))
+_USAGE_AVAILABILITY_FIELDS = frozenset((
+    "input_output", "cache_read", "cache_write", "reasoning", "response_output",
+))
 
 
 def _number(value):
@@ -218,7 +222,7 @@ def build_snapshot(items, local, query, revision, *, price_usage, deduplicate,
             if limited and not rows:
                 active = _overlaps(session, first, last) and any(_number(session.get(f)) for f in
                     ("in", "out", "cr", "cc", "asst", "user", "req"))
-            native_id = identity(agg, session) if source in ("claude", "codex") else session.get("_sid")
+            native_id = identity(agg, session) if source in ("claude", "codex", "antigravity") else session.get("_sid")
             if source == "copilot" and not session.get("_sid"):
                 path = str(agg.get("path", "")).replace("\\", "/")
                 match = _UUID.search(path.rsplit("/", 1)[-1]) or _UUID.search(path)
@@ -227,6 +231,8 @@ def build_snapshot(items, local, query, revision, *, price_usage, deduplicate,
                     or any(not c.isprintable() for c in native_id) or _path(native_id)):
                 native_id = ""
             if source == "codex" and not _UUID.fullmatch(native_id):
+                native_id = ""
+            if source == "antigravity" and not _UUID.fullmatch(native_id):
                 native_id = ""
             if source == "claude" and not (_UUID.fullmatch(native_id)
                     or claude_parent_key(agg.get("path"), child=True)):
@@ -264,16 +270,32 @@ def build_snapshot(items, local, query, revision, *, price_usage, deduplicate,
             dominant = max(ranked, key=ranked.get) if ranked else session.get("model") or "Unknown"
             project = _leaf(session.get("project") or agg.get("project"))
             alias = (display_aliases or {}).get((agg.get("path", ""), native_id))
+            # Antigravity's role is evidence-based. A recorded parent_id or
+            # root_id alone never turns an unmarked session into a subagent.
+            is_subagent = (session.get("subagent") is True if source == "antigravity"
+                           else bool(session.get("subagent")))
             row = {"key": key, "id": native_id, "source": source, "device": local,
                    "title": _text(alias or session.get("title")) or project,
-                   "project": project, "subagent": bool(session.get("subagent")),
+                   "project": project, "subagent": is_subagent,
                    "parent_key": None, "parent_title": None,
-                   "parent_status": "unavailable" if session.get("subagent") else "none",
+                   "parent_status": "unavailable" if is_subagent else "none",
                    "model": _text(dominant, 160), "efforts": _efforts(session, first, last),
                    **usage, "compactions": compactions,
                    "start": _timestamp(session.get("start")), "end": _timestamp(session.get("end")),
                    "archived": bool(agg.get("archived") or session.get("archived")),
                    "detail_limited": limited or not native_id}
+            if source == "antigravity":
+                status = session.get("usage_status", agg.get("usage_status"))
+                if isinstance(status, str) and status in _USAGE_STATUSES:
+                    row["usage_status"] = status
+                availability = session.get("usage_availability", agg.get("usage_availability"))
+                if isinstance(availability, dict):
+                    safe_availability = {
+                        field: state for field, state in availability.items()
+                        if field in _USAGE_AVAILABILITY_FIELDS and isinstance(state, str) and state in _USAGE_STATUSES
+                    }
+                    if safe_availability:
+                        row["usage_availability"] = safe_availability
             parent = None
             if source == "claude":
                 recognized = claude_parent_key(agg.get("path"), child=bool(session.get("subagent")))
@@ -284,6 +306,10 @@ def build_snapshot(items, local, query, revision, *, price_usage, deduplicate,
             elif source == "copilot" and native_id:
                 parent = ("copilot", native_id)
                 row["usage_status"] = (session.get("copilot_sdk") or {}).get("usage_status", "recorded")
+            elif source == "antigravity" and _UUID.fullmatch(native_id):
+                # Conversation UUIDs are globally unique in the source format;
+                # deduplicated local copies share this exact parent namespace.
+                parent = ("antigravity", native_id.lower())
             all_sessions.append((row, parent, session.get("parent_id")))
             if active and cwd is None:
                 unassigned += 1
@@ -345,6 +371,11 @@ def build_snapshot(items, local, query, revision, *, price_usage, deduplicate,
             continue
         if row["source"] == "codex":
             parent = (("codex", parent_id.lower()) if isinstance(parent_id, str)
+                      and _UUID.fullmatch(parent_id) else None)
+        elif row["source"] == "antigravity":
+            # Only an explicit immediate parent_id is link evidence. root_id is
+            # retained by the parser for context but cannot stand in for parent_id.
+            parent = (("antigravity", parent_id.lower()) if isinstance(parent_id, str)
                       and _UUID.fullmatch(parent_id) else None)
         found = candidates.get(parent, []) if parent else []
         if len(found) == 1 and found[0]["key"] != row["key"]:

@@ -89,7 +89,7 @@ fi
 if [[ -f "$AT_REPO_ROOT/accounts.py" ]]; then
   cp "$AT_REPO_ROOT/accounts.py" "$AT_BACKEND_DIR/"
 fi
-for AT_MODULE in ledger_backups.py session_timeline.py native_activity.py diagnostics.py editor_snapshot.py release_notes.py; do
+for AT_MODULE in antigravity.py ledger_backups.py session_timeline.py native_activity.py diagnostics.py editor_snapshot.py release_notes.py; do
   if [[ -f "$AT_REPO_ROOT/$AT_MODULE" ]]; then
     cp "$AT_REPO_ROOT/$AT_MODULE" "$AT_BACKEND_DIR/"
   fi
