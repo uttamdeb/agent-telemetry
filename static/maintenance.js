@@ -76,7 +76,14 @@ function renderMaintenanceDiagnostics(data){
   const ledger=data?.ledger&&typeof data.ledger==="object"?`<div class="maintenance-row"><div class="maintenance-row-head"><b>Analytics ledger</b><span>${maintenanceEsc(data.ledger.status||"Status unavailable")}</span></div>${data.ledger.hint?`<div class="stg-hint">${maintenanceEsc(data.ledger.hint)}</div>`:""}</div>`:"";
   const missing=Array.isArray(data?.missing_prices)?data.missing_prices:[];
   const priceHTML=missing.length?`<div class="maintenance-row"><div class="maintenance-row-head"><b>Models without an estimate</b><span>${maintenanceCount(missing.length)}</span></div><div class="stg-hint">${missing.slice(0,12).map(item=>maintenanceEsc(typeof item==="string"?item:item?.model||"Unknown model")).join(" · ")}${missing.length>12?" · …":""}</div></div>`:"";
-  return `<div class="maintenance-summary">${maintenanceEsc(summary)}</div>${rowHTML||'<div class="stg-hint">No source logs were detected yet. Refresh the dashboard after using a supported coding tool.</div>'}${ledger}${priceHTML}
+  const unsupported=Array.isArray(data?.unsupported_formats)?data.unsupported_formats:[];
+  const unsupportedHTML=unsupported.filter(item=>item&&item.source==="antigravity"&&item.format==="legacy_pb"&&Number(item.count)>0).map(item=>{
+    const rawHint=typeof item.hint==="string"?item.hint:"";
+    const hint=/^[A-Za-z0-9 .,:;()'’-]{1,240}$/.test(rawHint)?rawHint:"Older Antigravity conversation files are not parsed by this source reader.";
+    return `<div class="maintenance-row"><div class="maintenance-row-head"><b>${maintenanceToolLabel(item.source)}</b><span>Legacy format not parsed</span></div>
+      <div class="stg-hint">${maintenanceCount(item.count)} older conversation file${Number(item.count)===1?"":"s"} found · ${maintenanceEsc(hint)}</div></div>`;
+  }).join("");
+  return `<div class="maintenance-summary">${maintenanceEsc(summary)}</div>${rowHTML||'<div class="stg-hint">No source logs were detected yet. Refresh the dashboard after using a supported coding tool.</div>'}${ledger}${priceHTML}${unsupportedHTML}
     ${issueHTML?`<details class="maintenance-issues"><summary>Recent issues (${Math.min(issues.length,8)})</summary><ul>${issueHTML}</ul></details>`:""}`;
 }
 function renderMaintenanceBackups(data){

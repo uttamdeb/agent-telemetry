@@ -12,7 +12,7 @@ import zipfile
 
 
 MODULES = {
-    "__init__.py", "__main__.py", "cli.py", "dashboard.py", "editor_snapshot.py", "parser.py",
+    "__init__.py", "__main__.py", "cli.py", "dashboard.py", "editor_snapshot.py", "parser.py", "antigravity.py",
     "native.py", "accounts.py", "session_names.py", "release_notes.py",
     "local_servers.py", "local_servers_windows.py",
     "ledger_backups.py", "diagnostics.py", "session_timeline.py", "native_activity.py",
@@ -26,11 +26,11 @@ ASSETS = {
     "static/mcp.js",
     "static/release-notes.js",
     "static/apple-touch-icon.png", "static/icon-192.png", "static/icon-512.png",
-    "static/tool-icons/claude.svg", "static/tool-icons/copilot.svg",
+    "static/tool-icons/claude.svg", "static/tool-icons/antigravity.svg", "static/tool-icons/copilot.svg",
     "static/tool-icons/cursor.svg", "static/tool-icons/hermes.svg",
     "static/tool-icons/openai.svg", "static/tool-icons/openclaw.svg",
     "static/tool-icons/opencode.svg", "static/tool-icons/README.md",
-    "static/tool-icons/LICENSE.hermes.txt", "static/tool-icons/LICENSE.openclaw.txt",
+    "static/tool-icons/LICENSE.hermes.txt", "static/tool-icons/LICENSE.antigravity.txt", "static/tool-icons/LICENSE.openclaw.txt",
     "static/tool-icons/LICENSE.simple-icons.txt",
 }
 METADATA = {"PKG-INFO", "SOURCES.txt", "dependency_links.txt", "entry_points.txt", "top_level.txt"}
@@ -59,6 +59,7 @@ def check_archives(wheel, sdist):
             "pyproject.toml", "setup.py", "setup.cfg", "MANIFEST.in", "README.md",
             "LICENSE", "PKG-INFO", "docs/python-package.md",
             "docs/mcp.md", "docs/release-notes.md", "docs/native-activity.md",
+            "docs/antigravity.md",
         }
         extras = paths - expected
         assert all(path.startswith("agenttelemetry_app.egg-info/")

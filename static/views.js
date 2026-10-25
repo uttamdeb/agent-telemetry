@@ -279,6 +279,33 @@ function priceOf(m, date){
     if(date <= until) return p;
   return (RAW.pricing && RAW.pricing[m]) || (RAW.prices && RAW.prices[m]) || [0,0,0,0,0];
 }
+function hasPriceRow(m,date){
+  if(!m || m==="(user)") return true;
+  if(date) for(const [until,p] of (RAW.pricing_history&&RAW.pricing_history[m])||[])
+    if(date<=until) return Array.isArray(p);
+  return Object.prototype.hasOwnProperty.call(RAW.pricing||{},m)
+    || Object.prototype.hasOwnProperty.call(RAW.prices||{},m);
+}
+function unpricedUsageRow(r){
+  return r&&r.model!=="(user)"&&recTokens(r)>0&&!(Number(r.cost)>0)&&!hasPriceRow(r.model,r.date);
+}
+function unpricedModelNames(rows){
+  return [...new Set((rows||[]).filter(unpricedUsageRow).map(r=>r.model))].sort((a,b)=>a.localeCompare(b));
+}
+function costCoverageNote(models){
+  if(!models.length) return "";
+  return `${models.length} model${models.length===1?"":"s"} have no API price row; their estimated cost and rate are unavailable, not free.`;
+}
+function modelPriceWarning(model,unknown,cost=0){
+  if(!unknown) return "";
+  const message=cost>0
+    ? `No API price row for some ${model||"model"} usage. Its rate is unavailable; the displayed cost only reflects recorded estimates.`
+    : `No API price row for ${model||"this model"}. Estimated cost and rate are unavailable, not free.`;
+  return `<span class="warn-ic" tabindex="0" role="img" aria-label="${esc(message)}" title="${esc(message)}">⚠</span>`;
+}
+function modelCostCoverage(cost,unknown,formatter=fmtUSD){
+  return unknown?(cost>0?`Partial · ${formatter(cost)}`:"Unavailable"):formatter(cost);
+}
 function longPriceOf(m,date){ return (RAW.pricing_long_context||{})[m] || priceOf(m,date); }
 function tokenCostParts(r,current=false){
   const p=(current && RAW.prices && RAW.prices[r.model]) || priceOf(r.model,r.date), high=longPriceOf(r.model,r.date);
@@ -367,10 +394,11 @@ function renderMonthlyRhythmCard(){
 }
 
 function overviewSpendSummary(t, days, recs){
+  const missing=unpricedModelNames(recs);
   return {
     label:"Est. spend",
-    value:fmtUSD(t.cost),
-    title:"API list-price estimate; cache reads are included at the cached-input rate.",
+    value:modelCostCoverage(t.cost,missing.length>0),
+    title:["API list-price estimate; cache reads are included at the cached-input rate.",costCoverageNote(missing)].filter(Boolean).join(" "),
     spark:sparkline(dailySeries(recs,days,r=>r.cost||0),cssv("--text-3"),260,64).replace("<svg ",'<svg preserveAspectRatio="none" '),
   };
 }
@@ -586,16 +614,16 @@ function viewOverview(d){
   document.getElementById("modelMixSub").textContent = `share of ${metricNoun()}, and the tools that ran each`;
   const bm = {};
   for(const r of d.recs){ if(r.model==="(user)") continue;
-    const e = bm[r.model] || (bm[r.model] = {model:r.model, v:0, cost:0, tok:0, src:{}});
-    e.v += val(r); e.cost += r.cost||0; e.tok += recTokens(r); e.src[r.source] = (e.src[r.source]||0) + recTokens(r)+ (r.cost||0); }
+    const e = bm[r.model] || (bm[r.model] = {model:r.model, v:0, cost:0, tok:0, src:{},unpriced:false});
+    e.v += val(r); e.cost += r.cost||0; e.tok += recTokens(r); e.unpriced ||= unpricedUsageRow(r);
+    e.src[r.source] = (e.src[r.source]||0) + recTokens(r)+ (r.cost||0); }
   const models = Object.values(bm).filter(e=>e.v>0).sort((a,b)=>b.v-a.v);
   const mTot = models.reduce((a,e)=>a+e.v,0) || 1;
   document.getElementById("topModels").innerHTML = models.length
     ? `<thead><tr><th class="nosort">Model</th><th class="nosort">Tools</th><th class="r nosort">Est. $</th><th class="r nosort">Tokens</th><th class="r nosort">Share</th></tr></thead><tbody>` +
-      models.slice(0,7).map(e=>`<tr><td class="name"><span class="sw" style="background:${modelColor(e.model)};margin-right:8px"></span>${esc(e.model)}${
-          priceOf(e.model)[0]===0 && e.tok && !e.cost ? '<span class="warn-ic" title="No price row for this model — its cost reads as $0">⚠</span>' : ""}</td>
+      models.slice(0,7).map(e=>`<tr><td class="name"><span class="sw" style="background:${modelColor(e.model)};margin-right:8px"></span>${esc(e.model)}${modelPriceWarning(e.model,e.unpriced)}</td>
         <td>${topSources(e.src,3).map(toolDot).join(" ")}</td>
-        <td class="r">${fmtUSD(e.cost)}</td><td class="r">${fmtTok(e.tok)}</td><td class="r dim">${fmtPct(e.v/mTot)}</td></tr>`).join("") + "</tbody>"
+        <td class="r">${modelCostCoverage(e.cost,e.unpriced)}</td><td class="r">${fmtTok(e.tok)}</td><td class="r dim">${fmtPct(e.v/mTot)}</td></tr>`).join("") + "</tbody>"
     : `<tbody><tr><td class="empty">Nothing in range.</td></tr></tbody>`;
 
   // project mix
@@ -677,19 +705,20 @@ function viewCost(d){
   renderUsageChange("cost",d);
   const pd = hasPrev() ? slice(prevRange()) : null;
   const t = totals(d.recs), pt = pd ? totals(pd.recs) : null;
+  const missingPriceModels=unpricedModelNames(d.recs), hasUnpriced=missingPriceModels.length>0;
   const days = dateList(d.r), active = Math.max(1, t.days.size);
   let saved=0;
   for(const r of d.recs) saved += cacheSavings(r);
   document.getElementById("costHero").innerHTML = heroHTML({
     label:"Est. spend at API list prices",
-    value: fmtUSD2(t.cost),
-    delta: pd ? deltaHTML(t.cost, pt.cost, true) : "",
-    note: pd ? `vs ${fmtUSD(pt.cost)} the ${prevLabel()}` : "",
+    value: modelCostCoverage(t.cost,hasUnpriced,fmtUSD2),
+    delta: pd&&!hasUnpriced ? deltaHTML(t.cost, pt.cost, true) : "",
+    note: [pd&&!hasUnpriced ? `vs ${fmtUSD(pt.cost)} the ${prevLabel()}` : "",costCoverageNote(missingPriceModels)].filter(Boolean).join(" "),
     facts:[
-      {l:"Per active day", v:fmtUSD(t.cost/active)},
-      {l:"30-day run rate", v:fmtUSD(t.cost/active*30), title:"at the current pace per active day"},
-      {l:"Per session", v:fmtUSD(d.sessions.length?t.cost/d.sessions.length:0)},
-      {l:"Per prompt", v:fmtUSD(t.user?t.cost/t.user:0)},
+      {l:"Per active day", v:modelCostCoverage(t.cost/active,hasUnpriced)},
+      {l:"30-day run rate", v:modelCostCoverage(t.cost/active*30,hasUnpriced), title:"at the current pace per active day"},
+      {l:"Per session", v:modelCostCoverage(d.sessions.length?t.cost/d.sessions.length:0,hasUnpriced)},
+      {l:"Per prompt", v:modelCostCoverage(t.user?t.cost/t.user:0,hasUnpriced)},
     ]});
 
   // cumulative, by tool, with the previous period as a dashed reference
@@ -720,11 +749,11 @@ function viewCost(d){
   const subCost = d.sessions.filter(s=>s.subagent).reduce((a,s)=>a+(s.cost||0),0);
   document.getElementById("costStats").innerHTML = tilesHTML([
     {l:"Cache hit rate", v:ctx?fmtPct(t.cr/ctx):"—", d:pd&&pctx&&ctx?deltaHTML(t.cr/ctx, pt.cr/pctx):"", s:`${fmtTok(t.cr)} read from cache`},
-    {l:"Saved by caching", v:fmtUSD(saved), s:"vs re-sending that context"},
-    {l:"Effective rate", v:t.tok?"$"+(t.cost/t.tok*1e6).toFixed(2):"—", s:"per 1M tokens, blended"},
+    {l:"Saved by caching", v:modelCostCoverage(saved,hasUnpriced), s:"vs re-sending that context"},
+    {l:"Effective rate", v:t.tok?modelCostCoverage(t.cost/t.tok*1e6,hasUnpriced):"—", s:"per 1M tokens, blended"},
     {l:"Output share", v:t.tok?fmtPct(t.out/t.tok):"—", s:`${fmtTok(t.out)} generated`},
-    {l:"Priciest day", v:topDay?fmtUSD(topDay[1]):"—", s:topDay?fmtDay(topDay[0],true):""},
-    {l:subCost?"Spent in subagents":"Priciest session", v:subCost?fmtUSD(subCost):(topSess?fmtUSD(topSess.cost):"—"),
+    {l:"Priciest day", v:topDay?modelCostCoverage(topDay[1],hasUnpriced):"—", s:topDay?fmtDay(topDay[0],true):""},
+    {l:subCost?"Spent in subagents":"Priciest session", v:subCost?modelCostCoverage(subCost,hasUnpriced):(topSess?sessionCostValue(topSess):"—"),
      s:subCost?fmtPct(subCost/(t.cost||1))+" of spend":(topSess?(topSess.title||topSess.project||""):"")},
   ]);
 
@@ -756,8 +785,10 @@ function viewCost(d){
   const K = TOKEN_KINDS(), kcol = {in:K[0].color, cr:K[1].color, cw:K[2].color, out:K[3].color};
   barList("costByKind", [["in","Input"],["cr","Cache read"],["cw","Cache write"],["out","Output"]]
     .map(([k,l])=>({label:l, value:kinds[k], color:kcol[k]})).sort((a,b)=>b.value-a.value), {fmt:fmtUSD, total:priced});
-  document.getElementById("costByKindSub").textContent = priced < t.cost - 0.01
+  const splitNote=priced < t.cost - 0.01
     ? `${fmtUSD(t.cost-priced)} can't be split — logged cost with no per-token price` : "what each kind of token cost you";
+  const coverageNote=missingPriceModels.length?`${costCoverageNote(missingPriceModels)} See Models for details.`:"";
+  document.getElementById("costByKindSub").textContent=[splitNote,coverageNote].filter(Boolean).join(" ");
 
   // cache hit rate over time
   const cd={}; for(const r of d.recs){ const c=cd[r.date]||(cd[r.date]={cr:0,ctx:0}); c.cr+=r.cr||0; c.ctx+=ctxTokens(r); }
@@ -809,10 +840,13 @@ function viewModels(d){
     prov[p]=(prov[p]||0)+v;
     (provModels[p]=provModels[p]||{})[r.model]=(provModels[p][r.model]||0)+v;
     (provTools[p]=provTools[p]||{})[r.source]=(provTools[p][r.source]||0)+v;
-    const e=byModel[r.model]||(byModel[r.model]={model:r.model,tok:0,cost:0,msgs:0,in:0,out:0,cr:0,cc:0,tools:{}});
+    const unknownPrice=unpricedUsageRow(r);
+    const e=byModel[r.model]||(byModel[r.model]={model:r.model,tok:0,cost:0,msgs:0,in:0,out:0,cr:0,cc:0,unpriced:false,tools:{}});
     e.tok+=tk; e.cost+=r.cost||0; e.msgs+=r.asst||0; e.in+=r.in||0; e.out+=r.out||0; e.cr+=r.cr||0; e.cc+=r.cc||0;
-    const te=e.tools[r.source]||(e.tools[r.source]={source:r.source,tok:0,cost:0,msgs:0,in:0,out:0,cr:0,cc:0});
+    e.unpriced ||= unknownPrice;
+    const te=e.tools[r.source]||(e.tools[r.source]={source:r.source,tok:0,cost:0,msgs:0,in:0,out:0,cr:0,cc:0,unpriced:false});
     te.tok+=tk; te.cost+=r.cost||0; te.msgs+=r.asst||0; te.in+=r.in||0; te.out+=r.out||0; te.cr+=r.cr||0; te.cc+=r.cc||0;
+    te.unpriced ||= unknownPrice;
   }
   const provs = PROVIDERS.filter(p=>prov[p]);
   const grand = provs.reduce((a,p)=>a+prov[p],0)||1;
@@ -844,19 +878,18 @@ function viewModels(d){
     const rate = t.tok?t.cost/t.tok*1e6:0;
     return `<tr class="sub-row"><td colspan="2" class="dim">└ ${srcBadge(t.source)}</td><td></td>
       <td class="r dim">${fmtTok(t.tok)}</td><td class="r dim">${fmtTok(t.out)}</td>
-      <td class="r dim">${fmtTok(t.cr)}</td><td class="r dim">${fmtUSD(t.cost)}</td>
-      <td class="r dim">${fmtNum(t.msgs)}</td><td class="r dim">$${rate.toFixed(2)}</td><td></td></tr>`;
+      <td class="r dim">${fmtTok(t.cr)}</td><td class="r dim">${modelCostCoverage(t.cost,t.unpriced)}</td>
+      <td class="r dim">${fmtNum(t.msgs)}</td><td class="r dim">${t.unpriced?(t.cost>0?`Partial · $${rate.toFixed(2)}`:"Unavailable"):`$${rate.toFixed(2)}`}</td><td></td></tr>`;
   };
   document.getElementById("modelTable").innerHTML = thead(cols,S.modelSort,"model")+"<tbody>"+
     sortRows(rows, S.modelSort).map(r=>{
       const multi = r.toolList.length>1, expanded = multi && S.modelExpanded.has(r.model);
       const main = `<tr class="${multi?"clickable":""}" ${multi?`data-model="${esc(r.model)}"`:""}>
-        <td class="name">${multi?`<span class="caret">${expanded?"▾":"▸"}</span>`:'<span class="caret"></span>'}<span class="sw" style="background:${modelColor(r.model)};margin-right:8px"></span>${esc(r.model)}${
-          priceOf(r.model)[0]===0 && r.tok && !r.cost ? '<span class="warn-ic" title="No price row for this model — its cost reads as $0">⚠</span>':''}</td>
+        <td class="name">${multi?`<span class="caret">${expanded?"▾":"▸"}</span>`:'<span class="caret"></span>'}<span class="sw" style="background:${modelColor(r.model)};margin-right:8px"></span>${esc(r.model)}${modelPriceWarning(r.model,r.unpriced,r.cost)}</td>
         <td>${r.toolList.map(t=>srcBadge(t.source)).join(" ")}</td><td class="dim">${esc(r.prov)}</td>
         <td class="r">${fmtTok(r.tok)}</td><td class="r">${fmtTok(r.out)}</td>
-        <td class="r">${fmtTok(r.cr)}</td><td class="r"><b>${fmtUSD(r.cost)}</b></td>
-        <td class="r">${fmtNum(r.msgs)}</td><td class="r">$${r.rate.toFixed(2)}</td>
+        <td class="r">${fmtTok(r.cr)}</td><td class="r"><b>${modelCostCoverage(r.cost,r.unpriced)}</b></td>
+        <td class="r">${fmtNum(r.msgs)}</td><td class="r">${r.unpriced?(r.cost>0?`Partial · $${r.rate.toFixed(2)}`:"Unavailable"):`$${r.rate.toFixed(2)}`}</td>
         <td class="r dim">${fmtPct(r.share)}</td></tr>`;
       return expanded ? main+r.toolList.map(subRow).join("") : main;
     }).join("")+"</tbody>";
@@ -1125,12 +1158,12 @@ function reasoningEffortSummary(s){
   return {...detail,label,description};
 }
 function reasoningEffortLabel(s){
-  if(!["claude","codex"].includes(s.source)) return "";
+  if(!["claude","codex","antigravity"].includes(s.source)) return "";
   const summary=reasoningEffortSummary(s);
   return `<span class="session-effort" role="note" aria-label="${esc(summary.description)}" title="${esc(summary.description)}">Recorded effort: ${esc(summary.label)}</span>`;
 }
 function reasoningEffortDetails(s){
-  if(!["claude","codex"].includes(s.source)) return "";
+  if(!["claude","codex","antigravity"].includes(s.source)) return "";
   const summary=reasoningEffortSummary(s);
   const associations=summary.levels.length>1?`<ul class="reasoning-effort-associations" aria-label="Recorded effort by date and model">${summary.entries.map(entry=>`<li><time>${esc(entry.date)}</time><span><b>${esc(entry.model)}</b> · ${esc(entry.levels.map(level=>REASONING_EFFORT_LABELS[level]).join(" / ")||"Not recorded")}${entry.unrecorded&&entry.levels.length?" · partially recorded":""}</span></li>`).join("")}</ul>`:"";
   const notes=["Selected date range and model/provider filters. Recorded effort settings are separate from reasoning token counts; missing values are not inferred."];
@@ -1138,7 +1171,7 @@ function reasoningEffortDetails(s){
   if(s.source==="claude"&&summary.unrecorded&&summary.levels.length) notes.push("Inline child usage is not assigned the parent's effort.");
   if(s.source==="codex"&&summary.levels.includes("low")) notes.push("Codex may call Low “Light”.");
   if(s.source==="codex"&&summary.levels.includes("ultra")) notes.push("Ultra is a Codex delegation setting.");
-  if(summary.levels.length) notes.push("Claude and Codex effort levels use their own scales.");
+  if(summary.levels.length) notes.push("Tools record effort on their own scales; labels are not directly comparable.");
   return `<div class="kv"><span class="k">Recorded effort</span><span class="v">${esc(summary.label)}</span></div><div class="reasoning-effort-detail">${associations}<p class="hint">${esc(notes.join(" "))}</p></div>`;
 }
 function sessionWhen(s){
@@ -1163,6 +1196,37 @@ function sessionRows(d){
   return [...d.sessions,...children].map(sessionRow).filter(s=>!q || (s.name+" "+(s.original_title||"")+" "+(s.project||"")+" "+sessionModelList(sessionModelsInRange(s,range(),Infinity))+" "+(s.branch||"")+" "+(s.id||"")+" "+(s.rename_id||"")).toLowerCase().includes(q));
 }
 function sessionModelSummary(s){ return s.model_scoped||sessionModelsInRange(s,range()); }
+function sessionUnpricedModels(s){
+  if(!(Number(s?.tok)>0)) return [];
+  const summary=sessionModelSummary(s);
+  const models=Array.isArray(summary.models)?summary.models:summary.model?[summary.model]:[];
+  const selected=range();
+  return [...new Set(models)].filter(model=>{
+    if(!model||model==="(user)"||model==="Not recorded"||model==="No model usage") return false;
+    const rows=(RAW.records||[]).filter(row=>row.source===s.source&&row.model===model
+      &&(!s.device||!row.device||row.device===s.device)&&(!selected||row.date>=selected.from&&row.date<=selected.to)
+      &&recTokens(row)>0);
+    if(rows.length) return rows.some(unpricedUsageRow);
+    return s.source==="antigravity"&&!hasPriceRow(model);
+  });
+}
+function sessionCostNote(s){
+  const models=sessionUnpricedModels(s);
+  return models.length?`No API price row for ${models.join(", ")}. Estimated cost and rate are unavailable, not free.`:"";
+}
+function sessionCostValue(s){
+  const status=sessionUsageStatus(s), cost=Number(s?.cost)||0;
+  if(status==="unavailable") return "Unavailable";
+  const unknown=sessionUnpricedModels(s).length>0;
+  if(unknown) return modelCostCoverage(cost,true,fmtUSD2);
+  return status==="partial"?`Partial · ${fmtUSD2(cost)}`:fmtUSD2(cost);
+}
+function sessionCacheRate(s){
+  const availability=s?.usage_availability||{};
+  if(sessionUsageStatus(s)==="unavailable"||["input_output","cache_read","cache_write"].some(k=>availability[k]==="unavailable")) return "Unavailable";
+  const value=s.cache?fmtPct(s.cache):"—";
+  return (sessionUsageStatus(s)==="partial"||["input_output","cache_read","cache_write"].some(k=>availability[k]==="partial"))&&value!=="—"?`Partial · ${value}`:value;
+}
 function sortSessionRows(rows,st=S.sessSort){
   if(st.key!=="model") return sortRows(rows,st);
   return rows.slice().sort((a,b)=>st.dir*sessionModelSummary(a).model.localeCompare(sessionModelSummary(b).model));
@@ -1208,7 +1272,7 @@ function syncSessionTypeControls(counts){
 function sessionDelegationBadge(s){
   if(Number.isSafeInteger(s.subagent_children) && s.subagent_children>0){
     const n=s.subagent_children;
-    return ` <span class="delegation-badge" title="At least ${fmtNum(n)} recorded child transcript${n===1?"":"s"} associated by Claude's session directory. Whole session; date and model filters do not change this count.">${fmtNum(n)} subagent${n===1?"":"s"} recorded</span>`;
+    return ` <span class="delegation-badge" title="At least ${fmtNum(n)} recorded child transcript${n===1?"":"s"} associated with this session in the local source data. Whole session; date and model filters do not change this count.">${fmtNum(n)} subagent${n===1?"":"s"} recorded</span>`;
   }
   if((s.subagents||0)>0){
     const n=s.subagents;
@@ -1256,6 +1320,40 @@ function sdkUsageNote(s){
   if(notes.length&&!s.usage_in_parent) notes.push("Recording status covers the whole session. Saved per-call receipts, VS Code turn totals or SDK shutdown summaries can provide usage later.");
   return notes.join(" ");
 }
+function sessionUsageStatus(s){
+  return s?.usage_status || s?.copilot_sdk?.usage_status || "recorded";
+}
+function sessionUsageNote(s){
+  const notes=[];
+  if(!s.copilot_sdk){
+    const status=sessionUsageStatus(s), source=(SRC[s.source]||{label:s.source||"Source"}).label;
+    if(status==="unavailable") notes.push(`${source} usage is unavailable, not zero. Token totals and estimated cost cannot be calculated from this session log; message counts remain separate.`);
+    else if(status==="partial") notes.push(`${source} usage is partial. Only recorded counts are included; totals and estimated cost may undercount.`);
+  }
+  const cost=sessionCostNote(s);
+  if(cost) notes.push(cost);
+  return notes.join(" ");
+}
+function sessionUsageBadge(s){
+  const note=sessionUsageNote(s);
+  return note?` <span class="warn-ic session-usage-warning" tabindex="0" role="img" aria-label="${esc(note)}" title="${esc(note)}">⚠</span>`:"";
+}
+function sessionUsageDetails(s){
+  const note=sessionUsageNote(s);
+  return note?`<div class="warnbar">${esc(note)}</div>`:"";
+}
+function sessionUsageField(s,key,value){
+  const tokenField=["in","out","cr","cc","reason","response_out"].includes(key);
+  if(tokenField&&sessionUsageStatus(s)==="unavailable") return "Unavailable";
+  const field={in:"input_output",out:"input_output",cr:"cache_read",cc:"cache_write",reason:"reasoning",response_out:"response_output"}[key];
+  const availability=field&&s.usage_availability?.[field];
+  if(availability==="unavailable") return "Unavailable";
+  if(availability==="partial") return `Partial · ${value}`;
+  if(Array.isArray(s.recorded_fields) && !s.recorded_fields.includes(key)
+      && !(key==="asst"&&s.source==="antigravity")) return "Unavailable";
+  if(s.copilot_sdk && !(s.copilot_sdk.recorded_fields||[]).includes(key)) return "Unavailable";
+  return value;
+}
 function sdkUsageBadge(s){
   const note=sdkUsageNote(s);
   return note?` <span class="warn-ic sdk-usage-warning" tabindex="0" role="img" aria-label="${esc(note)}" title="${esc(note)}">⚠</span>`:"";
@@ -1274,7 +1372,7 @@ function sdkUsageDetails(s){
     ${note?`<div class="warnbar">${esc(note)}</div>`:""}${totals}${delegation}`;
 }
 function sdkField(s,key,value){
-  return s.copilot_sdk && !(s.copilot_sdk.recorded_fields||[]).includes(key)?"Unavailable":value;
+  return sessionUsageField(s,key,value);
 }
 function renameButton(s,text=false){
   const display=s.rename_scope==='display',label=display?'Name in AgentTelemetry':'Rename';
@@ -1380,6 +1478,7 @@ function viewSessions(d){
         +(s.subagent&&s.id?`<span class="session-subagent-id" title="Full session ID: ${esc(fullId)}" aria-hidden="true">#${esc(s.id)}</span>`:"")
         +sessionDelegationBadge(s)
         +(s.compaction_count?`<span class="compaction-badge" title="Completed compactions in the selected date range; model filters do not apply.">${fmtNum(s.compaction_count)} compaction${s.compaction_count===1?"":"s"}</span>`:"")
+        +sessionUsageBadge(s)
         +sdkUsageBadge(s);
       return `<tr class="clickable${s.subagent?" session-subagent":""}" data-sess="${i}">
       <td class="dim">${s.when?s.when.slice(0,16).replace("T"," "):"—"}</td>
@@ -1389,11 +1488,11 @@ function viewSessions(d){
         ${sessionMeta?`<div class="session-name-meta">${sessionMeta}</div>`:""}</td>
       <td class="dim">${esc(s.project||"—")}</td>
       <td>${sessionModelHTML(s)}${reasoningEffortLabel(s)}</td>
-      <td class="r">${s.copilot_sdk?.usage_status==="unavailable"?'<span class="dim" title="Token usage was not saved">—</span>':fmtTok(s.tok)}</td><td class="r"><b>${s.copilot_sdk?.usage_status==="unavailable"?'<span class="dim" title="Cost cannot be estimated without token usage">—</span>':fmtUSD(s.cost)}</b></td>
+      <td class="r">${sessionUsageStatus(s)==="unavailable"?'<span class="dim" title="Token usage is unavailable, not zero">Unavailable</span>':fmtTok(s.tok)}</td><td class="r"><b>${sessionCostValue(s)}</b></td>
       <td class="r">${s.usage_in_parent?'<span class="dim" title="Not recorded for this child">—</span>':fmtNum(s.user)}</td><td class="r">${s.usage_in_parent?'<span class="dim" title="Not recorded for this child">—</span>':fmtNum(s.copilot_sdk?s.asst:(s.asst||s.req))}</td>
       <td class="r">${s.usage_in_parent?'<span class="dim" title="Not recorded for this child">—</span>':fmtNum(s.tools)}</td>
       <td class="r">${s.active?fmtDur(s.active):'<span class="dim">—</span>'}</td>
-      <td class="r">${s.cache?fmtPct(s.cache):'<span class="dim">—</span>'}</td></tr>`;
+      <td class="r">${sessionCacheRate(s)}</td></tr>`;
     }).join(""):emptyMessage)+"</tbody>";
   const capped = (RAW.sessions_total>RAW.sessions.length)||(RAW.session_children_total>(RAW.session_children||[]).length);
   const clipped = rows.filter(x=>x.clipped).length;
@@ -1426,6 +1525,10 @@ function openSessionParent(identity){
 function openSessionDetails(s,related=false){
   const relatedLimited=related&&!sessionDays(s);
   const row=(k,v)=>v==null||v===""?"":`<div class="kv"><span class="k">${k}</span><span class="v">${v}</span></div>`;
+  const responseOutputRecorded=s.source==="antigravity"&&(s.response_out!=null
+    ||Object.prototype.hasOwnProperty.call(s.usage_availability||{},"response_output"));
+  const responseOutput=responseOutputRecorded
+    ?sessionUsageField(s,"response_out",s.response_out==null?"Not recorded":fmtNum(s.response_out)):null;
   openDrawer(`
     <div class="eyebrow">${s.subagent?"Subagent session":"Main agent session"}</div>
     <h2>${esc(s.title||s.project||s.id)}</h2>
@@ -1433,6 +1536,7 @@ function openSessionDetails(s,related=false){
     ${related?(relatedLimited?'<p class="hint">Parent session · whole-session figures. This older entry has no daily detail, so its usage cannot be scoped to your date or model filters.</p>':'<p class="hint">Parent session. Figures follow the selected date and model filters; your table filters are unchanged.</p>'):''}
     ${related&&!activeInRange(s,range())?'<div class="warnbar">This parent has no recorded activity matching the selected date and model filters.</div>':''}
     ${sessionTypeDetails(s)}
+    ${sessionUsageDetails(s)}
     ${row("Name scope",s.rename_scope==='display'?'AgentTelemetry only — Claude and its parent session are unchanged.':null)}
     ${row("Source title",s.display_alias?esc(s.original_title):null)}
     ${sessionDelegationDetails(s)}
@@ -1450,16 +1554,17 @@ function openSessionDetails(s,related=false){
     ${s.clipped?`<div class="warnbar">Figures below reflect the selected range and model filters.${s.range_clipped?` This session spans ${s.span} days in total.`:""}</div>`:""}
     ${row("Started",s.start?s.start.slice(0,19).replace("T"," "):"—")}
     ${row("Last activity",s.end?s.end.slice(0,19).replace("T"," "):"—")}
-    ${row("Est. cost",s.copilot_sdk?.usage_status==="unavailable"?"Unavailable":fmtUSD2(s.cost))}
-    ${row("Tokens",s.copilot_sdk?.usage_status==="unavailable"?"Unavailable":fmtNum(s.tok))}
+    ${row("Est. cost",sessionCostValue(s))}
+    ${row("Tokens",sessionUsageStatus(s)==="unavailable"?"Unavailable":fmtNum(s.tok))}
     ${row("· input",sdkField(s,"in",fmtNum(s.in)))}
     ${row("· cache read",sdkField(s,"cr",fmtNum(s.cr)))}
     ${row("· cache write",sdkField(s,"cc",fmtNum(s.cc)))}
     ${row("· output",sdkField(s,"out",fmtNum(s.out)))}
-    ${row("· reasoning (within output)",s.copilot_sdk?sdkField(s,"reason",fmtNum(s.reason||0)):null)}
-    ${row("Cache hit rate",s.cache?fmtPct(s.cache):"—")}
+    ${row("· reasoning (within output)",s.copilot_sdk||s.source==="antigravity"?sdkField(s,"reason",fmtNum(s.reason||0)):null)}
+    ${row("· response output token subtype (whole session)",responseOutput)}
+    ${row("Cache hit rate",sessionCacheRate(s))}
     ${row("Your prompts",s.usage_in_parent?null:fmtNum(s.user))}
-    ${row("Assistant replies",s.usage_in_parent?null:fmtNum(s.copilot_sdk?s.asst:(s.asst||s.req)))}
+    ${row("Assistant replies",s.usage_in_parent?null:sessionUsageField(s,"asst",fmtNum(s.copilot_sdk?s.asst:(s.asst||s.req))))}
     ${row(s.copilot_sdk?"Observed model calls":"Model calls",s.usage_in_parent?null:s.copilot_sdk?(s.req?fmtNum(s.req):"Not recorded"):(s.asst&&s.req&&s.req!==s.asst?fmtNum(s.req):null))}
     ${row("Tool calls",s.usage_in_parent?null:fmtNum(s.tools))}
     ${row("Active time",s.active?fmtDur(s.active):null)}
@@ -1479,7 +1584,7 @@ function openSessionDetails(s,related=false){
 }
 
 function compactionDetails(s){
-  if(s.source!=="claude" && s.source!=="claude-desktop" && s.source!=="codex" && !s.copilot_sdk) return "";
+  if(s.source!=="claude" && s.source!=="claude-desktop" && s.source!=="codex" && s.source!=="antigravity" && !s.copilot_sdk) return "";
   if(!Array.isArray(s.compactions)) return '<div class="kv"><span class="k">Compactions</span><span class="v">Not recorded in this ledger entry</span></div>';
   const events=s.compactions;
   const triggers={manual:"Manual",auto:"Auto",threshold:"Auto · context threshold",
@@ -2704,13 +2809,16 @@ function runFinders(d){
 function viewOptimize(d){
   const found = runFinders(d);
   const totalSpend = d.recs.reduce((a,r)=>a+(r.cost||0),0);
+  const missingPriceModels=unpricedModelNames(d.recs);
   // Findings overlap — the same long session feeds "large context", "no recorded delegation"
   // and "thinking share" — so their savings are NOT additive. Lead with the largest.
   const best = found.filter(f=>f.impact>0.5)[0];
   document.getElementById("optHero").innerHTML = `
     <div class="hero-stat" style="min-width:240px"><div class="hero-label">Largest single saving</div>
-      <div class="hero-value">${best?fmtUSD(best.impact):"—"}</div>
-      <div class="hero-delta"><span>${best?`${fmtPct(best.impact/(totalSpend||1))} of ${fmtUSD(totalSpend)} spent in range · estimates overlap, so they don't add up`:"nothing with a dollar figure in this range"}</span></div></div>
+      <div class="hero-value">${best?fmtUSD(best.impact):missingPriceModels.length?"Unavailable":"—"}</div>
+      <div class="hero-delta"><span>${best?`${fmtPct(best.impact/(totalSpend||1))} of ${fmtUSD(totalSpend)} priced spend in range · estimates overlap, so they don't add up`:
+        missingPriceModels.length?"No price row means cost-based savings are unavailable, not zero.":"nothing with a dollar figure in this range"}</span></div>
+      ${missingPriceModels.length?`<div class="hero-delta"><span>${esc(costCoverageNote(missingPriceModels))}</span></div>`:""}</div>
     <div class="hero-stat"><div class="l">Findings</div><div class="v">${found.length}</div><div class="s">${found.length?"ranked by estimated saving":"nothing to flag"}</div></div>
     <div class="hero-stat"><div class="l">Sessions analysed</div><div class="v">${fmtNum(d.sessions.length)}</div><div class="s">from your own logs</div></div>`;
   const host = document.getElementById("optFindings");

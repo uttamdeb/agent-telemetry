@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  const SOURCE_LABELS = {codex: 'Codex', claude: 'Claude Code', copilot: 'GitHub Copilot', cursor: 'Cursor', opencode: 'OpenCode', hermes: 'Hermes Agent', openclaw: 'OpenClaw', 'claude-desktop': 'Claude Desktop'};
+  const SOURCE_LABELS = {codex: 'Codex', claude: 'Claude Code', copilot: 'GitHub Copilot', cursor: 'Cursor', opencode: 'OpenCode', hermes: 'Hermes Agent', openclaw: 'OpenClaw', 'claude-desktop': 'Claude Desktop', antigravity: 'Antigravity'};
   const RANGE_LABELS = {today: 'Today', '7d': 'Last 7 days', '30d': 'Last 30 days'};
   const EFFORT_LABELS = {none: 'None', minimal: 'Minimal', low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max', ultra: 'Ultra', unrecorded: 'Not recorded'};
   const n = value => typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : 0;
@@ -59,7 +59,7 @@
     return {byKey, parent, children, roots: [...byKey.values()].filter(session => !parent.has(session.key))};
   }
 
-  if (typeof module !== 'undefined' && module.exports) module.exports = {compact, money, composition, forest, effortLabel};
+  if (typeof module !== 'undefined' && module.exports) module.exports = {compact, money, composition, forest, effortLabel, sourceLabel};
   if (typeof document === 'undefined') return;
 
   const api = acquireVsCodeApi();

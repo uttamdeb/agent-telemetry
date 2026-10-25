@@ -15,7 +15,9 @@ Monochrome marks render black/white for theme contrast.
 | OpenCode | [simple-icons/simple-icons/icons/opencode.svg](https://github.com/simple-icons/simple-icons/blob/dc7b10662a0a2cfdfc9305e2a2b06c023c30724a/icons/opencode.svg) |
 | hermes | [NousResearch/hermes-agent/website/static/img/favicon.svg](https://github.com/NousResearch/hermes-agent/blob/82ef40ab2956505b6c2a8d8957c94874abdbed3c/website/static/img/favicon.svg) |
 | openclaw | [openclaw/openclaw/apps/linux/src-tauri/icons/icon.svg](https://github.com/openclaw/openclaw/blob/37064938ac97bc56e6723305f8f6eb4eafe20505/apps/linux/src-tauri/icons/icon.svg) |
+| Antigravity | [Official Google Antigravity press asset](https://www.antigravity.google/assets/image/brand/antigravity-icon__one-color.svg) |
 
 Simple Icons vectors are CC0; Hermes and OpenClaw assets are from their MIT-licensed
 repositories. License texts are included here; trademark rights remain with owners.
-No remote asset requests occur at runtime.
+The Antigravity press-assets page states no open-source license; see
+`LICENSE.antigravity.txt`. No remote asset requests occur at runtime.

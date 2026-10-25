@@ -16,6 +16,10 @@ from typing import Callable, Iterable, Optional
 WINDOW_SECONDS = 15 * 60
 MAX_SESSIONS = 3
 MAX_TITLE_CHARS = 90
+_USAGE_STATUSES = frozenset(("recorded", "partial", "unavailable"))
+_AVAILABILITY_FIELDS = frozenset((
+    "input_output", "cache_read", "cache_write", "reasoning", "response_output",
+))
 
 # Keep these aligned with the dashboard's source (tool) dimension. The billed
 # model never determines the tool or provider shown here.
@@ -28,6 +32,7 @@ TOOLS = {
     "opencode": ("OpenCode", None),
     "hermes": ("Hermes Agent", None),
     "openclaw": ("OpenClaw", None),
+    "antigravity": ("Antigravity", "Google"),
 }
 
 _UTC = timezone.utc
@@ -102,6 +107,19 @@ def _sum_bucket_records(records) -> Optional[int]:
 
 
 def _session_tokens(session, aggregate, session_count) -> Optional[int]:
+    if aggregate.get("source") == "antigravity":
+        status = session.get("usage_status", aggregate.get("usage_status"))
+        availability = session.get("usage_availability", aggregate.get("usage_availability"))
+        if status == "unavailable":
+            return None
+        if isinstance(availability, dict):
+            # A token total requires all four additive token buckets. Reasoning
+            # and response-output availability do not change that total.
+            if any(availability.get(field) != "recorded"
+                   for field in ("input_output", "cache_read", "cache_write")):
+                return None
+        elif status in ("partial", "unavailable"):
+            return None
     parts = [_counter(session.get(field)) for field in _USAGE_FIELDS]
     if all(value is not None for value in parts):
         direct = sum(parts)
@@ -146,7 +164,7 @@ def _path_namespace(path, aggregate) -> Optional[str]:
 
 def _source_id(aggregate, session, identity=None, ordinal=0) -> Optional[str]:
     source = aggregate.get("source")
-    if callable(identity) and source in ("claude", "codex"):
+    if callable(identity) and source in ("claude", "codex", "antigravity"):
         try:
             value = identity(aggregate, session)
         except (KeyError, OSError, TypeError, ValueError):
@@ -249,6 +267,18 @@ def project(items: Iterable, *, observed_at=None, identity: Optional[Callable] =
                 "last_activity_at": _iso_utc(end),
                 "subagent": subagent,
             }
+            if source == "antigravity":
+                status = session.get("usage_status", aggregate.get("usage_status"))
+                if isinstance(status, str) and status in _USAGE_STATUSES:
+                    row["usage_status"] = status
+                availability = session.get("usage_availability", aggregate.get("usage_availability"))
+                if isinstance(availability, dict):
+                    safe_availability = {
+                        field: value for field, value in availability.items()
+                        if field in _AVAILABILITY_FIELDS and isinstance(value, str) and value in _USAGE_STATUSES
+                    }
+                    if safe_availability:
+                        row["usage_availability"] = safe_availability
             alias = None
             if source == "claude" and subagent and isinstance(path, str):
                 alias_id = source_id[len("native:"):] if source_id.startswith("native:") else source_id

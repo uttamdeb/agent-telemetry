@@ -14,11 +14,12 @@ from datetime import date, timedelta
 METRICS = ("tokens", "cost", "messages", "time")
 DIMENSIONS = ("project", "tool", "model", "provider", "ide", "device", "token_type")
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-_EXACT_SOURCES = frozenset(("claude", "codex", "claude-desktop", "opencode", "hermes", "openclaw"))
+_EXACT_SOURCES = frozenset(("claude", "codex", "claude-desktop", "opencode", "hermes", "openclaw", "antigravity"))
 _TOOL_LABELS = {
     "claude": "Claude Code", "codex": "Codex", "copilot": "Copilot",
     "cursor": "Cursor", "claude-desktop": "Claude Desktop", "opencode": "OpenCode",
     "hermes": "Hermes Agent", "openclaw": "OpenClaw",
+    "antigravity": "Antigravity",
 }
 _TOKEN_PART_LABELS = {
     "in": "Input", "out": "Output", "cr": "Cache reads", "cc": "Cache writes",

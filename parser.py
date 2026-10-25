@@ -15,8 +15,10 @@ No third-party dependencies — stdlib only.
 import os, sys, json, glob, re, time, shutil, subprocess, copy, hashlib
 if __package__:
     from . import accounts as A
+    from . import antigravity as AG
 else:
     import accounts as A
+    import antigravity as AG
 from datetime import datetime, timezone
 
 HOME = os.path.expanduser("~")
@@ -70,6 +72,9 @@ CLAUDE_DESKTOP_GLOBS = [
 GEMINI_GLOBS = [
     os.path.join(HOME, ".gemini", "tmp", "*", "chats", "*.jsonl"),
 ]
+# Antigravity stores conversation databases under exactly three local roots.
+# The reader owns root validation and rejects symlinked/out-of-root databases.
+ANTIGRAVITY_ROOTS = AG.conversation_roots(HOME)
 # Cursor's native AI: one SQLite key-value store. Bubbles hold messages; token counts
 # are present on only a few and no reliable per-message model is stored.
 # (CURSOR_DBS is derived portably from the editor roots below.)
@@ -2904,6 +2909,205 @@ def parse_gemini(agg, path):
         agg["totals"]["user"] += 1
 
 
+# ==========================================================================
+# ANTIGRAVITY  (bounded local SQLite conversation databases)
+# ==========================================================================
+def _antigravity_merge_state(previous, current):
+    states = (previous, current)
+    if all(value == "recorded" for value in states):
+        return "recorded"
+    if all(value == "unavailable" for value in states):
+        return "unavailable"
+    return "partial"
+
+
+def parse_antigravity(agg, path):
+    """Read one Antigravity SQLite conversation and fold safe facts into agg."""
+    snapshot = AG.read_conversation(path, max_events=AG.MAX_EVENTS,
+                                    include_private=True)
+    if not isinstance(snapshot, dict) or not isinstance(snapshot.get("conversation_id"), str):
+        raise AG.AntigravityReadError("conversation identity is unavailable")
+
+    conversation_id = snapshot["conversation_id"]
+    usage = snapshot.get("totals") if isinstance(snapshot.get("totals"), dict) else {}
+    summary = {
+        "usage_status": snapshot.get("usage_status", "unavailable"),
+        "usage_availability": dict(snapshot.get("usage_availability") or {}),
+        "model_status": snapshot.get("model_status", "unavailable"),
+        "detail_status": snapshot.get("detail_status", "unavailable"),
+        "record_availability": {},
+        "response_out": 0,
+        "undated_usage": {key: 0 for key in ("in", "out", "cr", "cc", "reason", "response_out", "req")},
+        "unknown_model_usage": {key: 0 for key in ("in", "out", "cr", "cc", "reason", "response_out")},
+        "subagent_requests": max(0, int(snapshot.get("subagent_requests", 0) or 0)),
+    }
+    agg["source"] = "antigravity"
+    agg["_session_id"] = conversation_id
+    agg["conversation_id"] = conversation_id
+    agg["cwd"] = snapshot.get("cwd")
+    agg["project"] = snapshot.get("project") or "(unknown)"
+    agg["branch"] = snapshot.get("branch")
+    agg["title"] = snapshot.get("title")
+    agg["subagent"] = snapshot.get("subagent") is True
+    agg["parent_id"] = snapshot.get("parent_id")
+    agg["root_id"] = snapshot.get("root_id")
+    agg["nesting_depth"] = snapshot.get("nesting_depth")
+    agg["subagent_type"] = snapshot.get("subagent_type")
+    agg["subagent_role"] = snapshot.get("subagent_role")
+    agg["context"] = copy.deepcopy(snapshot.get("context"))
+    agg["activity_dates"] = list(snapshot.get("activity_dates") or [])
+    agg["compactions"] = {
+        item["id"]: dict(item) for item in snapshot.get("compactions", [])
+        if isinstance(item, dict) and isinstance(item.get("id"), str)
+    }
+    agg["antigravity"] = summary
+    _reasoning_effort_init(agg)
+
+    totals = agg["totals"]
+    rows = snapshot.get("records") if isinstance(snapshot.get("records"), list) else []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        model = _canonicalize(row.get("model") if isinstance(row.get("model"), str) else "Unknown")
+        if not model:
+            model = "Unknown"
+        effort = row.get("effort") if row.get("effort") in ("low", "medium", "high", "xhigh", "max") else None
+        numeric = {key: max(0, int(row.get(key, 0) or 0))
+                   for key in ("in", "out", "cr", "cc", "reason", "response_out")}
+        req = max(0, int(row.get("req", 1) or 0))
+        availability = row.get("usage_availability") if isinstance(row.get("usage_availability"), dict) else {}
+        timestamp = row.get("timestamp")
+        dt = _from_iso(timestamp) if isinstance(timestamp, str) else None
+        date = _buckets(dt)[0] if dt else None
+        if date:
+            record = _rec(agg, date, model)
+            for key in ("in", "out", "cr", "cc", "reason"):
+                record[key] += numeric[key]
+                totals[key] += numeric[key]
+            record["req"] += req
+            totals["req"] += req
+            record_key = f"{date}\t{model}"
+            bucket_state = summary["record_availability"].get(record_key)
+            if bucket_state is None:
+                summary["record_availability"][record_key] = {
+                    field: availability.get(field, "unavailable")
+                    for field in ("input_output", "cache_read", "cache_write", "reasoning", "response_output")
+                }
+            else:
+                for field in bucket_state:
+                    bucket_state[field] = _antigravity_merge_state(
+                        bucket_state[field], availability.get(field, "unavailable"))
+            _bump_time(agg, dt, numeric["in"] + numeric["out"] + numeric["cr"] + numeric["cc"], 0)
+            record["active"] += _active_gap(agg.get("_active_last"), dt)
+            agg["_active_last"] = dt.isoformat()
+            _reasoning_effort_observe(agg, dt, model, effort,
+                                      "antigravity_effort_responses", identity=row.get("key"))
+        else:
+            for key in ("in", "out", "cr", "cc", "reason", "response_out"):
+                summary["undated_usage"][key] += numeric[key]
+                if key in totals:
+                    totals[key] += numeric[key]
+            summary["undated_usage"]["req"] += req
+            totals["req"] += req
+        summary["response_out"] += numeric["response_out"]
+        if model == "Unknown":
+            for key in summary["unknown_model_usage"]:
+                summary["unknown_model_usage"][key] += numeric[key]
+        if date and model != "(user)":
+            context = row.get("context") if isinstance(row.get("context"), dict) else {}
+            estimate = context.get("estimated_tokens_used")
+            if isinstance(estimate, int) and not isinstance(estimate, bool) and estimate >= 0:
+                label = ("0-50k" if estimate < 50_000 else "50-150k" if estimate < 150_000
+                         else "150-400k" if estimate < 400_000 else "400k+")
+                ctx = agg["ctx"].setdefault(f"{date}\t{label}", {"tok": 0, "n": 0})
+                ctx["tok"] += estimate
+                ctx["n"] += req
+
+    # Full safe activity buckets are produced during the bounded source scan,
+    # independently of the capped timeline event list.
+    activity = snapshot.get("activity_buckets") if isinstance(snapshot.get("activity_buckets"), dict) else {}
+    for key, count in (activity.get("assistant") or {}).items():
+        if not isinstance(key, str) or "\t" not in key or not isinstance(count, int):
+            continue
+        date, model_raw = key.split("\t", 1)
+        model = _canonicalize(model_raw)
+        record = _rec(agg, date, model)
+        record["asst"] += count
+        totals["asst"] += count
+    for date, count in (activity.get("user") or {}).items():
+        if not isinstance(date, str) or not isinstance(count, int):
+            continue
+        record = _rec(agg, date, "(user)")
+        record["user"] += count
+        totals["user"] += count
+    for key, count in (activity.get("tools") or {}).items():
+        if not isinstance(key, str) or key.count("\t") < 2 or not isinstance(count, int):
+            continue
+        date, model_raw, tool = key.split("\t", 2)
+        model = _canonicalize(model_raw)
+        record = _rec(agg, date, model)
+        record["tools"] += count
+        tool_key = f"{date}\t{tool}"
+        agg["tools"][tool_key] = agg["tools"].get(tool_key, 0) + count
+        totals["tools"] += count
+    for hour_key, value in (activity.get("hourly") or {}).items():
+        if (not isinstance(hour_key, str) or not isinstance(value, dict)
+                or not isinstance(value.get("msgs"), int)):
+            continue
+        hour = agg["hourly"].setdefault(hour_key, {"tokens": 0, "msgs": 0})
+        hour["msgs"] += value["msgs"]
+
+    totals["asst"] = sum((activity.get("assistant") or {}).values())
+    totals["user"] = sum((activity.get("user") or {}).values())
+    totals["tools"] = sum((activity.get("tools") or {}).values())
+    source_totals = snapshot.get("totals") if isinstance(snapshot.get("totals"), dict) else {}
+    # Requests and usage sums include dated and undated rows. Reassign from the
+    # reader's deduplicated snapshot to avoid message/event caps affecting totals.
+    for key in ("in", "out", "cr", "cc", "reason", "req"):
+        if isinstance(source_totals.get(key), int) and not isinstance(source_totals.get(key), bool):
+            totals[key] = source_totals[key]
+    if snapshot.get("first_activity"):
+        agg["first_ts"] = snapshot["first_activity"]
+    if snapshot.get("last_activity"):
+        agg["last_ts"] = snapshot["last_activity"]
+
+    session_fields = {
+        "conversation_id": conversation_id,
+        "_sid": conversation_id,
+        "id": conversation_id[:8],
+        "in": usage.get("in", 0),
+        "out": usage.get("out", 0),
+        "cr": usage.get("cr", 0),
+        "cc": usage.get("cc", 0),
+        "reason": usage.get("reason", 0),
+        "req": usage.get("req", 0),
+        "asst": snapshot.get("assistant_messages", 0),
+        "user": snapshot.get("user_messages", 0),
+        "tools": snapshot.get("tool_calls", 0),
+        "response_out": summary["response_out"],
+        "parent_id": snapshot.get("parent_id"),
+        "root_id": snapshot.get("root_id"),
+        "subagent": snapshot.get("subagent") is True,
+        "subagent_type": snapshot.get("subagent_type"),
+        "subagent_role": snapshot.get("subagent_role"),
+        "nesting_depth": snapshot.get("nesting_depth"),
+        "context": copy.deepcopy(snapshot.get("context")),
+        "usage_status": summary["usage_status"],
+        "usage_availability": dict(summary["usage_availability"]),
+        "model_status": summary["model_status"],
+        "detail_status": summary["detail_status"],
+        "record_availability": copy.deepcopy(summary["record_availability"]),
+        "user_messages": snapshot.get("user_messages", 0),
+        "assistant_messages": snapshot.get("assistant_messages", 0),
+        "tool_calls": snapshot.get("tool_calls", 0),
+        "subagent_requests": summary["subagent_requests"],
+        "activity_dates": list(snapshot.get("activity_dates") or []),
+    }
+    # _finalize_session creates the row after this parser returns. Retain the
+    # source-only values privately so the update route can add them to that row.
+    agg["_antigravity_session"] = session_fields
+
+
 # ===========================================================================
 # CURSOR  (native AI chat bubbles in a SQLite key-value store)
 # ===========================================================================
@@ -4078,6 +4282,8 @@ def discover():
     # NOTE: Gemini CLI is intentionally NOT discovered — its local chat logs persist
     # only a re-written session-context preamble (no prompts/responses/tokens/model),
     # so there is no usable usage data to report. See GEMINI_GLOBS / parse_gemini.
+    for path, editor in AG.discover_conversations(ANTIGRAVITY_ROOTS):
+        out.append(("antigravity", path, editor))
     for db in CURSOR_DBS:
         if os.path.exists(db):
             out.append(("cursor", db, "Cursor"))
@@ -4204,6 +4410,32 @@ def update_file(agg, source, path, editor_hint, proj_map):
         fresh["_sig"] = sig
         fresh["size"] = size + (wst.st_size if wst else 0)
         fresh["mtime"] = max(mtime, wst.st_mtime if wst else 0)
+        return fresh
+
+    if source == "antigravity":
+        # Include the WAL in the signature: active Antigravity writes may never
+        # touch the main database until a checkpoint. Full reparse is staged in
+        # a fresh aggregate so any required-schema/protobuf failure leaves the
+        # previous aggregate and signature untouched for retry.
+        wal = path + "-wal"
+        try:
+            wst = os.stat(wal)
+        except OSError:
+            wst = None
+        sig = [size, st.st_mtime_ns, wst.st_size if wst else 0,
+               wst.st_mtime_ns if wst else 0]
+        if agg and agg.get("_sig") == sig and agg.get("antigravity_schema") == 1:
+            return agg
+        fresh = _blank_agg(source, path)
+        fresh["editor"] = editor_hint
+        parse_antigravity(fresh, path)
+        fresh["size"] = size + (wst.st_size if wst else 0)
+        fresh["mtime"] = max(mtime, wst.st_mtime if wst else 0)
+        fresh["_sig"] = sig
+        fresh["antigravity_schema"] = 1
+        _finalize_session(fresh, source, path)
+        if fresh.get("sessions"):
+            fresh["sessions"][0].update(fresh.pop("_antigravity_session", {}))
         return fresh
 
     if source == "opencode":
@@ -4394,6 +4626,8 @@ def _ide_of(source, agg, editor_hint=None):
     new host shows up as itself instead of silently becoming 'VS Code'."""
     if source in IDE_FIXED:
         return IDE_FIXED[source]
+    if source == "antigravity":
+        return agg.get("editor") or editor_hint or "Antigravity IDE"
     if source == "copilot":
         # the editor whose storage this file came out of
         return agg.get("editor") or editor_hint or "VS Code"

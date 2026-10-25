@@ -22,9 +22,25 @@ else:
 MAX_REQUEST_BYTES = 64 * 1024
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 _SOURCES = re.compile(r"[a-z0-9][a-z0-9_-]{0,39}\Z")
-_TIMELINE_KINDS = {"request", "user_turn", "tool", "subagent"}
+_TIMELINE_KINDS = {
+    "request", "user_turn", "tool", "subagent", "model", "reasoning", "session",
+    "error", "compaction", "checkpoint",
+}
 _TIMELINE_NUMBERS = {
-    "input", "output", "cache_read", "cache_write", "reasoning", "web_search",
+    "input", "output", "cache_read", "cache_write", "reasoning", "response_output", "web_search",
+    "step_index", "included_steps", "estimated_tokens_used", "max_context_tokens",
+    "before", "after",
+}
+_TIMELINE_STATUSES = {
+    "unknown", "pending", "running", "done", "invalid", "cleared", "canceled",
+    "error", "generating", "waiting", "queued", "interrupted",
+}
+_TIMELINE_USAGE_AVAILABILITY = {
+    "input_output", "cache_read", "cache_write", "reasoning", "response_output",
+}
+_TIMELINE_EFFORTS = {"low", "medium", "high", "xhigh", "max"}
+_TIMELINE_TRIGGERS = {
+    "manual", "auto", "threshold", "context_limit_retry", "memory_pressure", "model_switch", "unknown",
 }
 _DIAGNOSTIC_CATEGORIES = {
     "permission", "missing_file", "invalid_json", "decode", "disk_full", "parse_error",
@@ -158,6 +174,17 @@ def _safe_diagnostics(report):
         elif status == "retained_only":
             item["hint"] = "Only retained history is available; new figures need readable source logs."
         sources.append(item)
+    unsupported_formats = []
+    raw_unsupported = report.get("unsupported_formats") if isinstance(report.get("unsupported_formats"), list) else []
+    for row in raw_unsupported[:20]:
+        if not isinstance(row, dict) or row.get("source") != "antigravity" or row.get("format") != "legacy_pb":
+            continue
+        count = _safe_count(row.get("count"))
+        if count:
+            unsupported_formats.append({
+                "source": "antigravity", "format": "legacy_pb", "count": count,
+                "hint": "Standalone Antigravity legacy .pb conversations are unsupported; file contents were not read.",
+            })
     raw_ledger = report.get("ledger") if isinstance(report.get("ledger"), dict) else {}
     ledger_status = raw_ledger.get("status")
     ledger_name = ledger_status if isinstance(ledger_status, str) else ""
@@ -201,6 +228,7 @@ def _safe_diagnostics(report):
         "read": _safe_count(report.get("read")),
         "errors": _safe_count(report.get("errors")),
         "sources": sources,
+        "unsupported_formats": unsupported_formats,
         "issue_categories": categories,
         "ledger": ledger,
         "backup_issue": bool(report.get("backup_error")),
@@ -256,6 +284,29 @@ def _safe_timeline(raw):
             safe = _safe_text(event.get(field))
             if safe is not None:
                 item[field] = safe
+        for field in ("subagent_role", "subagent_type"):
+            safe = _safe_text(event.get(field), 80)
+            if safe is not None:
+                item[field] = safe
+        effort = event.get("effort")
+        if isinstance(effort, str) and effort in _TIMELINE_EFFORTS:
+            item["effort"] = effort
+        if isinstance(event.get("intent_only"), bool):
+            item["intent_only"] = event["intent_only"]
+        trigger = event.get("trigger")
+        if isinstance(trigger, str) and trigger in _TIMELINE_TRIGGERS:
+            item["trigger"] = trigger
+        status = event.get("status")
+        if kind == "tool" and isinstance(status, str) and status in _TIMELINE_STATUSES:
+            item["status"] = status
+        availability = event.get("usage_availability")
+        if isinstance(availability, dict):
+            safe_availability = {
+                field: value for field, value in availability.items()
+                if field in _TIMELINE_USAGE_AVAILABILITY and value in ("recorded", "partial", "unavailable")
+            }
+            if safe_availability:
+                item["usage_availability"] = safe_availability
         for field in _TIMELINE_NUMBERS:
             value = event.get(field)
             if _finite_between(value, 0, 10**15):
@@ -433,7 +484,7 @@ def _timeline(payload, arguments, policy, builder):
         return _safe_timeline({"available": False, "events": [], "detail": "remote_source"})
     if selected.get("archived") is True:
         return _safe_timeline({"available": False, "events": [], "detail": "archived_source"})
-    if source not in ("claude", "claude-desktop", "codex"):
+    if source not in ("claude", "claude-desktop", "codex", "antigravity"):
         return _safe_timeline({"available": False, "events": [], "detail": "unsupported_tool"})
     try:
         result = builder(device, source, native_id,

@@ -2,7 +2,8 @@
 """
 dashboard.py — Live local usage analytics for your AI coding tools.
 
-Covers Claude Code, Claude Desktop, Codex, GitHub Copilot, Cursor, opencode and Hermes Agent.
+Covers Claude Code, Claude Desktop, Codex, GitHub Copilot, Cursor, Antigravity, OpenCode,
+Hermes Agent and OpenClaw.
 Parses your local interaction logs (no data leaves the machine unless you turn on device
 sharing in Settings), aggregates usage by day / model / tool / project / hour, and serves
 an interactive dashboard.
@@ -20,6 +21,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 if __package__:
     from . import parser as P
+    from . import antigravity as AG
     from . import native as N
     from . import session_names as SN
     from . import accounts as A
@@ -35,6 +37,7 @@ if __package__:
 else:
     # Source checkouts and native app payloads retain their top-level scripts.
     import parser as P
+    import antigravity as AG
     import native as N
     import session_names as SN
     import accounts as A
@@ -51,7 +54,7 @@ else:
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = HERE
 CACHE_PATH = os.path.join(DATA_DIR, ".usage_cache.json")
-CACHE_VERSION = 61
+CACHE_VERSION = 62
 
 
 def _configure_data_dir(path):
@@ -65,9 +68,9 @@ def _configure_data_dir(path):
 
 
 def _peer_cache_ok(version):
-    # v1.7.0 mirrors lack optional attribution/precision fields, but the reader
-    # still supports their rows just as it supports archived local entries.
-    return type(version) is int and version in (52, 53, 54, 55, 56, 57, 58, 59, 60, CACHE_VERSION)
+    # Mirrors from every supported ledger generation remain readable. Newer
+    # Antigravity source rows use the same generic aggregate shape as existing tools.
+    return type(version) is int and version in (52, 53, 54, 55, 56, 57, 58, 59, 60, 61, CACHE_VERSION)
 
 # ---------------------------------------------------------------------------
 # In-memory store of per-file aggregates, refreshed on a background interval.
@@ -330,13 +333,12 @@ def load_cache():
     if data.get("version") == CACHE_VERSION:
         _state["files"] = files
         return
-    if data.get("version") in (53, 54, 55, 56, 57, 58, 59, 60):
-        # Only optional compaction/pricing/account/SDK/effort metadata changed. Keep every entry
-        # until its replacement parses successfully; update_file backfills Claude
-        # and Codex logs lacking metadata, and Claude Haiku 5.5 pricing detail.
+    if data.get("version") in (53, 54, 55, 56, 57, 58, 59, 60, 61):
+        # Keep all compatible entries through v62. New Antigravity files are
+        # discovered incrementally; archives have no source file to re-read.
         _state["files"] = files
         _dirty["v"] = True
-        sys.stderr.write("[cache] backfilling optional metadata; existing ledger retained\n")
+        sys.stderr.write("[cache] retaining compatible entries during migration; existing ledger retained\n")
         return
     # Version changed, so the shape may have. Live logs are simply re-parsed from
     # disk — but ARCHIVED entries CANNOT be: their source files are gone. Dropping
@@ -574,6 +576,14 @@ def build_diagnostics():
                         if aggregate["source"] not in ("opencode", "openclaw") or not row.get("cost"):
                             missing.add(model)
         report["missing_prices"] = sorted(missing)[:100]
+        legacy_pb_count = AG.legacy_pb_inventory()
+        if legacy_pb_count:
+            report["unsupported_formats"] = [{
+                "source": "antigravity", "format": "legacy_pb", "count": legacy_pb_count,
+                "hint": "Standalone Antigravity legacy .pb conversations are unsupported; file contents were not read.",
+            }]
+        else:
+            report["unsupported_formats"] = []
         return report
 
 
@@ -581,7 +591,7 @@ def build_session_timeline(device, source, session_id, date_from=None, date_to=N
     """Resolve a full native id from this ledger, never a caller-supplied filename."""
     if view not in ("all", "activity", "requests", "tools", "compactions"):
         raise ValueError("Unknown timeline event view.")
-    if source not in ("claude", "codex", "claude-desktop", "copilot") or not isinstance(session_id, str) or not 0 < len(session_id) <= 512:
+    if source not in ("claude", "codex", "claude-desktop", "copilot", "antigravity") or not isinstance(session_id, str) or not 0 < len(session_id) <= 512:
         raise ValueError("Select a supported session with its full native identity.")
     if device != _local_id():
         return {"available": False, "events": [], "truncated": False, "detail": "Source events are available on the original device."}
@@ -690,6 +700,18 @@ def _conversation_key(path, agg):
     if src == "copilot":
         m = _UUID.search(P._leaf(path)) or _UUID.search(path)
         return (device, "copilot", m.group(0)) if m else None
+    if src == "antigravity":
+        # One SQLite database represents one Antigravity conversation. App, IDE,
+        # and CLI copies can share the same conversation UUID under distinct roots.
+        # Use only a full UUID; unknown filenames must remain separately counted.
+        identity = agg.get("conversation_id")
+        if not isinstance(identity, str) or not identity:
+            identity = P._leaf(path)
+        leaf = identity.replace("\\", "/").rsplit("/", 1)[-1]
+        if leaf.lower().endswith(".db"):
+            leaf = leaf[:-3]
+        if _UUID.fullmatch(leaf):
+            return (device, "antigravity", leaf.lower())
     return None
 
 
@@ -942,6 +964,139 @@ def _record_buckets(agg):
     return [(agg.get("project") or "(unknown)", agg.get("records", {}))]
 
 
+_AG_USAGE_FIELDS = frozenset(("input_output", "cache_read", "cache_write", "reasoning", "response_output"))
+_AG_USAGE_STATES = frozenset(("recorded", "partial", "unavailable"))
+
+
+def _ag_availability(value):
+    if not isinstance(value, dict):
+        return {}
+    return {field: state for field, state in value.items()
+            if field in _AG_USAGE_FIELDS and isinstance(state, str) and state in _AG_USAGE_STATES}
+
+
+def _ag_record_availability(value):
+    if not isinstance(value, dict):
+        return {}
+    result = {}
+    for key, fields in list(value.items())[:20_000]:
+        if not isinstance(key, str) or "\t" not in key:
+            continue
+        day, model = key.split("\t", 1)
+        if (not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day) or P._from_iso(day) is None
+                or not model or len(model) > 160 or "\t" in model):
+            continue
+        safe = _ag_availability(fields)
+        if safe:
+            result[key] = safe
+    return result
+
+
+def _ag_combine_status(values):
+    states = [value for value in values if isinstance(value, str) and value in _AG_USAGE_STATES]
+    if not states:
+        return None
+    return states[0] if all(state == states[0] for state in states) else "partial"
+
+
+def _ag_export_session(session):
+    if not isinstance(session, dict):
+        return None
+    out = {key: session[key] for key in _ANTIGRAVITY_SESSION_EXPORT_KEYS if key in session}
+    if "usage_availability" in out:
+        safe_availability = _ag_availability(out["usage_availability"])
+        if safe_availability:
+            out["usage_availability"] = safe_availability
+        else:
+            out.pop("usage_availability", None)
+    if "record_availability" in out:
+        safe_record_availability = _ag_record_availability(out["record_availability"])
+        if safe_record_availability:
+            out["record_availability"] = safe_record_availability
+        else:
+            out.pop("record_availability", None)
+    for field in ("usage_status", "model_status", "detail_status"):
+        if field in out and (not isinstance(out[field], str) or out[field] not in _AG_USAGE_STATES):
+            out.pop(field, None)
+    for field in ("in", "out", "cr", "cc", "reason", "response_out", "req", "asst", "user", "tools",
+                  "user_messages", "assistant_messages", "tool_calls", "subagent_requests"):
+        value = out.get(field)
+        if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= 10**15:
+            out.pop(field, None)
+    active = out.get("active")
+    if (not isinstance(active, (int, float)) or isinstance(active, bool)
+            or not 0 <= active <= 10**15):
+        out.pop("active", None)
+    if (not isinstance(out.get("effort"), str)
+            or out.get("effort") not in ("low", "medium", "high", "xhigh", "max")):
+        out.pop("effort", None)
+    reasoning = out.get("reasoning_effort")
+    if isinstance(reasoning, dict):
+        safe_days = {}
+        days = reasoning.get("days") if isinstance(reasoning.get("days"), dict) else {}
+        for key, row in list(days.items())[:20_000]:
+            if (not isinstance(key, str) or "\t" not in key or not isinstance(row, dict)):
+                continue
+            day, model = key.split("\t", 1)
+            if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day) or P._from_iso(day) is None or not model or len(model) > 160:
+                continue
+            levels = row.get("levels") if isinstance(row.get("levels"), dict) else {}
+            safe_levels = {level: count for level, count in levels.items()
+                           if level in ("low", "medium", "high", "xhigh", "max")
+                           and isinstance(count, int) and not isinstance(count, bool) and 0 <= count <= 10**9}
+            unrecorded = row.get("unrecorded")
+            safe_unrecorded = unrecorded if isinstance(unrecorded, int) and not isinstance(unrecorded, bool) and 0 <= unrecorded <= 10**9 else 0
+            if safe_levels or safe_unrecorded:
+                safe_days[key] = {"levels": safe_levels, "unrecorded": safe_unrecorded}
+        out["reasoning_effort"] = {"version": 1, "days": safe_days}
+    elif "reasoning_effort" in out:
+        out.pop("reasoning_effort", None)
+    if "efforts" in out:
+        efforts = out.get("efforts")
+        if isinstance(efforts, list):
+            out["efforts"] = [level for level in efforts[:6]
+                               if isinstance(level, str)
+                               and level in ("low", "medium", "high", "xhigh", "max", "unrecorded")]
+        else:
+            out.pop("efforts", None)
+    return out
+
+
+def _ag_export_summary(value):
+    if not isinstance(value, dict):
+        return {}
+    out = {}
+    for field in ("usage_status", "model_status", "detail_status"):
+        if isinstance(value.get(field), str) and value.get(field) in _AG_USAGE_STATES:
+            out[field] = value[field]
+    availability = _ag_availability(value.get("usage_availability"))
+    if availability:
+        out["usage_availability"] = availability
+    record_availability = _ag_record_availability(value.get("record_availability"))
+    if record_availability:
+        out["record_availability"] = record_availability
+    for field in ("subagent_requests", "response_out"):
+        number = value.get(field)
+        if isinstance(number, int) and not isinstance(number, bool) and 0 <= number <= 10**15:
+            out[field] = number
+    counter_fields = {
+        "undated_usage": ("in", "out", "cr", "cc", "reason", "response_out", "req"),
+        "unknown_model_usage": ("in", "out", "cr", "cc", "reason", "response_out"),
+    }
+    for field, allowed in counter_fields.items():
+        counters = value.get(field)
+        if not isinstance(counters, dict):
+            continue
+        safe = {}
+        for name in allowed:
+            number = counters.get(name)
+            if isinstance(number, int) and not isinstance(number, bool) and 0 <= number <= 10**15:
+                safe[name] = number
+        if safe:
+            out[field] = safe
+    return out
+
+
 def _priced_days(bucket, source, logged):
     days, models = {}, {}
     for key, row in bucket.items():
@@ -1106,6 +1261,7 @@ def _build_payload_locked():
     except ValueError as error:
         display_names, display_name_error = {}, str(error)
     records = {}      # (date, source, model, project, ide, device) -> aggregates
+    record_quality = {}  # Antigravity's per-date/model availability survives payload aggregation
     tools = {}        # (date, source, name, device) -> count
     projects = {}     # (project, source) -> {tokens, msgs, sessions, cost}
     hourly = {}       # (date, hour, source, device) -> {tokens, msgs}
@@ -1138,6 +1294,10 @@ def _build_payload_locked():
 
     for agg in files:
         source = agg["source"]
+        ag_summary = agg.get("antigravity") if source == "antigravity" and isinstance(agg.get("antigravity"), dict) else {}
+        ag_record_availability = _ag_record_availability(ag_summary.get("record_availability")) if source == "antigravity" else {}
+        ag_usage_availability = _ag_availability(ag_summary.get("usage_availability")) if source == "antigravity" else {}
+        ag_usage_status = ag_summary.get("usage_status") if source == "antigravity" else None
         # A connected device's copy is usage only. Its setup (instruction files, MCP
         # config, installed skills) lives on ITS disk, so the Optimize setup checks,
         # which read this machine's, skip it.
@@ -1164,6 +1324,15 @@ def _build_payload_locked():
                 rk = (date, source, model, row_project, ide, device)
                 slot = records.setdefault(rk, _zero())
                 _sum_usage(slot, priced)
+                if source == "antigravity":
+                    availability = ag_record_availability.get(key) or ag_usage_availability
+                    record_status = (_ag_combine_status(list(availability.values()))
+                                     if key in ag_record_availability else ag_usage_status)
+                    quality = record_quality.setdefault(rk, {"status": [], "fields": {}})
+                    if isinstance(record_status, str) and record_status in _AG_USAGE_STATES:
+                        quality["status"].append(record_status)
+                    for field, status in availability.items():
+                        quality["fields"].setdefault(field, []).append(status)
                 if "exact" in r:
                     exact = slot.setdefault("exact", _zero())
                     _sum_usage(exact, _priced_usage(source, model, date, r["exact"], False))
@@ -1275,6 +1444,33 @@ def _build_payload_locked():
         # daily totals into each session to fill that gap.
         for session in agg.get("sessions", []):
             s2 = dict(session)
+            s2["source"] = source
+            if source == "antigravity":
+                # Workspace identity remains local for editor-scope matching only.
+                s2.pop("cwd", None)
+                for field in ("usage_status", "model_status", "detail_status"):
+                    value = s2.get(field, ag_summary.get(field))
+                    if isinstance(value, str) and value in _AG_USAGE_STATES:
+                        s2[field] = value
+                    else:
+                        s2.pop(field, None)
+                availability = _ag_availability(s2.get("usage_availability") or ag_usage_availability)
+                if availability:
+                    s2["usage_availability"] = availability
+                else:
+                    s2.pop("usage_availability", None)
+                record_availability = _ag_record_availability(
+                    s2.get("record_availability") or ag_summary.get("record_availability"))
+                if record_availability:
+                    s2["record_availability"] = record_availability
+                else:
+                    s2.pop("record_availability", None)
+                s2.pop("subagents_started", None)
+                count = s2.get("subagent_requests", ag_summary.get("subagent_requests"))
+                if isinstance(count, int) and not isinstance(count, bool) and 0 <= count <= 10**15:
+                    s2["subagent_requests"] = count
+                else:
+                    s2.pop("subagent_requests", None)
             bucket = session.get("records")
             if bucket is None and len(agg.get("sessions", [])) == 1:
                 bucket = agg.get("records", {})
@@ -1295,7 +1491,8 @@ def _build_payload_locked():
                 s2["detail_limited"] = True
             s2["days"] = _day_vectors(days) if days or bucket is not None else None
             s2["archived"] = bool(agg.get("archived"))
-            s2["subagent"] = bool(session.get("subagent"))
+            s2["subagent"] = (session.get("subagent") is True if source == "antigravity"
+                               else bool(session.get("subagent")))
             s2["device"] = device
             if source == "claude" and not s2["subagent"]:
                 parent = _claude_parent_key(agg.get("path"))
@@ -1339,25 +1536,65 @@ def _build_payload_locked():
     parent_candidates = {}
     for session in sessions:
         identity = session.get("rename_id")
-        if session.get("source") == "codex" and isinstance(identity, str) and re.fullmatch(
+        if session.get("source") in ("codex", "antigravity") and isinstance(identity, str) and re.fullmatch(
                 r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", identity):
-            key = (session["device"], identity.lower())
+            key = (session["device"], session["source"], identity.lower())
             parent_candidates.setdefault(key, []).append(session)
+    antigravity_child_ids = {}
     for session in sessions:
         parent_id = session.get("parent_id")
-        if session.get("source") != "codex" or not session.get("subagent") or not isinstance(parent_id, str):
+        source = session.get("source")
+        if source == "antigravity":
+            # Only a recorded subagent role plus its explicit immediate parent
+            # link can establish this relationship. root_id is not a substitute.
+            if session.get("subagent") is not True or not isinstance(parent_id, str):
+                continue
+        elif source != "codex" or not session.get("subagent") or not isinstance(parent_id, str):
             continue
-        candidates = parent_candidates.get((session["device"], parent_id), [])
+        key_id = parent_id.lower() if source == "antigravity" else parent_id
+        candidates = parent_candidates.get((session["device"], source, key_id), [])
         if len(candidates) == 1 and candidates[0] is not session:
             parent = candidates[0]
             session["subagent_parent"] = {
                 "id": parent["rename_id"], "title": parent.get("title") or parent.get("project") or parent_id,
-                "source": "codex", "device": parent["device"]}
+                "source": source, "device": parent["device"]}
+            if source == "antigravity":
+                child_id = session.get("rename_id")
+                parent_identity = parent.get("rename_id")
+                if (isinstance(child_id, str) and _UUID.fullmatch(child_id)
+                        and isinstance(parent_identity, str) and _UUID.fullmatch(parent_identity)):
+                    key = (session["device"], parent_identity)
+                    antigravity_child_ids.setdefault(key, set()).add(child_id)
+
+    # Child transcript counts come from distinct retained conversation DBs.
+    # Keep them separate from typed InvokeSubagent request evidence.
+    for session in sessions:
+        if session.get("source") != "antigravity":
+            continue
+        identity = session.get("rename_id")
+        if not isinstance(identity, str) or not _UUID.fullmatch(identity):
+            continue
+        child_ids = antigravity_child_ids.get((session["device"], identity), set())
+        if child_ids:
+            session["subagent_children"] = len(child_ids)
 
     rec_list = []
     for (date, source, model, project, ide, device), v in records.items():
-        rec_list.append({"date": date, "source": source, "model": model,
-                         "project": project, "ide": ide, "device": device, **v})
+        item = {"date": date, "source": source, "model": model,
+                "project": project, "ide": ide, "device": device, **v}
+        quality = record_quality.get((date, source, model, project, ide, device))
+        if quality:
+            status = _ag_combine_status(quality["status"])
+            if status:
+                item["usage_status"] = status
+            availability = {
+                field: _ag_combine_status(states)
+                for field, states in quality["fields"].items()
+            }
+            availability = {field: state for field, state in availability.items() if state}
+            if availability:
+                item["usage_availability"] = availability
+        rec_list.append(item)
     rec_list.sort(key=lambda x: (x["date"], x["source"]))
 
     # keep the payload bounded: the long tail of one-off tool names folds into
@@ -2185,11 +2422,44 @@ def _devices_meta():
 _EXPORT_KEYS = ("source", "path", "mtime", "archived", "project", "title", "branch", "editor",
                 "entry", "cliver", "subagent", "first_ts", "last_ts", "records", "tools",
                 "skills", "ctx", "hourly", "reads", "totals", "sessions", "open_ctx",
-                "opencode_ids", "opencode_messages", "compactions", "copilot_sdk")
+                "opencode_ids", "opencode_messages", "compactions", "copilot_sdk", "antigravity")
+_ANTIGRAVITY_SESSION_EXPORT_KEYS = frozenset((
+    "_sid", "id", "conversation_id", "title", "project", "branch", "model", "start", "end",
+    "subagent", "subagent_type", "subagent_role", "parent_id", "root_id", "nesting_depth",
+    "records", "days", "compactions", "activity_dates", "usage_status", "usage_availability",
+    "model_status", "detail_status", "record_availability", "user_messages",
+    "assistant_messages", "tool_calls", "subagent_requests", "in", "out", "cr", "cc",
+    "reason", "response_out", "req", "asst", "user", "tools", "active", "effort", "reasoning_effort",
+    "efforts",
+))
 
 
 def _export_agg(agg):
     a = {k: agg[k] for k in _EXPORT_KEYS if k in agg}
+    if agg.get("source") == "antigravity":
+        # Keep only the safe summary contract. In particular, the private
+        # workspace cwd used by the local editor projection never leaves here.
+        if isinstance(a.get("sessions"), list):
+            a["sessions"] = [safe for session in a["sessions"]
+                              if (safe := _ag_export_session(session)) is not None]
+        if "antigravity" in a:
+            a["antigravity"] = _ag_export_summary(a["antigravity"])
+        # Preserve only a canonical, fully validated native UUID so peers can
+        # deduplicate this conversation after its private database path is removed.
+        identity = SN.identity(agg, {})
+        if not identity:
+            for session in agg.get("sessions", []):
+                if isinstance(session, dict):
+                    identity = SN.identity(agg, session)
+                    if identity:
+                        break
+        if identity:
+            a["conversation_id"] = identity
+        else:
+            a.pop("conversation_id", None)
+        # The receiver can identify and deduplicate a conversation by UUID; the
+        # local database path contains a private home directory and is unnecessary.
+        a.pop("path", None)
     # resolved here: Codex's editor lookup reads THIS machine's editor storage
     a["ide"] = P._ide_of(agg["source"], agg)
     # the still-open last turn folded in, so the importer needs no parser state
@@ -2214,9 +2484,30 @@ def _export_body():
         # The receiving device cannot resolve our local directory symlinks.
         # Deduplicate those aliases here while retaining all raw ledger entries.
         claude = _one_per_conversation([(p, a) for p, a in items if a.get("source") == "claude"])
-        selected = {id(a) for a in claude}
-        files = {path: _export_agg(a) for path, a in items
-                 if a.get("source") != "claude" or id(a) in selected}
+        antigravity = _one_per_conversation([(p, a) for p, a in items if a.get("source") == "antigravity"])
+        claude_selected = {id(a) for a in claude}
+        antigravity_selected = {id(a) for a in antigravity}
+        files = {}
+        unknown_antigravity = 0
+        for path, aggregate in items:
+            source = aggregate.get("source")
+            if source == "claude" and id(aggregate) not in claude_selected:
+                continue
+            if source == "antigravity":
+                if id(aggregate) not in antigravity_selected:
+                    continue
+                identity = aggregate.get("conversation_id")
+                if not isinstance(identity, str) or not _UUID.fullmatch(identity):
+                    identity = next((SN.identity(aggregate, session) for session in aggregate.get("sessions", [])
+                                     if isinstance(session, dict) and SN.identity(aggregate, session)), None)
+                if isinstance(identity, str) and _UUID.fullmatch(identity):
+                    export_key = "antigravity:" + identity.lower()
+                else:
+                    unknown_antigravity += 1
+                    export_key = "antigravity:unidentified:" + str(unknown_antigravity)
+            else:
+                export_key = path
+            files[export_key] = _export_agg(aggregate)
     finally:
         _refresh_lock.release()
     doc = {"proto": PEER_PROTO, "cache_version": CACHE_VERSION, "device_id": _local_id(),

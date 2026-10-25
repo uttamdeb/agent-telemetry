@@ -45,7 +45,7 @@ class PackageTests(unittest.TestCase):
 
     def test_dashboard_dependencies_keep_one_namespaced_identity(self):
         bare_names = (
-            "parser", "native", "session_names", "accounts", "local_servers",
+            "parser", "antigravity", "native", "session_names", "accounts", "local_servers",
             "local_servers_windows", "ledger_backups", "diagnostics", "session_timeline",
             "release_notes", "native_activity", "mcp_access", "mcp_backend", "mcp_protocol", "mcp_server", "mcp_tools",
             "telemetry_query", "telemetry_insights",
@@ -54,6 +54,7 @@ class PackageTests(unittest.TestCase):
 
         dashboard = self.import_module("dashboard")
         parser = self.import_module("parser")
+        antigravity = self.import_module("antigravity")
         native = self.import_module("native")
         session_names = self.import_module("session_names")
         accounts = self.import_module("accounts")
@@ -73,6 +74,7 @@ class PackageTests(unittest.TestCase):
         telemetry_insights = self.import_module("telemetry_insights")
 
         self.assertIs(dashboard.P, parser)
+        self.assertIs(self.import_module("session_timeline").AG, antigravity)
         self.assertIs(dashboard.N, native)
         self.assertIs(dashboard.SN, session_names)
         self.assertIs(dashboard.A, accounts)

@@ -16,7 +16,7 @@ fetch GitHub update and release-note metadata after you click **Check for update
 for the dashboard; it has no runtime dependencies beyond Python's standard library and a
 vendored copy of Chart.js.
 
-Covers **Claude Code · Claude Desktop · Codex · GitHub Copilot · Cursor · OpenCode · Hermes Agent · OpenClaw**.
+Covers **Claude Code · Claude Desktop · Codex · GitHub Copilot · Cursor · Antigravity · OpenCode · Hermes Agent · OpenClaw**.
 
 ## Download the app
 
@@ -268,13 +268,17 @@ instead of cloning, delete `.usage_cache.json` first — that file is your perso
 | **Codex** | `~/.codex/sessions/**`, `~/.codex/archived_sessions/**` | exact (in/cached/out/reasoning); subagents are identified and labelled |
 | **GitHub Copilot** | VS Code-family `chatSessions/*.{json,jsonl}`; SDK/CLI `~/.copilot/session-state/*/events.jsonl`, enriched from VS Code `agentSessionData/*/session.db` | recorded request/turn tokens where available; SDK shutdown totals where safely dated. SDK gaps show a warning tooltip and unavailable/partial usage; older non-SDK chats retain text estimates. Premium multipliers are separate from estimated dollars. |
 | **Cursor** (native AI) | `Cursor/User/globalStorage/state.vscdb` under App Support / `%APPDATA%` / `~/.config` | partial — model, mode, timestamps, tool calls and AI-line stats are exact; tokens are on only ~2% of messages |
+| **Google Antigravity** | `~/.gemini/antigravity/conversations/*.db`, `~/.gemini/antigravity-ide/conversations/*.db`, `~/.gemini/antigravity-cli/conversations/*.db` | recorded SQLite usage with per-field availability; standalone legacy `.pb` files are unsupported |
 | **OpenCode** | `~/.local/share/opencode/opencode.db`, `%LOCALAPPDATA%\opencode\opencode.db`, `~/.opencode/opencode.db` (or `$OPENCODE_DATA_DIR`) | V1/V2 SQLite; exact (in/out/reasoning/cache), prompts and tools; cost is read from OpenCode's own per-message value |
 | **Hermes Agent** | `~/.hermes/state.db` (or `$HERMES_HOME`, `%LOCALAPPDATA%\hermes`) | exact (in/out/cache/reasoning, per model) |
 | **OpenClaw** | `~/.openclaw/agents/<agent>/agent/openclaw-agent.sqlite` (or `$OPENCLAW_STATE_DIR`; also the older `~/.clawdbot`, `~/.moltbot`) and the older per-session `sessions/*.jsonl` | exact (in/out/cache read/cache write/reasoning, per response); its own logged cost is used only for a model with no verified price. Large events are stored zstd-compressed: read with the `zstd` command or Python 3.14+ |
 
 A tool you don't use simply contributes nothing. **Attribution is by tool, not by model** —
-a Claude or GPT model used *inside* Copilot/Cursor/OpenCode/Hermes/OpenClaw counts under that tool, and the
+a Claude, Gemini, or GPT model used *inside* Copilot/Cursor/Antigravity/OpenCode/Hermes/OpenClaw counts under that tool, and the
 Models table lists each `model × tool` row separately.
+
+Antigravity's supported SQLite schema, duplicate-row handling, recorded checkpoint detail,
+and format limits are documented in [Google Antigravity support](docs/antigravity.md).
 
 Copilot's newer SDK-based agent sessions use a different store from older Copilot Chat.
 AgentTelemetry joins their event history to VS Code's saved per-turn usage using native

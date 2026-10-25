@@ -35,16 +35,19 @@ _KNOWN_TOOLS = {
     "opencode": "OpenCode",
     "hermes": "Hermes Agent",
     "openclaw": "OpenClaw",
+    "antigravity": "Antigravity",
 }
 _EXACT_TOOLS = frozenset({
-    "claude", "codex", "claude-desktop", "opencode", "hermes", "openclaw",
+    "claude", "codex", "claude-desktop", "opencode", "hermes", "openclaw", "antigravity",
 })
 _GROUP_FIELDS = ("date", "project", "tool", "model", "provider", "ide", "device")
 _RECORD_FIELDS = (
     "date", "source", "model", "project", "ide", "device", "in", "out", "cr", "cc",
     "cc5", "cc1", "reason", "cost", "req", "asst", "user", "tools", "active", "prem", "ws",
-    "lc_in", "lc_out", "lc_cc5", "lc_cc1", "lc_cr", "lc_asst",
+    "lc_in", "lc_out", "lc_cc5", "lc_cc1", "lc_cr", "lc_asst", "usage_status", "usage_availability",
 )
+_USAGE_STATES = frozenset(("recorded", "partial", "unavailable"))
+_USAGE_AVAILABILITY_FIELDS = frozenset(("input_output", "cache_read", "cache_write", "reasoning", "response_output"))
 _SUM_FIELDS = (
     "in", "out", "cr", "cc", "cc5", "cc1", "reason", "cost", "req", "asst", "user",
     "tools", "active",
@@ -385,7 +388,51 @@ def matches_filter(kind: str, raw: Any, requested: list[str] | tuple[str, ...], 
 
 def _row_copy(row: dict[str, Any]) -> dict[str, Any]:
     out = {key: row.get(key) for key in _RECORD_FIELDS if key in row}
+    if not isinstance(out.get("usage_status"), str) or out.get("usage_status") not in _USAGE_STATES:
+        out.pop("usage_status", None)
+    availability = out.get("usage_availability")
+    if isinstance(availability, dict):
+        out["usage_availability"] = {
+            field: state for field, state in availability.items()
+            if field in _USAGE_AVAILABILITY_FIELDS and isinstance(state, str) and state in _USAGE_STATES
+        }
+        if not out["usage_availability"]:
+            out.pop("usage_availability", None)
+    else:
+        out.pop("usage_availability", None)
     return out
+
+
+def _combine_usage_states(states: list[Any]) -> str | None:
+    safe = [state for state in states if isinstance(state, str) and state in _USAGE_STATES]
+    if not safe:
+        return None
+    return safe[0] if all(state == safe[0] for state in safe) else "partial"
+
+
+def _usage_quality(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    grouped: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        source = row.get("source", row.get("tool"))
+        if not isinstance(source, str):
+            continue
+        slot = grouped.setdefault(source, {"statuses": [], "fields": {}})
+        if isinstance(row.get("usage_status"), str) and row.get("usage_status") in _USAGE_STATES:
+            slot["statuses"].append(row["usage_status"])
+        availability = row.get("usage_availability")
+        if isinstance(availability, dict):
+            for field, state in availability.items():
+                if field in _USAGE_AVAILABILITY_FIELDS and isinstance(state, str) and state in _USAGE_STATES:
+                    slot["fields"].setdefault(field, []).append(state)
+    result = {}
+    for source, slot in grouped.items():
+        fields = {field: _combine_usage_states(states)
+                  for field, states in slot["fields"].items()}
+        result[source] = {
+            "usage_status": _combine_usage_states(slot["statuses"]),
+            "usage_availability": {field: state for field, state in fields.items() if state},
+        }
+    return result
 
 
 def _selected_rows(payload: dict[str, Any], context: dict[str, Any], policy: dict[str, Any]) -> tuple[list[dict[str, Any]], int, int, list[str]]:
@@ -489,6 +536,7 @@ def select_records(payload: dict[str, Any], arguments: dict[str, Any], *, policy
     }
     context["selected_records"] = len(selected)
     context["selected_sources"] = sorted({row["source"] for row in selected if isinstance(row.get("source"), str)})
+    context["source_usage"] = _usage_quality(selected)
     return selected, context
 
 
@@ -693,10 +741,28 @@ def result_meta(payload: dict[str, Any], selection: dict[str, Any], *, policy: d
             precision, note = "exact", "Token counts are recorded by the source."
         else:
             precision, note = "unknown", "This source has no declared precision classification."
-        precision_by_source[safe_source] = {"tool": _KNOWN_TOOLS.get(safe_source, safe_source), "precision": precision, "note": note}
+        source_info = {"tool": _KNOWN_TOOLS.get(safe_source, safe_source), "precision": precision, "note": note}
+        if safe_source == "antigravity":
+            source_usage = context.get("source_usage") if isinstance(context.get("source_usage"), dict) else {}
+            quality = source_usage.get("antigravity") if isinstance(source_usage.get("antigravity"), dict) else {}
+            status = quality.get("usage_status")
+            availability = quality.get("usage_availability")
+            if isinstance(status, str) and status in _USAGE_STATES:
+                source_info["usage_status"] = status
+            if isinstance(availability, dict) and availability:
+                source_info["usage_availability"] = {
+                    field: state for field, state in availability.items()
+                    if field in _USAGE_AVAILABILITY_FIELDS and isinstance(state, str) and state in _USAGE_STATES
+                }
+            if status == "partial":
+                source_info["note"] = "Antigravity records usage partially; missing token fields are not inferred."
+            elif status == "unavailable":
+                source_info["note"] = "Antigravity usage is unavailable; missing token fields are not inferred."
+        precision_by_source[safe_source] = source_info
     source_precision = [precision_by_source[key] for key in sorted(precision_by_source)]
     for source_info in source_precision:
-        if source_info["precision"] in {"mixed_recorded_and_estimated", "lower_bound", "unknown"}:
+        if (source_info["precision"] in {"mixed_recorded_and_estimated", "lower_bound", "unknown"}
+                or source_info.get("usage_status") in ("partial", "unavailable")):
             if source_info["note"] not in warnings:
                 warnings.append(source_info["note"])
     supplied = context.get("coverage") if isinstance(context.get("coverage"), dict) else {}
@@ -1020,6 +1086,20 @@ def _session_public_item(session: dict[str, Any], sums: dict[str, Any], payload:
         "usage_available": not unknown,
         "range_scope": "unknown" if unknown else "daily",
     }
+    if source == "antigravity":
+        status = session.get("usage_status")
+        if isinstance(status, str) and status in _USAGE_STATES:
+            item["usage_status"] = status
+            if status == "unavailable":
+                item["usage_available"] = False
+        availability = session.get("usage_availability")
+        if isinstance(availability, dict):
+            safe_availability = {
+                field: state for field, state in availability.items()
+                if field in _USAGE_AVAILABILITY_FIELDS and isinstance(state, str) and state in _USAGE_STATES
+            }
+            if safe_availability:
+                item["usage_availability"] = safe_availability
     opaque = session_alias(session, policy)
     if opaque:
         item["session"] = opaque
@@ -1198,6 +1278,7 @@ def list_sessions(payload: dict[str, Any], arguments: dict[str, Any], *, policy:
     context["selected_sources"] = sorted({
         entry[1]["tool"] for entry in candidates if isinstance(entry[1].get("tool"), str)
     })
+    context["source_usage"] = _usage_quality([entry[1] for entry in candidates])
     rendered = [entry[1] for entry in candidates]
     page = rendered[offset:offset + limit]
     # Totals are recomputed from every selected session with available daily data.

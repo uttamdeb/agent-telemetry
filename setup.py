@@ -8,6 +8,7 @@ ALLOWED_MODULES = {
     "__init__",
     "__main__",
     "accounts",
+    "antigravity",
     "cli",
     "dashboard",
     "editor_snapshot",

@@ -137,6 +137,7 @@ accurately. Keep the existing public tag intact when adding packaging metadata/a
 |---|---|
 | `dashboard.py` | stdlib `http.server`. Serves `/`, `/static/*`, `/chart.js`, `/manifest.json`, `/sw.js`, `/api/{data,storage,refresh,settings,cache,update,release-notes,devices}`. Owns the cache, the aggregate merge, `_cost()` and the device sharing listener. |
 | `parser.py` | `discover()` lists log files; `update_file()` routes each to a `parse_*`. Holds `PRICING` and the model-name normalizers. |
+| `antigravity.py` | Read-only Antigravity SQLite conversation snapshot and bounded safe event reader; parser integration routes the same records to every client. |
 | `static/core.js` | `SRC`/`ORDER`, state `S`, formatting, date ranges, filtering. |
 | `static/tool-icons/` | Bundled tool/provider SVG marks, pinned sources and licenses. |
 | `session_names.py` | Warning previews, private title backups and verified original-tool renames. |
@@ -303,6 +304,14 @@ so that file stops being a cache and becomes the sole record. Two consequences:
   when the source size/mtime is unchanged. In v56, only available Claude logs with
   Haiku 5.5 usage missing `haiku_pricing` need a pricing backfill; other sources stay
   incremental. Peers with versions 52/53/54/55 remain readable.
+- Cache **62** adds Antigravity while retaining every compatible v61 entry,
+  including archives; peers with versions 52–61 remain readable. New
+  conversations are discovered incrementally and do not need a rebuild. Its
+  reverse-engineered SQLite reader preserves field-level recorded/partial/
+  unavailable states, deduplicates generation/step rows only through their
+  explicit packed-step mapping, and does not treat intent-only checkpoints as
+  compactions. Standalone legacy `.pb` files remain unsupported. See
+  docs/antigravity.md.
 - **`--rebuild` destroys archived sessions too**, not just the Settings buttons — it
   skips the cache entirely and re-parses from disk, and an archived session has no
   disk to parse. Back up `.usage_cache.json` before running it on a machine whose
@@ -731,6 +740,23 @@ existing guarded `GET /api/local-servers` for the separate local server list.
   session actually used — sessions can switch model mid-way, like Codex. `messages.tool_calls`
   is an OpenAI-shaped JSON array, read only for per-day tool and turn counts; message
   `content` is never read.
+- **Antigravity** reads only direct `*.db` files under the exact App, IDE and CLI
+  `~/.gemini/antigravity/conversations`, `~/.gemini/antigravity-ide/conversations`,
+  and `~/.gemini/antigravity-cli/conversations` roots. One database is one conversation;
+  duplicate copies under those roots share a full UUID and are deduplicated per device by
+  the fullest ledger entry. Duplicate usage statistics in the companion table are not
+  added. `generation_idx` and `step_idx` are different identities and link only through
+  the explicit packed step-index mapping. Unknown-model usage counts once as `Unknown`
+  without invented pricing; reasoning remains a subset of output. The bounded reader
+  returns whitelisted timestamps, event kinds, model/tool labels, safe statuses, and
+  numeric usage, never prompts, arguments, raw blobs, or account data. Timeline detail
+  resolves only the full ledger identity and a rediscovered source path. A recorded
+  `subagent: true` plus an explicit immediate `parent_id` is required for a parent link;
+  `root_id` alone is not enough. `intent_only` checkpoints remain checkpoint events,
+  never compactions. Standalone legacy `.pb` files are unsupported and unknown schemas
+  report a parse error. No hooks are installed and no provider is contacted. The public
+  [hooks docs](https://www.antigravity.google/docs/hooks) describe a separate
+  `transcriptPath` under `brain/`; it is outside this parser. See docs/antigravity.md.
 - **SQLite stores**: always open via `_open_ro_sqlite()`. Neither flag is safe alone —
   `mode=ro` reads the `-wal` (so a *running* tool's newest sessions are visible) but must
   create a `-shm`, which fails on read-only media; `immutable=1` needs no `-shm` but ignores
