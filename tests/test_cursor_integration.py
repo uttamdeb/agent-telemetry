@@ -1,6 +1,6 @@
 """Mock-only coverage for Cursor's shared telemetry, timeline and native paths."""
 
-from contextlib import ExitStack
+from contextlib import ExitStack, closing
 from datetime import date, datetime, time, timezone
 import json
 import sqlite3
@@ -342,7 +342,7 @@ class CursorIntegrationTests(unittest.TestCase):
             user = Path(folder) / "Cursor" / "User"
             store = user / "globalStorage" / "state.vscdb"
             store.parent.mkdir(parents=True)
-            with sqlite3.connect(store) as connection:
+            with closing(sqlite3.connect(store)) as connection, connection:
                 connection.execute("CREATE TABLE cursorDiskKV (key TEXT PRIMARY KEY, value BLOB)")
                 composer = {
                     "composerId": composer_id,
