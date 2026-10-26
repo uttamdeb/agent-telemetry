@@ -238,6 +238,11 @@ marketplace listing; install/update AgentTelemetry, then use the [MCP setup guid
 > from disk (see [Storage](#storage--what-these-logs-cost-you-in-disk)). Copy
 > `.usage_cache.json` somewhere safe first if you've cleaned up old logs.
 
+Deleting a session inside a tool doesn't remove it from your totals either. If OpenCode,
+Hermes or OpenClaw delete a session from their database, the dashboard keeps the usage it
+already counted and marks that session as deleted. The same applies to turns you undo in
+OpenCode and to a Claude or Copilot log that gets shorter.
+
 **Requirements:** Python 3.8+ on **macOS, Linux or Windows**. On Windows run
 `python dashboard.py` (or `run.cmd`); on macOS/Linux `python3 dashboard.py` (or `./run.sh`).
 

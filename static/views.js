@@ -1700,7 +1700,9 @@ function openSessionDetails(s,related=false){
     ${row("Log size",s.bytes?fmtBytes(s.bytes):null)}
     ${compactionDetails(s)}
     ${sessionTimelineHTML(s)}
-    ${s.archived?'<div class="warnbar">This log has been pruned from disk; its numbers are kept from an earlier scan.</div>':""}
+    ${s.retained?`<div class="warnbar">This session was deleted in ${esc((SRC[s.source]||{label:s.source}).label)}; its numbers are kept from an earlier scan.</div>`
+      :s.archived?'<div class="warnbar">This log has been pruned from disk; its numbers are kept from an earlier scan.</div>':""}
+    ${s.retained_usage&&!s.retained?`<div class="warnbar" role="note">Part of this session was deleted in ${esc((SRC[s.source]||{label:s.source}).label)}; that usage is kept from an earlier scan.</div>`:""}
   `);
   loadSessionTimeline(s,document.querySelector('#drawerBody .session-timeline-detail'));
 }
