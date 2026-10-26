@@ -178,7 +178,9 @@ class NativeActivityTests(unittest.TestCase):
             finally:
                 connection.close()
             opencode_agg = P.update_file(None, "opencode", str(open_db), "OpenCode", {})
-            self.assertNotIn("_sid", opencode_agg["sessions"][0])
+            # The full native id is retained: OpenCode's eight-character display
+            # ids repeat within minutes, so retention and renames need the whole id.
+            self.assertEqual(opencode_agg["sessions"][0]["_sid"], sid)
 
             copilot_dir = root / "copilot" / "12345678-1234-4234-8234-123456789012"
             copilot_dir.mkdir(parents=True)

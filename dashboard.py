@@ -408,6 +408,10 @@ def _refresh_locked(verbose=False):
             updated = P.update_file(prev, source, path, editor, proj_map)
             if updated is None:                # disappeared between discover and stat
                 continue
+            # A full reparse rebuilds from what the log holds now; keep what the
+            # tool deleted from it (a session, a request) the same way as a log
+            # that disappeared. See parser.reconcile.
+            updated = P.reconcile(prev, updated, CACHE_VERSION)
             if updated is not prev:
                 changed = _dirty["v"] = True
             elif mark != _parse_mark(updated):
@@ -819,7 +823,10 @@ def set_session_name(body):
         for candidate in _state["files"].values():
             if candidate["source"] != source: continue
             if (source, os.path.realpath(candidate.get("path", ""))) not in discovered: continue
-            session = next((s for s in candidate.get("sessions", []) if SN.identity(candidate, s) == session_id), None)
+            # A session the tool deleted is kept for its usage only; there is no
+            # source record left to rename.
+            session = next((s for s in candidate.get("sessions", [])
+                            if not s.get("retained") and SN.identity(candidate, s) == session_id), None)
             if session is not None and os.path.isfile(candidate.get("path", "")):
                 matches.append((candidate, session))
         if not matches:
@@ -847,6 +854,7 @@ def set_session_name(body):
             updated = P.update_file(aggregate, source, path, aggregate.get("editor"), {})
             if source == "codex":
                 P._finalize_session(updated, source, path)
+            updated = P.reconcile(aggregate, updated, CACHE_VERSION)
             for key, value in list(_state["files"].items()):
                 if value is aggregate: _state["files"][key] = updated
             _dirty["v"] = True
@@ -1567,7 +1575,8 @@ def _build_payload_locked():
                         days[date] = _priced_usage(source, session["model"], date, r, has_logged_cost)
                 s2["detail_limited"] = True
             s2["days"] = _day_vectors(days) if days or bucket is not None else None
-            s2["archived"] = bool(agg.get("archived"))
+            # A session deleted inside its tool is kept like a pruned log.
+            s2["archived"] = bool(agg.get("archived") or session.get("retained"))
             s2["subagent"] = (session.get("subagent") is True if source == "antigravity"
                                else bool(session.get("subagent")))
             s2["device"] = device
@@ -1600,6 +1609,8 @@ def _build_payload_locked():
                         s2["original_title"] = session.get("title") or session.get("project") or s2["rename_id"]
                         s2["title"] = alias
                         s2["display_alias"] = True
+            if session.get("retained"):
+                available, reason = False, "This session was deleted in its tool. Its telemetry is preserved."
             s2["rename_available"], s2["rename_reason"] = available, reason
             s2["cost"] = (sum(d["cost"] for d in days.values()) if days else
                           _priced_usage(source, session["model"],

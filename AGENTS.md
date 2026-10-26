@@ -327,6 +327,47 @@ so that file stops being a cache and becomes the sole record. Two consequences:
   Cursor's storage after Cursor imported VS Code's. `build_payload` keeps one per
   conversation **per device** (`_one_per_conversation`: fullest including cache writes,
   then live, then newest). Use `_leaf()` on paths so Windows copies deduplicate on a Mac too.
+- **Usage a tool deletes from a log that still exists is kept too** (`parser.reconcile`,
+  called from both `update_file` call sites in `dashboard.py`). Archiving only covers a
+  path that disappears. OpenCode's database, Hermes and OpenClaw hold many sessions in
+  one store, and a deleted session (or OpenCode's undo, which deletes the reverted
+  messages) silently dropped out of every total on the next full reparse; so did a
+  Claude/Copilot log that got shorter (Copilot compacts its chat log without requests
+  removed in the chat). Kept usage lives in private `agg["_retained"]` and is re-added
+  after every reparse. **It is found by identity, never by comparing totals alone**:
+  usage also moves between rows without being deleted (Hermes' main model changes, a
+  timezone change re-buckets local dates, an OpenClaw fork takes over its parent's
+  copied responses), and one refresh can bring a deletion and a same-sized retry.
+  A store session that is gone keeps its whole last-known contribution and is flagged
+  `retained` + `archived` (no rename, no timeline, never "live"); if it comes back,
+  the source's copy replaces it. OpenCode messages deleted from a session still there
+  are kept by message id from per-message summaries in private `_store_detail`
+  (`retained_usage` flag, drawer note); a session emptied and used again keeps its old
+  messages. Ids hold across OpenCode's V1/V2 copies (the migration keeps them and V1
+  has no forks), so a V2 session that falls back to its V1 rows keeps what was written
+  since. A shortened Claude/Copilot log keeps what each dimension's totals lost,
+  capped so moved usage is never kept; the ids of the records it lost (`_retained.seen`)
+  seed every later parse's seen-set, a full reparse included, so restored lines are
+  not recounted. A kept row the source lacks takes the full shape its parser indexes
+  (`_RETAIN_BLANK`); a partial one made the next append fail. Message and log shortfalls are
+  measured only when the SOURCE changed and both parses carry the same `_parsed_under`
+  (CACHE_VERSION): **a parser fix that lowers counts must bump `CACHE_VERSION`**, or
+  retention will keep the old figures. Hermes and OpenClaw keep whole deleted sessions
+  only; Codex is only ever deleted whole (archived) and has no record identity for a
+  shortened-then-restored log; Copilot `.json`, Antigravity and Copilot SDK are one
+  conversation per path; Cursor keeps its own row history.
+  Store sessions now keep their full native `_sid` (the visible id is only eight
+  characters; OpenCode's repeat within minutes), which also makes OpenCode renames
+  resolve. Entries written earlier match on the short id only when unambiguous (else
+  also on `start`); ambiguous ones are neither kept nor compared. `_store_detail` also
+  holds each store session's tools/hourly and OpenClaw's counted response keys, so a
+  fork never recounts a deleted parent's responses; a store entry without it reparses
+  once, even on an unchanged signature. `_retained`, `_store_detail` and
+  `_parsed_under` are never exported to peers; the merged usage is. No cache-version
+  bump. Like archived sessions, kept usage cannot be re-derived: `--rebuild` and the
+  warned Rebuild / Delete cache actions drop it, as does `load_cache()`'s fallback for an
+  unlisted version (it keeps archived entries only), so list each migrated version as
+  compatible. See `tests/test_retention.py`.
 - A failed full reparse leaves the previous ledger entry and signature intact; the
   next refresh retries it. Parser failures propagate to `_refresh_locked`, which reports
   the source, path and exception on stderr even for background refreshes.
