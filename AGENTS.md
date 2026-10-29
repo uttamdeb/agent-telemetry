@@ -313,6 +313,15 @@ so that file stops being a cache and becomes the sole record. Two consequences:
   explicit packed-step mapping, and does not treat intent-only checkpoints as
   compactions. Standalone legacy `.pb` files remain unsupported. See
   docs/antigravity.md.
+- Cache **64** adds discovery of Codex's zstd-compressed rollouts (`*.jsonl.zst`) and
+  retains every v53–63 entry, live and archived; peers with versions 52–63 remain
+  readable. No aggregate changes shape. It is bumped because a device that predates
+  it counts a conversation's archived `.jsonl` entry and its live `.jsonl.zst` entry
+  as two conversations, so an older receiver must refuse a newer export ("update
+  both") rather than double count. The compressed entries appear beside the existing
+  ones on the next normal restart: never rebuild, and keep the archived plain entries,
+  which are the only record of a rollout whose compressed copy cannot be decoded here.
+  See "Codex compresses idle rollouts" under Per-source quirks.
 - **`--rebuild` destroys archived sessions too**, not just the Settings buttons — it
   skips the cache entirely and re-parses from disk, and an archived session has no
   disk to parse. Back up `.usage_cache.json` before running it on a machine whose
@@ -322,11 +331,18 @@ so that file stops being a cache and becomes the sole record. Two consequences:
   clears the cache without the same warning.
 - **One conversation can hold two ledger entries**, and each used to count in full:
   Codex's archive feature moves a rollout into `archived_sessions/` (the old path stays,
-  archived, beside the new live one), and a Copilot chat can exist as both `<uuid>.json`
+  archived, beside the new live one); Codex also replaces an idle rollout with
+  `<rollout>.jsonl.zst` (the plain path goes missing and is archived beside the new live
+  compressed one, and the reverse when a thread is decompressed to resume); and a
+  Copilot chat can exist as both `<uuid>.json`
   and `<uuid>.jsonl` across its storage-format migration, or in both VS Code's and
   Cursor's storage after Cursor imported VS Code's. `build_payload` keeps one per
   conversation **per device** (`_one_per_conversation`: fullest including cache writes,
-  then live, then newest). Use `_leaf()` on paths so Windows copies deduplicate on a Mac too.
+  then live, then newest). Use `_leaf()` on paths so Windows copies deduplicate on a Mac
+  too; Codex's key is `_codex_leaf()`, the file name without a `.zst` suffix.
+  A path found on disk is never archived: `_refresh_locked` clears the mark, which is
+  otherwise only ever set when a path goes missing, so a log that came back (a rollout
+  Codex decompressed) stayed archived and lost its timeline, rename and live views.
 - **Usage a tool deletes from a log that still exists is kept too** (`parser.reconcile`,
   called from both `update_file` call sites in `dashboard.py`). Archiving only covers a
   path that disappears. OpenCode's database, Hermes and OpenClaw hold many sessions in
@@ -661,6 +677,37 @@ existing guarded `GET /api/local-servers` for the separate local server list.
   prompts/messages silently zero out. `parse_codex` handles both; if Codex ships a
   third shape, check `event_msg` payload types in a fresh rollout file before
   assuming the existing branches still apply.
+- **Codex compresses idle rollouts.** In `sessions/**` and `archived_sessions/**` an idle
+  thread's `rollout-<stamp>-<thread id>.jsonl` becomes the same name plus `.zst` (one
+  zstd frame, no checksum: 180 files, 961 MiB packed / 1.8 GiB of text, the largest
+  380 MiB, here). Both spellings are discovered (`CODEX_GLOBS`) and are ONE
+  conversation. A compressed file is immutable, so `update_file()` hands it to
+  `_update_codex_compressed()`: always read in full, keyed by size/mtime, never from a
+  byte offset, streamed (`zstd_stream` / `_zstd_lines`, memory follows the longest
+  record: the 380 MiB log peaks near 300 MiB where the plain path needed 1.3 GiB) and
+  committed only after every frame decoded, so a failure leaves the previous entry
+  (usually the rollout's archived plain one) as it was. `entry["size"]` is the bytes on
+  disk, as Storage lists them. The same `_codex_stale()` markers force a full re-read.
+  **Decoding has one seam, `_zstd_backend()`**: Python 3.14's `compression.zstd`, else the
+  `zstd` command, else nothing (OpenClaw's `_zstd_decode_many` uses it too). The bundled
+  macOS and Windows runtimes pin CPython 3.13 (no `compression.zstd`) and the macOS app
+  hands its backend the PATH it was launched with, so expect "no decoder" there until
+  packaging bundles a `zstd` or moves to 3.14. Then `update_file()` raises
+  `ZstdUnavailable`; `_refresh_locked` counts it (`_meta` / payload
+  `codex_compressed_unread`, one stderr line with no path whenever the count changes, the
+  sidebar note, the Settings hint) and creates NO entry and NO log error: nothing in the
+  ledger is dropped or zeroed, and the archived plain entries keep counting. A damaged
+  or truncated file raises `ZstdReadError` through the normal parse-failure path
+  (stderr, diagnostics "could not be parsed"), is not decoded again until its size or
+  mtime changes (`_ZSTD_BAD`), and never commits a partial read. A zero-byte `.zst`
+  (still being written) is skipped and never replaces an entry. Lines split on `\n`
+  ONLY: the plain path's `str.splitlines()` also splits on U+2028/U+2029/U+0085, which
+  Codex writes unescaped, and drops those records (one rollout here lost a prompt that
+  way), so do not "fix" the compressed reader to match it. The session timeline reads
+  the same stream, bounded at 64 MiB of decoded text; without a decoder it reports the
+  log unavailable. Cleanup commands and "reclaimable" include `*.jsonl.zst` only where a
+  decoder exists: never offer an unread log for deletion. Session ids, titles, IDE and
+  subagent detection need no special case: `session_meta` is read the same way.
 - **Codex usage comes from `token_usage_record` once a rollout has one.** Builds from
   2026-09 log one per model response (with a `response_id`), written before its
   `token_count` twin. `token_count` alone misses a compaction request (it logs zeros

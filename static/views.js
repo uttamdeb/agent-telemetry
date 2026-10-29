@@ -3137,6 +3137,7 @@ async function load(){
     // Only problems that need the user's attention show here; the log count and date span do not.
     document.getElementById("coverage").innerHTML = ""
       + (RAW.openclaw_undecoded ? `<span class="coverage-detail">${fmtNum(RAW.openclaw_undecoded)} OpenClaw events unread — install zstd</span>` : "")
+      + (RAW.codex_compressed_unread ? `<span class="coverage-detail">${fmtNum(RAW.codex_compressed_unread)} compressed Codex ${RAW.codex_compressed_unread===1?"log":"logs"} unread — install zstd or use Python 3.14+</span>` : "")
       + (RAW.cache_error ? `<span class="coverage-detail">${esc(RAW.cache_error)}</span>` : "")
       + (RAW.meta.parse_errors ? `<span class="coverage-detail">${fmtNum(RAW.meta.parse_errors)} log errors — see Settings</span>` : "")
       + (RAW.meta.backup_error ? `<span class="coverage-detail">backup failed — see Settings</span>` : "");

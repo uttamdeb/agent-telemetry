@@ -24,7 +24,7 @@ class CursorMigrationTests(unittest.TestCase):
         }
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / "ledger.json"
-            for version in range(53, 63):
+            for version in range(53, D.CACHE_VERSION):
                 with self.subTest(version=version):
                     path.write_text(json.dumps({"version": version, "files": files}))
                     with patch.object(D, "CACHE_PATH", str(path)), \

@@ -54,7 +54,7 @@ else:
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = HERE
 CACHE_PATH = os.path.join(DATA_DIR, ".usage_cache.json")
-CACHE_VERSION = 63
+CACHE_VERSION = 64
 
 
 def _configure_data_dir(path):
@@ -70,7 +70,9 @@ def _configure_data_dir(path):
 def _peer_cache_ok(version):
     # Mirrors from every supported ledger generation remain readable. Newer
     # Cursor/Antigravity optional metadata does not invalidate retained history.
-    return type(version) is int and version in (52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, CACHE_VERSION)
+    # A v63 device simply has not read compressed Codex rollouts yet; its archived
+    # plain entries are the same conversations and deduplicate here.
+    return type(version) is int and version in (52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, CACHE_VERSION)
 
 # ---------------------------------------------------------------------------
 # In-memory store of per-file aggregates, refreshed on a background interval.
@@ -333,9 +335,11 @@ def load_cache():
     if data.get("version") == CACHE_VERSION:
         _state["files"] = files
         return
-    if data.get("version") in (53, 54, 55, 56, 57, 58, 59, 60, 61, 62):
-        # Keep all compatible entries through v63. Cursor backfills available
+    if data.get("version") in (53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63):
+        # Keep all compatible entries through v64. Cursor backfills available
         # stores transactionally via its parser marker; archives cannot be re-read.
+        # v64 only adds discovery of compressed Codex rollouts: new entries beside the
+        # plain ones (now archived), deduplicated per conversation. Nothing is dropped.
         _state["files"] = files
         _dirty["v"] = True
         sys.stderr.write("[cache] retaining compatible entries during migration; existing ledger retained\n")
@@ -396,9 +400,16 @@ def _refresh_locked(verbose=False):
     files = _state["files"]
     seen = set()
     changed = False
+    unread = 0        # compressed Codex logs this scan needed a zstd decoder for and had none
     for i, (source, path, editor) in enumerate(found):
         seen.add(path)
         prev = files.get(path)
+        if prev and prev.get("archived"):
+            # "archived" is only ever set when a path goes missing, so a log that is
+            # back on disk (Codex decompressing a rollout it had compressed) would
+            # stay archived: out of live views, though its usage still counts.
+            del prev["archived"]
+            changed = _dirty["v"] = True
         # Claude, Codex and Copilot logs are appended to and parsed in place: the
         # same dict comes back, grown. So compare where the parse stopped, not just
         # identity, which missed every appended turn: a connected device's pulls
@@ -418,6 +429,12 @@ def _refresh_locked(verbose=False):
                 changed = _grew["v"] = True
             files[path] = updated
             DG.record_success(source, path)
+        except P.ZstdUnavailable:
+            # Not this log's fault: the machine has no zstd decoder. Whatever the
+            # ledger already holds for it (an earlier read, or the archived plain
+            # copy of the rollout) stays untouched and counted. One note per scan
+            # below, not a line per log.
+            unread += 1
         except Exception as e:
             # A failed full reparse must not replace the last valid ledger entry
             # with an empty aggregate or advance its signature. Retry next time.
@@ -439,8 +456,12 @@ def _refresh_locked(verbose=False):
         sys.stderr.write(f"\n[ledger] retaining {len(gone)} pruned-from-disk session(s)\n")
     if verbose:
         sys.stderr.write("\n")
+    if unread and unread != _meta.get("codex_compressed_unread"):
+        # fixed text, no paths; repeated only when the count changes, not every refresh
+        sys.stderr.write(f"[codex] {unread} compressed rollout log(s) not read: "
+                         "install zstd or use Python 3.14+\n")
     _meta.update(last_refresh=time.time(), last_duration=time.time() - t0,
-                 files=len(files), building=False)
+                 files=len(files), building=False, codex_compressed_unread=unread)
     DG.finish_scan()
     _meta["parse_errors"] = DG.get_scan_report()["errors"]
     if changed:
@@ -558,6 +579,14 @@ def backup_action(body):
 def build_diagnostics():
     with _refresh_lock:
         report = DG.get_scan_report()
+        unread = int(_meta.get("codex_compressed_unread") or 0)
+        if unread:
+            # Not an error and not counted as one: those logs are waiting for a decoder.
+            note = (f"{unread} compressed log{'' if unread == 1 else 's'} not read: install the "
+                    "zstd command or use Python 3.14+, then Refresh.")
+            for row in report["sources"]:
+                if row["source"] == "codex":
+                    row["hint"] = f"{row['hint']} {note}" if row.get("hint") else note
         present = {row["source"] for row in report["sources"]}
         for source in sorted({a.get("source") for a in _state["files"].values() if a.get("source")} - present):
             report["sources"].append({"source": source, "status": "retained_only", "discovered": 0,
@@ -687,10 +716,12 @@ _UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 def _conversation_key(path, agg):
     """Cache entries that hold the SAME conversation. Codex's archive feature
     moves a rollout into archived_sessions/: the old path stays in the ledger as
-    archived while the new one parses live. A Copilot chat can sit under two
-    paths too: <uuid>.json and <uuid>.jsonl across its storage-format migration,
-    or the same chat in Cursor's storage after Cursor imported VS Code's. Every
-    copy used to be counted in full. Copies are deduplicated within a device:
+    archived while the new one parses live. Codex also replaces an idle rollout
+    with <rollout>.jsonl.zst, so the plain entry (archived once its file is gone)
+    and the compressed one are one conversation too. A Copilot chat can sit under
+    two paths too: <uuid>.json and <uuid>.jsonl across its storage-format
+    migration, or the same chat in Cursor's storage after Cursor imported VS Code's.
+    Every copy used to be counted in full. Copies are deduplicated within a device:
     an imported conversation must not hide another device's usage."""
     src = agg.get("source")
     device = agg.get("_device")              # None is this machine's own ledger
@@ -700,7 +731,7 @@ def _conversation_key(path, agg):
         # Never resolve another device's paths against this machine's filesystem.
         return (device, "claude", os.path.realpath(path))
     if src == "codex":
-        return (device, "codex", P._leaf(path))
+        return (device, "codex", P._codex_leaf(path))
     if src == "copilot":
         m = _UUID.search(P._leaf(path)) or _UUID.search(path)
         return (device, "copilot", m.group(0)) if m else None
@@ -1733,6 +1764,8 @@ def _build_payload_locked():
         "version": VERSION,
         "home": P.HOME,        # to show instruction-file paths as ~/...
         "openclaw_undecoded": undecoded,
+        # compressed Codex logs the last scan needed a zstd decoder for and had none
+        "codex_compressed_unread": int(_meta.get("codex_compressed_unread") or 0),
         "mcp_servers": _mcp_servers(),
         # Real per-1M rates for the models THIS user actually ran, so the client can
         # cost a "what if this had run on X" without any hardcoded model list.
@@ -2229,9 +2262,15 @@ def _cleanup_targets():
     """
     t = []
     for g in P.CLAUDE_GLOBS + P.CODEX_GLOBS:
+        name = os.path.basename(g)
+        if P.is_zstd_path(name) and not P.zstd_available():
+            # Compressed Codex rollouts are offered for deletion only where this
+            # install can read them. Without a decoder their usage never reached the
+            # ledger, and "the dashboard keeps what it has parsed" would be untrue.
+            continue
         head = g.split("**")[0].rstrip(os.sep)
         if os.path.isdir(head):
-            t.append((head, None, "*.jsonl"))
+            t.append((head, None, name))
     for g in P.CLAUDE_DESKTOP_GLOBS:                 # skip the audit.jsonl mirror
         head = g.split("**")[0].rstrip(os.sep)
         if os.path.isdir(head):

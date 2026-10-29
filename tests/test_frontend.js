@@ -540,7 +540,7 @@ console.log('Frontend regression checks passed: pricing, precision, scope, model
   assert.equal(rendered,1,'Superseded payload rendered after a newer one');
   loading.fetch=async()=>({ok:true,json:async()=>({...payload(300),
     records:[{date:'2025-07-07'},{date:'2026-10-18'}],
-    cache_error:'Cannot read <ledger> & backup',openclaw_undecoded:2,
+    cache_error:'Cannot read <ledger> & backup',openclaw_undecoded:2,codex_compressed_unread:3,
     meta:{last_refresh:1,files:731,parse_errors:3,backup_error:true}})});
   assert.equal(await vm.runInContext('load()',loading),true);
   assert.doesNotMatch(loadNodes.coverage.innerHTML,/731 logs|2025-07-07|2026-10-18|coverage-dates/,
@@ -548,8 +548,17 @@ console.log('Frontend regression checks passed: pricing, precision, scope, model
   assert.match(loadNodes.coverage.innerHTML,/class="coverage-detail">Cannot read &lt;ledger&gt; &amp; backup<\/span>/);
   assert.doesNotMatch(loadNodes.coverage.innerHTML,/<ledger>/,'Coverage errors must remain text when rendered as HTML');
   assert.match(loadNodes.coverage.innerHTML,/>2 OpenClaw events unread — install zstd<\/span>/);
+  assert.match(loadNodes.coverage.innerHTML,/>3 compressed Codex logs unread — install zstd or use Python 3\.14\+<\/span>/,
+    'Compressed Codex logs this install cannot read are reported with their fix');
   assert.match(loadNodes.coverage.innerHTML,/>3 log errors — see Settings<\/span>/);
   assert.match(loadNodes.coverage.innerHTML,/>backup failed — see Settings<\/span>/);
+  loading.fetch=async()=>({ok:true,json:async()=>({...payload(200),codex_compressed_unread:1})});
+  assert.equal(await vm.runInContext('load()',loading),true);
+  assert.match(loadNodes.coverage.innerHTML,/>1 compressed Codex log unread — install zstd or use Python 3\.14\+<\/span>/,
+    'A single unread log is not pluralised');
+  loading.fetch=async()=>({ok:true,json:async()=>({...payload(200),codex_compressed_unread:0,openclaw_undecoded:0})});
+  assert.equal(await vm.runInContext('load()',loading),true);
+  assert.equal(loadNodes.coverage.innerHTML,'','A resolved unread count leaves no note');
   loading.fetch=async()=>({ok:true,json:async()=>({...payload(200),records:[{date:'<img src=x onerror=alert(1)>',in:200}]})});
   assert.equal(await vm.runInContext('load()',loading),true);
   assert.doesNotMatch(loadNodes.coverage.innerHTML,/img/,'Record dates from a payload never reach the coverage note');

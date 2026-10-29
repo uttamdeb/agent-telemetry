@@ -95,7 +95,7 @@ is why the write endpoint is guarded.
 |---|---|
 | A website you visit silently POSTing to the local API (CSRF) | Every browser write route uses the same JSON content-type and same-origin / fetch-metadata guard, including settings, cache, account, device, MCP, session-name, backup, native-app and local-server actions. Cross-site writes return `403`. |
 | Someone on your network reading a shared device's usage | Sharing is off by default and asks before it starts. Only `/api/peer/export` is served on the network port, behind a ~59-bit pairing code, with a 1s delay per wrong guess. Nothing on that port writes anything. |
-| A connected device sending malformed data | The export is size-capped (512 MB decompressed), must identify as AgentTelemetry at a supported cache schema (versions 52 through 61), and entries without the expected shape are dropped. Log-derived strings are escaped as for local logs. |
+| A connected device sending malformed data | The export is size-capped (512 MB decompressed), must identify as AgentTelemetry at a supported cache schema (versions 52 through 64), and entries without the expected shape are dropped. Log-derived strings are escaped as for local logs. |
 | Reading arbitrary files through `/static/` | Path is normalised and must stay under `static/`; anything else is `404`. |
 | Malicious content inside a parsed log rendering as HTML | All log-derived strings are escaped before insertion into the DOM. Log files are attacker-influenced if you ever paste untrusted text into a coding tool — treat them as untrusted input. |
 | SQL injection via Cursor's / opencode's SQLite stores | Queries are static; no value from a log is ever interpolated into SQL. Databases are opened read-only (`mode=ro`). |
