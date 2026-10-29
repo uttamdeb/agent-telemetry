@@ -9,6 +9,9 @@ for(const file of ['static/core.js','static/charts.js','static/insights.js'])
   vm.runInContext(fs.readFileSync(path.join(root,file),'utf8'),context);
 const views=fs.readFileSync(path.join(root,'static/views.js'),'utf8');
 vm.runInContext(views.slice(0,views.indexOf('document.getElementById("tabs").addEventListener')),context);
+const html=fs.readFileSync(path.join(root,'index.html'),'utf8');
+assert.doesNotMatch(html,/Changes" hidden|What changed/,'The What changed card is gone from Overview and Cost');
+assert.doesNotMatch(views,/renderUsageChange/);
 const run=code=>vm.runInContext(code,context);
 run(`RAW={records:[],sessions:[],hourly:[],device:{id:'local'},prices:{M:[2,10,2.5,4,.2]},model_vendor:{M:'OpenAI'}};
 var before=[{project:'A',source:'codex',model:'M',in:100,out:20,cr:200,cc:10,cost:10,asst:2,active:20},
@@ -30,32 +33,4 @@ assert.equal(run(`usageChange([{cost:10,project:'A'},{cost:10,project:'B'}],[{co
 assert.equal(run(`Object.values(changeParts({model:'M',cost:2,in:100},'cost')).reduce((a,b)=>a+b,0)`),2);
 assert.equal(run(`changeParts({model:'M',cost:.00001,in:100},'cost').other`),.00001,'Discounted logged cost cannot invent token attribution');
 assert.equal(run(`Object.values(changeParts({in:100,out:20,cr:200,cc:10,reason:18},'tokens')).reduce((a,b)=>a+b,0)`),330,'Reasoning is already within output');
-run(`S.preset='custom';S.from='2026-10-10';S.to='2026-10-11';S.metric='tokens';
-RAW.records=[{date:'2026-10-08',source:'codex',model:'M',project:'<img src=x>',in:100},
-{date:'2026-10-10',source:'codex',model:'M',project:'<img src=x>',in:300}];
-renderUsageChange('overview',slice());`);
-assert.match(node('overviewChanges').innerHTML,/&lt;img src=x&gt;/);
-assert.doesNotMatch(node('overviewChanges').innerHTML,/<img src=x>/);
-assert.match(node('overviewChanges').innerHTML,/data-change-period="previous"/);
-assert.match(node('overviewChanges').innerHTML,/2026-10-08 – 2026-10-09/);
-run(`RAW.records=RAW.records.slice(0,1);renderUsageChange('overview',slice());`);
-assert.equal(node('overviewChanges').hidden,false,'No current usage still needs a decline explanation');
-assert.match(node('overviewChanges').innerHTML,/−100/);
-run(`S.preset='all';renderUsageChange('overview',slice());`);
-assert.equal(node('overviewChanges').hidden,true,'All time has no valid previous period');
-run(`S.preset='custom';S.from='2026-10-10';S.to='2026-10-11';S.exactOnly=true;S.tools=new Set(['copilot']);
-RAW.records=[{date:'2026-10-08',source:'copilot',model:'M',project:'P',in:999,cost:99,exact:{in:10,cost:1}},
-{date:'2026-10-10',source:'copilot',model:'M',project:'P',in:999,cost:99,exact:{in:20,cost:2}}];
-renderUsageChange('overview',slice());`);
-assert.match(node('overviewChanges').innerHTML,/\+10 tokens/);
-assert.doesNotMatch(node('overviewChanges').innerHTML,/>999</);
-run(`var nextView;setView=v=>{nextView=v};syncSearchBoxes=()=>{};
-S.search='hidden';S.sessionType='subagents';S.provs=new Set(['OpenAI']);S.ides=new Set(['VS Code']);S.devs=new Set(['local']);
-drillUsageChange('project','P','previous');`);
-assert.equal(run(`S.from`),'2026-10-08');
-assert.equal(run(`S.to`),'2026-10-09');
-assert.equal(run(`S.search`),'');
-assert.equal(run(`S.sessionType`),'all','Comparison drilldown must not hide evidence with a session-type filter');
-assert.equal(run(`S.projs.has('P')&&S.provs.has('OpenAI')&&S.ides.has('VS Code')&&S.devs.has('local')&&S.exactOnly`),true,'Drilldown preserves unrelated filters');
-assert.equal(run(`nextView`),'sessions');
-console.log('Usage-change contributions reconcile across metrics and filters; decline, zero baseline, escaping and session drilldowns passed.');
+console.log('Usage-change contributions reconcile across metrics, keep departed and offsetting groups, and never double-count reasoning.');

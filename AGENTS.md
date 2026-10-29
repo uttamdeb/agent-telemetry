@@ -387,12 +387,12 @@ labels and explicitly relocated local roots at presentation time. Use
 ledger entries or peer exports for a folder rename; no cache bump/rebuild is needed.
 See `docs/project-relocations.md` for migration and compatibility-link guidance.
 
-`static/insights.js` compares the same `filteredRecords()` as Overview/Cost with
-`prevRange()`. Within each independent project/model/tool/token-type grouping,
-current minus previous must reconcile to the hero delta. Keep decreases, departed
-categories, zero baselines and offsetting changes. These are accounting contributions,
-not causal findings; no account quota is involved. All time has no prior comparison.
-Current and previous drilldowns preserve other filters and use the correct date range.
+Overview and Cost no longer show a "What changed?" card. `static/insights.js` keeps
+only its period-contribution maths (`usageChange`, `changeParts`): the reference the
+MCP `compare_usage` engine is held in parity with (`tests/test_mcp_insights_parity.js`).
+Within each independent project/model/tool/token-type grouping, current minus previous
+must reconcile to the total delta. Keep decreases, departed categories, zero baselines
+and offsetting changes. These are accounting contributions, not causal findings.
 
 `ledger_backups.py` keeps private byte-preserving snapshots in `.usage-backups/`
 beside `CACHE_PATH`. Serialize create/preview/restore with `_refresh_lock`. Routine
