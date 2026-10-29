@@ -216,7 +216,10 @@ class Monitor:
             if not isinstance(data.get("records"), list):
                 raise ValueError("The existing dashboard could not be read.")
             return {"service": "agent-telemetry", "ready": True, "legacy": True}
-        except urllib.error.URLError:
+        except (urllib.error.URLError, TimeoutError, ConnectionError):
+            # Not answering yet. The backend binds its port before its first parse and answers only after it, so
+            # a health request can be accepted and then time out (a bare TimeoutError, not a URLError). Treating
+            # that as a failure made start() give up on a backend that was starting normally.
             return None
 
     def start(self, intent=None):
