@@ -110,7 +110,7 @@ class PackagingTests(unittest.TestCase):
             with patch.object(BUILD, "PYTHON_SHA256", checksum), patch.object(BUILD.subprocess, "check_output", return_value="release-fixture\n"):
                 BUILD.stage(ROOT, root / "payload", archive, "2.0.0")
             payload = root / "payload"
-            self.assertEqual((payload / "runtime" / "python313._pth").read_text(), "python313.zip\n.\n..\n")
+            self.assertEqual((payload / "runtime" / "python313._pth").read_text(), "..\npython313.zip\n.\n")
             self.assertEqual(json.loads((payload / "BUILD-INFO.json").read_text())["commit"], "release-fixture")
             self.assertTrue((payload / "windows" / "register_install.py").is_file())
             self.assertEqual((payload / "session_names.py").read_bytes(), (ROOT / "session_names.py").read_bytes())
@@ -130,6 +130,14 @@ class PackagingTests(unittest.TestCase):
                 or p.name.startswith((".local_servers.", ".release-notes-"))
                 for p in payload.rglob("*")
             ))
+
+    @unittest.skipUnless(hasattr(sys, "stdlib_module_names"), "needs Python 3.10+")
+    def test_only_antigravity_shadows_a_standard_library_module(self):
+        # The bundled runtime puts the app before the stdlib, so a module named like a stdlib one replaces it
+        # for the whole app. Antigravity is the one deliberate case (and why the app must come first).
+        names = {Path(name).stem for name in install.BACKEND_FILES if name.endswith(".py") and "/" not in name}
+        self.assertIn("dashboard", names)
+        self.assertEqual((names | {"windows"}) & set(sys.stdlib_module_names), {"antigravity"})
 
     def test_runtime_checksum_failure_never_extracts_archive(self):
         with tempfile.TemporaryDirectory() as directory:
