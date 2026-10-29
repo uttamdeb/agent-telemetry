@@ -121,7 +121,10 @@ CI runs backend/frontend checks on Linux, macOS and Windows and native checks on
 Release downloads use `.github/workflows/release-downloads.yml`, dispatched against an
 existing tag. It builds architecture-specific macOS DMGs and a Windows x64 EXE. The EXE
 uses Inno Setup only at build time and bundles hash-pinned CPython with the unchanged
-release-tag backend/UI allowlist. `windows/installer/register_install.py` registers app
+release-tag backend/UI allowlist. Its `python313._pth` lists the app folder BEFORE `python313.zip`: a
+`._pth` stops Python adding the script's folder, and with the stdlib first `import antigravity` found
+the stdlib's xkcd module (it opens a browser), so the backend could not start. Keep it first, and keep
+`antigravity` the only top-level module named like a stdlib one (`test_release_packaging.py`). `windows/installer/register_install.py` registers app
 controls, preserves an existing owned login opt-in, and guards installation/uninstall
 against a live or closing client; it never deletes the ledger or preferences. Run
 `tests/run_windows_installer.py` on Windows to verify install, packaged Win32 UI, upgrade,

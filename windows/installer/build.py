@@ -57,8 +57,11 @@ def stage(source, destination, archive, version):
             if path.is_absolute() or len(path.parts) != 1 or path.name in ("..", "."):
                 raise ValueError("Unexpected path in embedded Python archive.")
         zipped.extractall(runtime)
-    # Isolate imports from machine/user Python; expose only stdlib and this app.
-    (runtime / "python313._pth").write_text("python313.zip\n.\n..\n", encoding="utf-8")
+    # Isolate imports from machine/user Python; expose only stdlib and this app. The app comes FIRST, as a
+    # script's own folder does elsewhere: a ._pth also stops Python adding the script's folder, so with the
+    # stdlib first `python dashboard.py` got the stdlib "antigravity" (the xkcd joke, which opens a browser)
+    # instead of the Antigravity parser, and the backend could not start.
+    (runtime / "python313._pth").write_text("..\npython313.zip\n.\n", encoding="utf-8")
     shutil.copy2(HERE / "register_install.py", destination / "windows" / "register_install.py")
     commit = subprocess.check_output(["git", "-C", str(source), "rev-parse", "HEAD"], text=True).strip()
     packaging_commit = subprocess.check_output(["git", "-C", str(HERE.parents[1]), "rev-parse", "HEAD"], text=True).strip()
