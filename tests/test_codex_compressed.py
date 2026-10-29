@@ -688,7 +688,7 @@ class Discovery(unittest.TestCase):
             moved = [g.replace(real, scratch, 1) for g in P.CODEX_GLOBS]
             self.assertTrue(all(g.startswith(scratch) for g in moved))
             expected = []
-            for root in ("sessions/2026/10/10", "archived_sessions"):
+            for root in (os.path.join("sessions", "2026", "10", "10"), "archived_sessions"):
                 os.makedirs(os.path.join(scratch, root))
                 for suffix in (".jsonl", ".jsonl.zst"):
                     path = os.path.join(scratch, root, STAMP + suffix)
@@ -702,7 +702,8 @@ class Discovery(unittest.TestCase):
                  patch.object(P, "OPENCODE_ROOTS", []), patch.object(P, "COPILOT_SDK_GLOBS", []), \
                  patch.object(P, "COPILOT_ROOTS", []):
                 found = sorted(path for source, path, _ in P.discover() if source == "codex")
-            self.assertEqual(found, sorted(expected))
+            # Compared normalized: glob answers with the platform's own separator (backslashes on Windows).
+            self.assertEqual(sorted(map(os.path.normpath, found)), sorted(map(os.path.normpath, expected)))
 
 
 class ConversationIdentity(unittest.TestCase):
