@@ -105,12 +105,16 @@ class PackagingTests(unittest.TestCase):
             with zipfile.ZipFile(archive, "w") as zipped:
                 zipped.writestr("pythonw.exe", b"runtime fixture")
                 zipped.writestr("python.exe", b"runtime fixture")
-                zipped.writestr("python313._pth", "untrusted search path")
+                zipped.writestr("python315._pth", "untrusted search path")
             checksum = hashlib.sha256(archive.read_bytes()).hexdigest()
             with patch.object(BUILD, "PYTHON_SHA256", checksum), patch.object(BUILD.subprocess, "check_output", return_value="release-fixture\n"):
                 BUILD.stage(ROOT, root / "payload", archive, "2.0.0")
             payload = root / "payload"
-            self.assertEqual((payload / "runtime" / "python313._pth").read_text(), "..\npython313.zip\n.\n")
+            # The bundled runtime is 3.15 (compression.zstd); it reads only python315._pth, app folder first.
+            self.assertEqual(BUILD.PYTHON_TAG, "python315")
+            self.assertEqual((payload / "runtime" / "python315._pth").read_text(), "..\npython315.zip\n.\n")
+            self.assertEqual(sorted(p.name for p in (payload / "runtime").glob("*._pth")), ["python315._pth"])
+            self.assertEqual(json.loads((payload / "BUILD-INFO.json").read_text())["python"], "3.15.2")
             self.assertEqual(json.loads((payload / "BUILD-INFO.json").read_text())["commit"], "release-fixture")
             self.assertTrue((payload / "windows" / "register_install.py").is_file())
             self.assertEqual((payload / "session_names.py").read_bytes(), (ROOT / "session_names.py").read_bytes())

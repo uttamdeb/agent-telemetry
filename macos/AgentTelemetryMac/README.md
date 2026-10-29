@@ -32,7 +32,7 @@ macos/AgentTelemetryMac/Scripts/package-app.sh
 
 The script compiles for the current Mac architecture, downloads a pinned standalone CPython runtime, verifies its SHA-256, bundles only the dashboard source/assets it needs, and creates `macos/AgentTelemetryMac/build/AgentTelemetry-macos-<architecture>.dmg`. To use a previously downloaded matching Python archive, set `AGENT_TELEMETRY_PYTHON_ARCHIVE` to its path. `AGENT_TELEMETRY_SDK_PATH` can select another installed SDK. The disk image contains an `Applications` shortcut for drag-to-install. The published DMGs use this script on matching architectures and remain unnotarized.
 
-The bundled interpreter comes from Astral's `python-build-standalone` release `20261003` (CPython 3.13.16). The package script pins separate Apple Silicon and Intel archive hashes in source. The archive is an install-only, stripped runtime; the app removes its unused `pip`, `idle`, and `pydoc` launchers and includes CPython's license file and a `BUILD-INFO.txt` with the source and checksum. The Python backend uses no third-party packages.
+The bundled interpreter comes from Astral's `python-build-standalone` release `20261026` (CPython 3.15.2, which includes `compression.zstd` for Codex's compressed rollouts). The package script pins separate Apple Silicon and Intel archive hashes in source. The archive is an install-only, stripped runtime; the app removes its unused `pip`, `idle`, and `pydoc` launchers and includes CPython's license file and a `BUILD-INFO.txt` with the source and checksum. The Python backend uses no third-party packages.
 
 ## Signed distribution
 
