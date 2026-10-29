@@ -3395,7 +3395,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, f.read(), ctype)
 
     def do_GET(self):
-        if not self._origin_ok():
+        if not self._origin_ok(page=True):
             self._send(403, json.dumps({"error": "cross-site request refused"}))
             return
         route = self.path.split("?")[0]
@@ -3523,8 +3523,20 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self._send(404, "not found", "text/plain")
 
-    def _origin_ok(self):
-        """Pin every dashboard request to this listener, including private GETs."""
+    def _link_to_page(self):
+        """Someone following a link from another site to the dashboard itself: a top-level load of the page.
+
+        The browser shows that page to the person; no other site can read it, frame it or post through it.
+        Everything the page then asks for is same-origin and keeps every check. Asked only from do_GET."""
+        route = self.path.split("?")[0]
+        return (route in ("/", "/index.html")
+                and (self.headers.get("Sec-Fetch-Mode") or "").strip().lower() == "navigate"
+                and (self.headers.get("Sec-Fetch-Dest") or "").strip().lower() == "document")
+
+    def _origin_ok(self, page=False):
+        """Pin every dashboard request to this listener, including private GETs.
+
+        `page`: a link from another site may open the dashboard page (`_link_to_page`), never anything else."""
         server_address = getattr(getattr(self, "server", None), "server_address", None)
         listen_port = (server_address[1] if isinstance(server_address, tuple) and len(server_address) > 1
                        else BIND["port"])
@@ -3544,7 +3556,7 @@ class Handler(BaseHTTPRequestHandler):
         if port is not None and port != listen_port:
             return False
         site = (self.headers.get("Sec-Fetch-Site") or "").strip().lower()
-        if site and site not in ("same-origin", "none"):
+        if site and site not in ("same-origin", "none") and not (page and self._link_to_page()):
             return False
         origin = self.headers.get("Origin")
         if origin:
