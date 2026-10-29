@@ -538,13 +538,16 @@ existing guarded `GET /api/local-servers` for the separate local server list.
   2027-01-01 — move it into `PRICE_HISTORY` then. `_canonicalize` gives every source one
   spelling ("Gemini 3.1 Pro"); `price_of` also tries it, so a row cached under an older
   spelling still prices.
-- **Gemini 4 Argon uses announced introductory API-equivalent rates** of $2/$10 per
-  1M input/output tokens and $0.10 cached input, verified against Google's
-  [launch post](https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-4-argon/)
-  on 2026-10-02. Access is limited to trusted testers; no public API model ID is listed.
+- **Gemini 4 Argon is $2/$10 per 1M input/output tokens and $0.10 cached input through
+  2026-11-30**, then $4/$20 and $0.20 from 2026-12-01, verified against Google's
+  [pricing page](https://ai.google.dev/gemini-api/docs/pricing) on 2026-10-30 (generally
+  available as `gemini-4-argon`; first seen in the
+  [launch post](https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-4-argon/)).
   `_canonicalize` recognizes Argon display/raw spellings without treating audio/image/Live
-  variants as the text model. The later $4/$20 price has no effective date — move the
-  intro tuple into `PRICE_HISTORY` only when it takes effect. Cache storage is not modeled.
+  variants as the text model. On or after 2026-12-01 move the current tuple into
+  `PRICE_HISTORY` dated 2026-11-30 and put the new rates in `PRICING` — never before.
+  Cache storage is not modeled. There is no "Gemini 4 Carbon" on Google's pricing page
+  (checked 2026-10-30); add nothing until Google publishes it.
 - **Claude's advisor iterations** (`usage.iterations[].type == "advisor_message"`) are not
   priced separately — none exist in any log seen, so their shape can't be verified. Every
   iteration here is a plain `message`, already covered by the response's own `usage`.

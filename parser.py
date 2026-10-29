@@ -259,11 +259,13 @@ PRICING = {
     "GPT-6 Astra": (10, 50, 12.50, 0, 1),
     "GPT-6 Sol": (2, 10, 2.50, 0, 0.20),
     "GPT-6 Luna": (0.10, 0.50, 0.125, 0, 0.01),
-    # GPT-6.1 Sol — same $2/$10 as GPT-6 Sol, but cached input is 5% of input, not 10%
-    # (verified against the model page and the pricing page, 2026-09-30). Sol is the
-    # only 6.1 variant listed. The page now states the 272K long-context threshold; it
-    # is still not modeled (the one 6.1 request seen here has 136K of input).
+    # GPT-6.1 — cached input is 5% of input (GPT-6 is 10%); 30-minute cache write 1.25x
+    # input. Sol verified 2026-09-30; Terra (launched 2026-10-26) verified against
+    # developers.openai.com/api/docs/pricing on 2026-10-30: $1 / $5, cached $0.05,
+    # write $1.25, short context (<=272K). The page's long-context (>272K) and Fast
+    # rows are per request and still not modeled (AGENTS.md "What the logs cannot show").
     "GPT-6.1 Sol": (2, 10, 2.50, 0, 0.10),
+    "GPT-6.1 Terra": (1, 5, 1.25, 0, 0.05),
     # OpenAI GPT-5.4 / 5.5 — verified from OpenAI API pricing docs (2026-07).
     # NOTE: GPT-5.5 has a >272K-input surcharge (2x in / 1.5x out for the session)
     # not modeled here, so heavy-context Codex sessions may cost somewhat more.
@@ -298,12 +300,12 @@ PRICING = {
     # prompts over 200K on Pro (2x input, 1.2-1.5x output), audio input (about 2x), and
     # the Live / TTS / image / embedding / Veo models, which bill audio, image and video
     # tokens at rates one tuple cannot express and no coding agent logs.
-    # Gemini 4 Argon — announced introductory API-equivalent rates, verified
-    # against blog.google/innovation-and-ai/models-and-research/gemini-models/
-    # gemini-4-argon/ (2026-10-02): $2 input / $10 output, cached input 95% off.
-    # Access is limited to trusted testers; no public API id is listed yet. The
-    # later $4/$20 rate has no effective date: only move this into PRICE_HISTORY
-    # when that change takes effect. Cache storage is not modeled.
+    # Gemini 4 Argon — generally available as gemini-4-argon; verified against
+    # ai.google.dev/gemini-api/docs/pricing (2026-10-30): $2 input / $10 output /
+    # $0.10 cached "through November 30, 2026", then $4 / $20 / $0.20 "starting
+    # December 1, 2026". Never pre-encode a future price: ON OR AFTER 2026-12-01 move
+    # this tuple into PRICE_HISTORY as [("2026-11-30", ...)] and put (4, 20, 0, 0, 0.20)
+    # here. Implicit caching only; cache storage is not modeled.
     "Gemini 4 Argon": (2.00, 10.00, 0, 0, 0.10),
     # 3.6 to 3.8 Flash are a promo "through December 31, 2026" and double on 2027-01-01:
     # then move these tuples into PRICE_HISTORY dated 2026-12-31 and put the doubled
