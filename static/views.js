@@ -564,7 +564,6 @@ function cursorActivityNoteHTML(sessions){
 }
 
 function viewOverview(d){
-  renderUsageChange("overview",d);
   const pd = hasPrev() ? slice(prevRange()) : null;
   const days = dateList(d.r), val = metricOf(), fmt = fmtOf();
   const t = totals(d.recs), pt = pd ? totals(pd.recs) : null;
@@ -726,7 +725,6 @@ function renderTokenMix(d){
 /* ---------------- COST ---------------- */
 function viewCost(d){
   renderAccountLimits();
-  renderUsageChange("cost",d);
   const pd = hasPrev() ? slice(prevRange()) : null;
   const t = totals(d.recs), pt = pd ? totals(pd.recs) : null;
   const missingPriceModels=unpricedModelNames(d.recs), hasUnpriced=missingPriceModels.length>0;

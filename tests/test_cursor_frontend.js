@@ -41,7 +41,7 @@ RAW={device:{id:${JSON.stringify(device)},name:'Synthetic'},devices:[],records:$
   pricing:{'Claude Sonnet 5':[2,10,0,0,.2]},prices:{},pricing_history:{}};
 S.preset='all';S.metric='tokens';S.exactOnly=false;S.models.clear();S.provs.clear();S.projs.clear();S.ides.clear();S.devs.clear();
 S.tools=new Set(ORDER);
-renderUsageChange=()=>{};renderDeviceDistribution=()=>{};renderHighlights=()=>{};renderHeat=()=>{};renderTokenMix=()=>{};
+renderDeviceDistribution=()=>{};renderHighlights=()=>{};renderHeat=()=>{};renderTokenMix=()=>{};
 renderCalendar=()=>{};renderMonthlyRhythmCard=()=>{};mk=()=>{};stackDS=()=>({});axes=()=>({});legendHTML=()=>'';
 renderModelEff=()=>{};`);
 
