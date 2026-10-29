@@ -121,7 +121,10 @@ CI runs backend/frontend checks on Linux, macOS and Windows and native checks on
 Release downloads use `.github/workflows/release-downloads.yml`, dispatched against an
 existing tag. It builds architecture-specific macOS DMGs and a Windows x64 EXE. The EXE
 uses Inno Setup only at build time and bundles hash-pinned CPython with the unchanged
-release-tag backend/UI allowlist. Its `python313._pth` lists the app folder BEFORE `python313.zip`: a
+release-tag backend/UI allowlist. The runtime is CPython 3.15.2 (`PYTHON_VERSION` in
+`windows/installer/build.py`; the macOS app pins the same version in `package-app.sh`, and CI runs the
+unit tests on 3.15 too). Its `python315._pth` (named for the version, or it is ignored) lists the app
+folder BEFORE `python315.zip`: a
 `._pth` stops Python adding the script's folder, and with the stdlib first `import antigravity` found
 the stdlib's xkcd module (it opens a browser), so the backend could not start. Keep it first, and keep
 `antigravity` the only top-level module named like a stdlib one (`test_release_packaging.py`). `windows/installer/register_install.py` registers app
@@ -696,9 +699,9 @@ existing guarded `GET /api/local-servers` for the separate local server list.
   disk, as Storage lists them. The same `_codex_stale()` markers force a full re-read.
   **Decoding has one seam, `_zstd_backend()`**: Python 3.14's `compression.zstd`, else the
   `zstd` command, else nothing (OpenClaw's `_zstd_decode_many` uses it too). The bundled
-  macOS and Windows runtimes pin CPython 3.13 (no `compression.zstd`) and the macOS app
-  hands its backend the PATH it was launched with, so expect "no decoder" there until
-  packaging bundles a `zstd` or moves to 3.14. Then `update_file()` raises
+  macOS and Windows runtimes are CPython 3.15.2, which has `compression.zstd`, so the
+  installed apps decode with no `zstd` command; a source checkout on Python 3.13 or older
+  still needs the command. Without either, `update_file()` raises
   `ZstdUnavailable`; `_refresh_locked` counts it (`_meta` / payload
   `codex_compressed_unread`, one stderr line with no path whenever the count changes, the
   sidebar note, the Settings hint) and creates NO entry and NO log error: nothing in the

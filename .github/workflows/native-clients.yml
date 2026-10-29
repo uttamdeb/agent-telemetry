@@ -11,6 +11,16 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      # The installed apps bundle CPython 3.15.2: run the unit tests on 3.15 too, then 3.13 for everything after.
+      - uses: actions/setup-python@v5
+        id: bundled-python
+        with:
+          python-version: '3.15'
+      - name: Unit tests on the bundled runtime's Python
+        shell: bash
+        env:
+          BUNDLED_PYTHON: ${{ steps.bundled-python.outputs.python-path }}
+        run: '"$BUNDLED_PYTHON" -m unittest discover -s tests'
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
