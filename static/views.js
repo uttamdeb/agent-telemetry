@@ -3134,12 +3134,10 @@ async function load(){
   // a render failure is a bug, not a dead server — say so, and let the headless
   // sweep see it (data-js-error) instead of reporting "cannot reach"
   try{
-    const dates=RAW.records.map(x=>x.date).filter(x=>x!=="0000-00-00");
-    const lo=dates.length?dates.reduce((a,b)=>a<b?a:b):"—";
-    const hi=dates.length?dates.reduce((a,b)=>a>b?a:b):"—";
     const fresh=new Date(RAW.meta.last_refresh*1000).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"});
     document.getElementById("statusText").textContent = (S.live ? "Live" : "Paused") + " · updated " + fresh;
-    document.getElementById("coverage").innerHTML = `<span>${fmtNum(RAW.meta.files)} logs</span><span class="coverage-dates">${esc(lo)} → ${esc(hi)}</span>`
+    // Only problems that need the user's attention show here; the log count and date span do not.
+    document.getElementById("coverage").innerHTML = ""
       + (RAW.openclaw_undecoded ? `<span class="coverage-detail">${fmtNum(RAW.openclaw_undecoded)} OpenClaw events unread — install zstd</span>` : "")
       + (RAW.cache_error ? `<span class="coverage-detail">${esc(RAW.cache_error)}</span>` : "")
       + (RAW.meta.parse_errors ? `<span class="coverage-detail">${fmtNum(RAW.meta.parse_errors)} log errors — see Settings</span>` : "")

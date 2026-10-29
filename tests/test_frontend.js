@@ -543,8 +543,8 @@ console.log('Frontend regression checks passed: pricing, precision, scope, model
     cache_error:'Cannot read <ledger> & backup',openclaw_undecoded:2,
     meta:{last_refresh:1,files:731,parse_errors:3,backup_error:true}})});
   assert.equal(await vm.runInContext('load()',loading),true);
-  assert.match(loadNodes.coverage.innerHTML,/<span>731 logs<\/span><span class="coverage-dates">2025-07-07 → 2026-10-18<\/span>/,
-    'Coverage dates must stay in one span so CSS can move the whole range to a new line');
+  assert.doesNotMatch(loadNodes.coverage.innerHTML,/731 logs|2025-07-07|2026-10-18|coverage-dates/,
+    'The sidebar no longer shows the log count or the date span');
   assert.match(loadNodes.coverage.innerHTML,/class="coverage-detail">Cannot read &lt;ledger&gt; &amp; backup<\/span>/);
   assert.doesNotMatch(loadNodes.coverage.innerHTML,/<ledger>/,'Coverage errors must remain text when rendered as HTML');
   assert.match(loadNodes.coverage.innerHTML,/>2 OpenClaw events unread — install zstd<\/span>/);
@@ -552,9 +552,8 @@ console.log('Frontend regression checks passed: pricing, precision, scope, model
   assert.match(loadNodes.coverage.innerHTML,/>backup failed — see Settings<\/span>/);
   loading.fetch=async()=>({ok:true,json:async()=>({...payload(200),records:[{date:'<img src=x onerror=alert(1)>',in:200}]})});
   assert.equal(await vm.runInContext('load()',loading),true);
-  assert.doesNotMatch(loadNodes.coverage.innerHTML,/<img/,'Coverage dates from a payload must also remain escaped text');
-  assert.match(loadNodes.coverage.innerHTML,/&lt;img src=x onerror=alert\(1\)&gt;/);
-  assert.doesNotMatch(loadNodes.coverage.innerHTML,/coverage-detail/,'Resolved coverage errors must disappear on refresh');
+  assert.doesNotMatch(loadNodes.coverage.innerHTML,/img/,'Record dates from a payload never reach the coverage note');
+  assert.equal(loadNodes.coverage.innerHTML,'','Resolved coverage errors must disappear on refresh, leaving the note empty');
   loading.console={error(){}};
   loading.fetch=async()=>({ok:false});
   assert.equal(await vm.runInContext('load()',loading),false);

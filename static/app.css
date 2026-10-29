@@ -145,7 +145,7 @@ a{color:inherit}
 .icon-btn:hover{background:var(--surface-2);color:var(--text);border-color:var(--border)}
 .side-note{font-size:11px;color:var(--text-3);line-height:1.5;padding:0 6px}
 .coverage-meta{display:flex;flex-wrap:wrap;gap:2px 8px}
-.coverage-dates{white-space:nowrap}
+.coverage-meta:empty{display:none}
 .coverage-detail{flex-basis:100%;overflow-wrap:anywhere}
 .side-ver{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;margin-top:4px}
 .side-ver .ver{font-family:var(--mono,ui-monospace,SFMono-Regular,Menlo,monospace);color:var(--text-2)}
