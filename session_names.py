@@ -192,7 +192,10 @@ def identity(aggregate, session):
         except ValueError: return stem
     if aggregate["source"] == "codex":
         if aggregate.get("_session_id"): return aggregate["_session_id"]
-        tail = Path(aggregate.get("path", "")).stem[-36:]
+        name = Path(aggregate.get("path", "")).name
+        if name.lower().endswith(".jsonl.zst"):      # the same thread as the plain rollout it replaced
+            name = name[:-4]
+        tail = Path(name).stem[-36:]
         try: uuid.UUID(tail)
         except ValueError: return ""
         return tail

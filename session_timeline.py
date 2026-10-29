@@ -17,12 +17,14 @@ if __package__:
     from .parser import (
         FAST_SUFFIX, US_SUFFIX, _CODEX_SKIP, _buckets, _first_text, _from_iso,
         _is_subagent_path, normalize_claude, normalize_codex, _claude_effort, _sdk_model, _sdk_tokens,
+        ZstdReadError, ZstdUnavailable, is_zstd_path, zstd_stream,
     )
 else:
     import antigravity as AG
     from parser import (
         FAST_SUFFIX, US_SUFFIX, _CODEX_SKIP, _buckets, _first_text, _from_iso,
         _is_subagent_path, normalize_claude, normalize_codex, _claude_effort, _sdk_model, _sdk_tokens,
+        ZstdReadError, ZstdUnavailable, is_zstd_path, zstd_stream,
     )
 
 
@@ -857,7 +859,11 @@ def timeline(source, path, session_id, max_events=400, date_from=None, date_to=N
     except OSError:
         return result
 
-    limited = size > MAX_BYTES
+    # A compressed Codex rollout is read through the same decoder the parser uses. Its
+    # file size says nothing about how much text it holds, so the 64 MiB bound applies
+    # to the DECODED bytes, while reading, exactly as it does to a plain log.
+    compressed = source == "codex" and is_zstd_path(path)
+    limited = size > MAX_BYTES and not compressed
     try:
         cap = max(0, min(int(max_events), 2000))
     except (TypeError, ValueError, OverflowError):
@@ -866,7 +872,7 @@ def timeline(source, path, session_id, max_events=400, date_from=None, date_to=N
 
     def source_lines():
         consumed = 0
-        with open(path, "rb") as handle:
+        with (zstd_stream(path) if compressed else open(path, "rb")) as handle:
             while consumed < MAX_BYTES:
                 remaining = MAX_BYTES - consumed
                 raw_line = handle.readline(remaining + 1)
@@ -895,6 +901,12 @@ def timeline(source, path, session_id, max_events=400, date_from=None, date_to=N
     if source == "codex":
         try:
             events = _codex_events(source_lines(), session_id, cap + 1, date_from, date_to, view)
+        except ZstdUnavailable:
+            result["detail"] = "This compressed Codex log needs the zstd command or Python 3.14+ to be read."
+            return result
+        except ZstdReadError:
+            result["detail"] = "The compressed source log is damaged or incomplete."
+            return result
         except OSError:
             return result
     elif source == "copilot":

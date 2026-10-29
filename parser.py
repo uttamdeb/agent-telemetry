@@ -12,7 +12,7 @@ Mac/Linux install of the same tools.
 
 No third-party dependencies — stdlib only.
 """
-import os, sys, json, glob, re, time, shutil, subprocess, copy, hashlib
+import os, sys, json, glob, re, time, shutil, subprocess, copy, hashlib, contextlib
 if __package__:
     from . import accounts as A
     from . import antigravity as AG
@@ -31,6 +31,20 @@ def _leaf(path):
         return ""
     return os.path.basename(str(path).replace("\\", "/").rstrip("/"))
 
+
+def is_zstd_path(path):
+    """True for a zstd-compressed log (a Codex rollout Codex has compressed)."""
+    return str(path).lower().endswith(".zst")
+
+
+def _codex_leaf(path):
+    """A Codex rollout's file name with the compression suffix removed:
+    rollout-<stamp>-<thread id>.jsonl.zst is the same conversation as the
+    rollout-<stamp>-<thread id>.jsonl it replaced. Uses _leaf, so a path written on
+    Windows deduplicates against one written on macOS or Linux."""
+    leaf = _leaf(path)
+    return leaf[:-4] if leaf.lower().endswith(".jsonl.zst") else leaf
+
 # ---------------------------------------------------------------------------
 # Source locations
 # ---------------------------------------------------------------------------
@@ -41,9 +55,14 @@ CLAUDE_GLOBS = [os.path.join(HOME, ".claude", "projects", "**", "*.jsonl")]
 # source. Append-only: a renamed thread gets a NEW line, so the LAST entry wins.
 CODEX_SESSION_INDEX = os.path.join(HOME, ".codex", "session_index.jsonl")
 
+# Codex replaces an idle thread's rollout-<stamp>-<thread id>.jsonl with a zstd file of
+# the same name plus ".zst" (and the two never coexist for long), so both spellings are
+# discovered in both roots and are ONE conversation (see _codex_leaf).
 CODEX_GLOBS = [
     os.path.join(HOME, ".codex", "sessions", "**", "*.jsonl"),
+    os.path.join(HOME, ".codex", "sessions", "**", "*.jsonl.zst"),
     os.path.join(HOME, ".codex", "archived_sessions", "**", "*.jsonl"),
+    os.path.join(HOME, ".codex", "archived_sessions", "**", "*.jsonl.zst"),
 ]
 # Claude Desktop "local agent mode" runs Claude Code in a sandbox; it writes
 # standard Claude-format transcripts under a nested .claude/projects/ tree
@@ -4200,14 +4219,43 @@ def _parse_hermes_store(agg, con):
 
 
 # ===========================================================================
-# OPENCLAW — per-agent SQLite (current) and JSONL transcripts (older / archived).
-# Transcript events are the same JSON either way: a `session` header, then
-# `message` entries whose assistant messages carry a normalized `usage`
-# {input, output, cacheRead, cacheWrite, cacheWrite1h?, reasoning?, cost.total} —
-# input EXCLUDES cache reads and writes (OpenClaw's model layer subtracts them from
-# the provider's prompt count), and reasoning is a subset of output, like ours.
+# zstd — ONE decoder policy for everything a tool stores compressed: OpenClaw's
+# large transcript events (_zstd_decode_many) and Codex's idle rollouts
+# (zstd_stream / _zstd_lines). Python 3.14's compression.zstd when present, else
+# the `zstd` command. With neither, nothing is guessed: the caller counts what it
+# could not read and every ledger entry already held stays exactly as it was.
 # ===========================================================================
-_OPENCLAW_DB = os.path.join("agent", "openclaw-agent.sqlite")
+class ZstdUnavailable(RuntimeError):
+    """No zstd decoder here: not Python 3.14+, and no `zstd` command on PATH."""
+
+
+class ZstdReadError(RuntimeError):
+    """A compressed file the decoder refused: damaged, cut short or not zstd. The
+    message is fixed text; it never carries a path or any decoded content."""
+
+
+_ZSTD_DAMAGED = "compressed log is damaged or incomplete"
+_ZSTD_TOO_LONG = "compressed log holds a record too large to read"
+_ZSTD_CHUNK = 1 << 20           # decoded bytes pulled per read
+_ZSTD_MAX_LINE = 256 << 20      # the longest rollout record seen is ~20 MB
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)   # no console flash from pythonw
+
+
+def _zstd_backend():
+    """("module", compression.zstd) on Python 3.14+, else ("command", the `zstd`
+    executable), else None. Everything that decodes asks here, so there is exactly
+    one answer to "can this machine read compressed logs"."""
+    try:
+        from compression import zstd as _z          # Python 3.14+
+        return "module", _z
+    except ImportError:
+        pass
+    exe = shutil.which("zstd")
+    return ("command", exe) if exe else None
+
+
+def zstd_available():
+    return _zstd_backend() is not None
 
 
 def _zstd_decode_many(blobs):
@@ -4216,20 +4264,19 @@ def _zstd_decode_many(blobs):
     left out (and counted by the caller), never guessed."""
     if not blobs:
         return {}
-    try:
-        from compression import zstd as _z          # Python 3.14+
+    backend = _zstd_backend()
+    if backend is None:
+        return {}
+    kind, impl = backend
+    if kind == "module":
         out = {}
         for k, b in blobs.items():
             try:
-                out[k] = _z.decompress(b).decode("utf-8", "replace")
+                out[k] = impl.decompress(b).decode("utf-8", "replace")
             except Exception as e:
                 sys.stderr.write(f"[openclaw] zstd row {k}: {e}\n")
         return out
-    except ImportError:
-        pass
-    exe = shutil.which("zstd")
-    if not exe:
-        return {}
+    exe = impl
     import tempfile
     out = {}
     with tempfile.TemporaryDirectory(prefix="agenttelemetry-zstd-") as tmp:
@@ -4243,7 +4290,7 @@ def _zstd_decode_many(blobs):
         for j in range(0, len(keys), 400):          # keep the command line bounded
             chunk = keys[j:j + 400]
             r = subprocess.run([exe, "-d", "-q", "-f", *[names[k] for k in chunk]],
-                               capture_output=True, text=True)
+                               capture_output=True, text=True, creationflags=_NO_WINDOW)
             if r.returncode != 0:
                 sys.stderr.write(f"[openclaw] zstd: {r.stderr.strip()[:200]}\n")
             for k in chunk:
@@ -4253,6 +4300,121 @@ def _zstd_decode_many(blobs):
                 except OSError:
                     pass
     return out
+
+
+class _ZstdReader:
+    """The decoded bytes of one compressed file as a binary reader: read(n) and
+    readline(limit). A decoder complaint becomes ZstdReadError; with the command, so
+    does a non-zero exit, noticed when the stream ends."""
+
+    def __init__(self, handle, errors=(), proc=None):
+        self._handle, self._errors, self._proc = handle, tuple(errors), proc
+        self._finished = False
+
+    def _pull(self, name, size):
+        try:
+            data = getattr(self._handle, name)(size)
+        except self._errors:
+            raise ZstdReadError(_ZSTD_DAMAGED) from None
+        if not data:
+            self._finish()
+        return data
+
+    def read(self, size=-1):
+        return self._pull("read", size)
+
+    def readline(self, limit=-1):
+        return self._pull("readline", limit)
+
+    def _finish(self):
+        # The command reports a damaged or cut-short file only through its exit status.
+        if self._proc is not None and not self._finished:
+            self._finished = True
+            if self._proc.wait() != 0:
+                raise ZstdReadError(_ZSTD_DAMAGED)
+
+    def close(self):
+        proc = self._proc
+        if proc is None:
+            return
+        self._finished = True          # stopped on purpose: a signal exit is not damage
+        try:
+            if proc.poll() is None:
+                proc.terminate()       # our own short-lived decoder child, nothing else
+        finally:
+            try:
+                self._handle.close()
+            finally:
+                try:
+                    proc.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
+
+
+@contextlib.contextmanager
+def zstd_stream(path):
+    """The decoded bytes of a compressed file, incrementally: a log of hundreds of
+    MB never sits in memory. Raises ZstdUnavailable when no decoder exists,
+    ZstdReadError when the file is damaged, OSError when it cannot be opened."""
+    backend = _zstd_backend()
+    if backend is None:
+        raise ZstdUnavailable("no zstd decoder: install the zstd command or use Python 3.14+")
+    kind, impl = backend
+    if kind == "module":
+        handle = impl.open(path, "rb")
+        try:
+            yield _ZstdReader(handle, (impl.ZstdError, EOFError))
+        finally:
+            handle.close()
+        return
+    proc = subprocess.Popen([impl, "-d", "-c", "-q", "--", str(path)],
+                            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                            stderr=subprocess.DEVNULL, bufsize=_ZSTD_CHUNK,
+                            creationflags=_NO_WINDOW)
+    reader = _ZstdReader(proc.stdout, (), proc)
+    try:
+        yield reader
+    finally:
+        reader.close()
+
+
+def _zstd_lines(path):
+    """The decoded lines of a compressed JSONL file, one at a time (memory follows
+    the longest record, not the file). Split on newlines only, as JSONL is: a raw
+    U+2028 inside a JSON string is not a line break. Same errors as zstd_stream."""
+    with zstd_stream(path) as stream:
+        parts, held = [], 0
+        while True:
+            chunk = stream.read(_ZSTD_CHUNK)
+            if not chunk:
+                break
+            pieces = chunk.split(b"\n")
+            if len(pieces) == 1:                    # still inside one long record
+                parts.append(chunk)
+                held += len(chunk)
+                if held > _ZSTD_MAX_LINE:
+                    raise ZstdReadError(_ZSTD_TOO_LONG)
+                continue
+            if parts:
+                pieces[0] = b"".join(parts + [pieces[0]])
+            tail = pieces.pop()
+            parts, held = ([tail], len(tail)) if tail else ([], 0)
+            for piece in pieces:
+                yield piece.rstrip(b"\r").decode("utf-8", "replace")
+        if parts:                                   # a last record with no newline
+            yield b"".join(parts).rstrip(b"\r").decode("utf-8", "replace")
+
+
+# ===========================================================================
+# OPENCLAW — per-agent SQLite (current) and JSONL transcripts (older / archived).
+# Transcript events are the same JSON either way: a `session` header, then
+# `message` entries whose assistant messages carry a normalized `usage`
+# {input, output, cacheRead, cacheWrite, cacheWrite1h?, reasoning?, cost.total} —
+# input EXCLUDES cache reads and writes (OpenClaw's model layer subtracts them from
+# the provider's prompt count), and reasoning is a subset of output, like ours.
+# ===========================================================================
+_OPENCLAW_DB = os.path.join("agent", "openclaw-agent.sqlite")
 
 
 def _openclaw_ts(entry):
@@ -5077,6 +5239,58 @@ def reconcile(prev, fresh, version):
     return fresh
 
 
+def _codex_stale(agg):
+    """True when an available Codex log's entry predates metadata the parser now
+    records, so it must be read again in full. The plain-log branch of update_file
+    holds the same conditions inline (alongside Claude's); keep the two in step."""
+    return (agg.get("parent_metadata_version") != 1
+            or agg.get("reasoning_effort_version") != _REASONING_EFFORT_VERSION
+            or agg.get("state", {}).get("compaction_timing", {}).get("version")
+            != _CODEX_COMPACTION_TIMING_VERSION
+            or agg.get("account_metadata_version") != A.METADATA_VERSION
+            or "compactions" not in agg)
+
+
+# Compressed logs the decoder refused, by path -> (size, mtime_ns). A compressed log
+# is immutable, so a damaged one fails identically every time: remember that and do
+# not decode hundreds of MB again each refresh until the file itself changes.
+_ZSTD_BAD = {}
+
+
+def _update_codex_compressed(agg, path, st):
+    """A Codex rollout Codex has compressed (<rollout>.jsonl.zst). Always read in
+    full and keyed by the file's signature, never from a byte offset: a compressed
+    file is written once and replaced whole if it ever changes. The new entry is
+    built on the side and handed back only after every frame decoded, so a failure
+    leaves the previous ledger entry (the rollout's archived plain copy, or an
+    earlier read of this file) exactly as it was."""
+    size, mtime = st.st_size, st.st_mtime
+    if (agg and agg.get("size") == size and agg.get("mtime") == mtime
+            and not _codex_stale(agg)):
+        return agg                                   # already read, and nothing new to record
+    if size == 0:
+        return agg                                   # still being written: nothing to read yet
+    signature = (size, st.st_mtime_ns)
+    if _ZSTD_BAD.get(path) == signature:
+        raise ZstdReadError(_ZSTD_DAMAGED)
+    if not zstd_available():
+        raise ZstdUnavailable("no zstd decoder: install the zstd command or use Python 3.14+")
+    fresh = _blank_agg("codex", path)
+    lines = _zstd_lines(path)
+    try:
+        parse_codex(fresh, lines)
+    except ZstdReadError:
+        _ZSTD_BAD[path] = signature
+        raise
+    finally:
+        lines.close()
+    _ZSTD_BAD.pop(path, None)
+    fresh["offset"] = size                           # every byte of the file was consumed
+    fresh["size"], fresh["mtime"] = size, mtime      # on-disk (compressed) size, as Storage shows
+    _finalize_session(fresh, "codex", path)
+    return fresh
+
+
 def update_file(agg, source, path, editor_hint, proj_map):
     """(Re)parse a single file incrementally. Returns the updated agg."""
     try:
@@ -5085,6 +5299,9 @@ def update_file(agg, source, path, editor_hint, proj_map):
         return agg
     size, mtime = st.st_size, st.st_mtime
     kept_seen = (agg.get("_retained") or {}).get("seen") if isinstance(agg, dict) else None
+
+    if source == "codex" and is_zstd_path(path):
+        return _update_codex_compressed(agg, path, st)
 
     if source == "copilot" and _leaf(path) == "events.jsonl":
         return _update_copilot_sdk(agg, path)
@@ -5473,7 +5690,11 @@ def _finalize_session(agg, source, path):
     ranked = [m for m, _ in sorted(mt.items(), key=lambda kv: -kv[1])]
     dom = agg["state"].get("dom_model") or (ranked[0] if ranked else "Unknown")
     models = [dom] + [m for m in ranked if m != dom]   # dominant first
-    base = os.path.splitext(os.path.basename(path))[0]
+    # a compressed rollout keeps the id of the plain one it replaced
+    name = os.path.basename(path)
+    if source == "codex" and is_zstd_path(name):
+        name = name[:-4]
+    base = os.path.splitext(name)[0]
     m = re.match(r"rollout-\d{4}-\d{2}-\d{2}T[\d-]+-([0-9a-f]{8})", base)
     if m:
         base = m.group(1)
