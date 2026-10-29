@@ -1122,6 +1122,10 @@ render bug from the headless sweep.
   Results and errors go inline (`.stg-msg`), never in a popup. While a dialog is open it
   owns the keyboard, and Esc closes it alone, not the drawer behind it.
 
+- **A link from another site opens the page, nothing else.** `_origin_ok()` refuses a cross-site
+  `Sec-Fetch-Site` on every GET, except a top-level page load of `/` or `/index.html`
+  (`_link_to_page`: `navigate` + `document`), so the Pro portal's "Open local dashboard" works.
+  Frames, scripts, fetches and every `/api/*` read stay refused; the Host check always applies.
 - **A link is untrusted input.** Whatever `filtersFromURL()` reads may have been written by
   another page, and this app has write endpoints behind only a same-origin check, so script
   injected through a crafted `?projects=` would get past it. Dates, tool ids, `range`,

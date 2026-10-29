@@ -272,9 +272,9 @@ class SafetyAndAccountingTests(unittest.TestCase):
         self.addCleanup(server.server_close); self.addCleanup(server.shutdown)
         with patch.dict(D.BIND, {"host": "127.0.0.1", "port": port}), \
              patch.object(D, "build_payload", return_value={}), patch.object(D, "refresh") as refresh:
-            def request(method, path, host, origin=None, ctype="application/json", fetch_site=None, body="{}"):
+            def request(method, path, host, origin=None, ctype="application/json", fetch_site=None, body="{}", extra=None):
                 con = http.client.HTTPConnection("127.0.0.1", port)
-                headers = {"Host": host, "Content-Type": ctype}
+                headers = {"Host": host, "Content-Type": ctype, **(extra or {})}
                 if origin is not None: headers["Origin"] = origin
                 if fetch_site is not None: headers["Sec-Fetch-Site"] = fetch_site
                 con.request(method, path, body=body if method == "POST" else None, headers=headers)
@@ -289,6 +289,20 @@ class SafetyAndAccountingTests(unittest.TestCase):
             self.assertEqual(request("POST", "/api/refresh", host, "http://" + evil), 403)
             self.assertEqual(request("POST", "/api/settings", host, body="[]"), 400)
             self.assertEqual(request("GET", "/api/data", host, fetch_site="cross-site"), 403)
+            # A link on another site (the Pro portal, a README) may open the page itself, and only that.
+            link = {"Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "document"}
+            for path in ("/", "/index.html", "/?range=7d"):
+                self.assertEqual(request("GET", path, host, fetch_site="cross-site", extra=link), 200, path)
+            self.assertEqual(request("GET", "/", evil, fetch_site="cross-site", extra=link), 403, "Host is still checked")
+            for path in ("/api/data", "/api/storage", "/static/core.js", "/manifest.json"):
+                self.assertEqual(request("GET", path, host, fetch_site="cross-site", extra=link), 403, path)
+            for extra in ({"Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "iframe"},
+                          {"Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "empty"},
+                          {"Sec-Fetch-Mode": "no-cors", "Sec-Fetch-Dest": "script"}, {}):
+                self.assertEqual(request("GET", "/", host, fetch_site="cross-site", extra=extra), 403, extra)
+            self.assertEqual(request("POST", "/api/refresh", host, ctype="application/x-www-form-urlencoded",
+                                     fetch_site="cross-site", extra=link, body="x=1"), 403, "a cross-site form post")
+            self.assertEqual(request("POST", "/api/refresh", host, fetch_site="cross-site", extra=link), 403)
             self.assertEqual(refresh.call_count, 1)
             with patch.dict(D.BIND, {"host": "0.0.0.0"}), patch.object(D, "_lan_addrs", return_value=["192.168.1.2"]):
                 self.assertEqual(request("GET", "/api/data", "192.168.1.2:%d" % port), 200)
