@@ -291,7 +291,7 @@ def _codex_rpc(method, params, home=None):
             return message.get("result", {})
     try:
         send({"id": 1, "method": "initialize", "params": {"clientInfo": {
-            "name": "agent_telemetry", "title": "AgentTelemetry", "version": "2.1.0"}}})
+            "name": "agent_telemetry", "title": "AgentTelemetry", "version": "2.2.0"}}})
         receive(1); send({"method": "initialized", "params": {}})
         send({"id": 2, "method": method, "params": params})
         return receive(2)

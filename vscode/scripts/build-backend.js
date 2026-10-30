@@ -19,7 +19,12 @@ function buildBackend(repoRoot, destination) {
     }
     return [relative, fs.readFileSync(source)];
   });
-  const version = JSON.parse(fs.readFileSync(path.join(root, 'vscode', 'package.json'), 'utf8')).version;
+  // The backend reports the app's version (pyproject.toml), not the extension's: a pre-release extension (2.1.x)
+  // bundles the backend of the app version it previews. The extension's own version is recorded beside it.
+  const extensionVersion = JSON.parse(fs.readFileSync(path.join(root, 'vscode', 'package.json'), 'utf8')).version;
+  const pyproject = path.join(root, 'pyproject.toml');
+  const appVersion = fs.existsSync(pyproject) ? /^version\s*=\s*"([^"]+)"$/m.exec(fs.readFileSync(pyproject, 'utf8'))?.[1] : null;
+  const version = appVersion || extensionVersion;
   const cache = /^CACHE_VERSION\s*=\s*(\d+)$/m.exec(contents.find(([file]) => file === 'dashboard.py')[1].toString());
   if (!cache) throw new Error('Backend cache version is unavailable.');
   const commit = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], {encoding: 'utf8'}).trim();
@@ -39,7 +44,7 @@ function buildBackend(repoRoot, destination) {
     fs.writeFileSync(output, content);
     digests[relative] = crypto.createHash('sha256').update(content).digest('hex');
   }
-  const info = {version, source_commit: commit, cache_version: Number(cache[1]), files: digests};
+  const info = {version, extension_version: extensionVersion, source_commit: commit, cache_version: Number(cache[1]), files: digests};
   fs.writeFileSync(path.join(target, 'BUILD-INFO.json'), JSON.stringify(info, null, 2) + '\n');
   return info;
 }

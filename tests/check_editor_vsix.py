@@ -44,7 +44,11 @@ def check_archive(path):
         # VSCE owns these two archive metadata files; everything else is allowlisted.
         assert names == expected | {"extension.vsixmanifest", "[Content_Types].xml"}, names ^ expected
         info = json.loads(archive.read("extension/backend/BUILD-INFO.json"))
-        assert info["version"] == manifest["version"]
+        # The backend reports the app version (pyproject.toml); a pre-release extension (2.1.x) previews a newer app.
+        import re
+        app_version = re.search(r'^version\s*=\s*"([^"]+)"$', (ROOT / "pyproject.toml").read_text(), re.M).group(1)
+        assert info["version"] == app_version, (info["version"], app_version)
+        assert info["extension_version"] == manifest["version"], (info["extension_version"], manifest["version"])
         assert set(info["files"]) == expected_backend
         for relative in expected_backend:
             data = archive.read("extension/backend/" + relative)
