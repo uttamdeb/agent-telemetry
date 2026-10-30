@@ -11,8 +11,8 @@ function harness({trusted = false, remote = false, workspacePath = '/work/exampl
   const dispose = () => {};
   class EventEmitter { constructor() {this.event = () => ({dispose});} fire() {} dispose() {} }
   const vscode = {
-    EventEmitter, StatusBarAlignment: {Right: 2}, ViewColumn: {Active: 1}, TreeItemCollapsibleState: {None: 0, Collapsed: 1},
-    TreeItem: class {constructor(label) {this.label = label;}}, ThemeIcon: class {constructor(id) {this.id = id;}},
+    EventEmitter, StatusBarAlignment: {Right: 2}, ViewColumn: {Active: 1}, TreeItemCollapsibleState: {None: 0, Collapsed: 1, Expanded: 2},
+    TreeItem: class {constructor(label, collapsibleState) {this.label = label; this.collapsibleState = collapsibleState;}}, ThemeIcon: class {constructor(id) {this.id = id;}},
     Uri: {joinPath: (_, part) => ({fsPath: '/extension/' + part}), parse: value => value},
     env: {appName: 'Cursor', remoteName: remote ? 'ssh-remote' : undefined, openExternal: async () => true},
     workspace: {isTrusted: trusted, workspaceFolders: [{uri: {scheme: remote ? 'vscode-remote' : 'file', fsPath: workspacePath}}],
@@ -111,4 +111,31 @@ test('status bar keeps the existing numeric labels for summaries without coverag
   assert.equal(host.statusItem().text, '$(pulse) 480 · $0.25');
   assert.match(host.statusItem().tooltip, /480 tokens · \$0\.25 estimated API cost/);
   assert.doesNotMatch(host.statusItem().tooltip, /partial|unavailable|lower bound/i);
+});
+
+test('Active now lists the sessions with activity in the last 15 minutes, newest first, and opens them', t => {
+  const host = harness(); t.after(host.cleanup); const tree = new host.ActivityTree();
+  const at = minutes => new Date(Date.now() - minutes * 60000).toISOString();
+  const sessions = [
+    {key: 'old', title: 'Yesterday', source: 'claude', end: at(60 * 24), tokens: 5, cost: 0},
+    {key: 'codex', title: 'Fix the parser', source: 'codex', end: at(2), tokens: 1200000, cost: 1, model: 'GPT-6.1 Terra'},
+    {key: 'claude', title: 'Write tests', source: 'claude', end: at(0), tokens: 3400, cost: 0},
+    {key: 'archived', title: 'Gone', source: 'claude', end: at(1), archived: true, tokens: 1, cost: 0},
+    {key: 'edge', title: 'Sixteen minutes', source: 'cursor', end: at(16), tokens: 1, cost: 0},
+  ];
+  tree.update({...host.api.getState(), connection: {status: 'connected', endpoint: 'http://127.0.0.1:7878'}, snapshot: {sessions, summary: {tokens: 1, cost: 0}, scope: {label: 'This workspace'}, from: '2026-10-30', to: '2026-10-30'}});
+  const rows = tree.getChildren();
+  const group = rows.find(row => row.id === 'active');
+  assert.ok(group, 'the Active now group is shown');
+  assert.equal(group.description, '2 sessions');
+  assert.equal(tree.getTreeItem(group).collapsibleState, 2, 'expanded by default');
+  const children = tree.getChildren(group);
+  assert.deepEqual([...children.map(row => row.session)], ['claude', 'codex'], 'newest first; archived and older than 15 minutes left out');
+  assert.match(children[0].description, /^Claude Code · just now · 3\.4K tokens$/);
+  assert.match(children[1].description, /^Codex · 2 min ago · 1\.2M tokens$/);
+  const item = tree.getTreeItem(children[1]);
+  assert.equal(item.id, 'active:codex', 'its own id, distinct from the same session in the list below');
+  assert.deepEqual([...item.command.arguments], ['codex'], 'clicking opens that session in the Agent desk');
+  tree.update({...host.api.getState(), connection: {status: 'connected', endpoint: 'http://127.0.0.1:7878'}, snapshot: {sessions: [sessions[0]], summary: {tokens: 1, cost: 0}, scope: {label: 'This workspace'}, from: '2026-10-30', to: '2026-10-30'}});
+  assert.equal(tree.getChildren().some(row => row.id === 'active'), false, 'no group when nothing is active');
 });
