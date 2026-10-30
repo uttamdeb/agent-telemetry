@@ -206,7 +206,7 @@
         const start = action('Start local monitoring', 'start', true);
         start.disabled = state.trusted === false;
         start.title = start.disabled ? 'Trust this workspace before starting a local Python process.' : 'Starts a local service that keeps running when the editor closes.';
-        actions.append(start, action('Set up Python', 'setupPython'), action('Connection settings', 'openSettings'));
+        actions.append(start, action('Set up Python', 'setupPython'), action('Get the desktop app', 'getDesktopApp'), action('Connection settings', 'openSettings'));
       }
       nodes.push(actions);
       if (state.trusted === false) nodes.push(el('p', 'detail-scope', 'Restricted Mode allows read-only connections. Starting monitoring requires a trusted workspace.'));
@@ -439,7 +439,7 @@
     const target = event.target.closest('button, .tree-line');
     if (!target) return;
     if (target.dataset.action) {
-      const allowed = ['refresh', 'start', 'openBrowser', 'resetBaseline', 'setupPython', 'openSettings'];
+      const allowed = ['refresh', 'start', 'openBrowser', 'resetBaseline', 'setupPython', 'getDesktopApp', 'openSettings'];
       if (allowed.includes(target.dataset.action) && !target.disabled) send(target.dataset.action);
     } else if (target.dataset.sessionFilter && ['all', 'main', 'subagents'].includes(target.dataset.sessionFilter)) {
       sessionFilter = target.dataset.sessionFilter; renderTree(); renderDetail(); markControls(); persist();

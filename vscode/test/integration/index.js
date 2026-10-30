@@ -62,7 +62,7 @@ async function run() {
   assert.equal(api.getState().since.tokens, 0);
   await vscode.commands.executeCommand('workbench.view.extension.agentTelemetry');
   const commands = await vscode.commands.getCommands(true);
-  for (const command of ['open', 'refresh', 'start', 'openBrowser', 'resetBaseline', 'settings', 'setupPython']) {
+  for (const command of ['open', 'refresh', 'start', 'openBrowser', 'resetBaseline', 'settings', 'setupPython', 'getDesktopApp']) {
     assert.ok(commands.includes('agentTelemetry.' + command));
   }
   // The fixture backend changes only in memory. Neither activation nor read-only

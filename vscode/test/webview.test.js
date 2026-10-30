@@ -121,6 +121,12 @@ test('webview uses text DOM, exact message actions and no telemetry storage', ()
   assert.match(js, /Current composer setting · whole session/);
   assert.match(js, /Context is a saved snapshot, not billed tokens/);
 });
+test('webview offers the desktop app beside Set up Python and never holds a URL to open', () => {
+  const js = fs.readFileSync(path.join(__dirname, '../media/desk.js'), 'utf8');
+  assert.match(js, /action\('Set up Python', 'setupPython'\), action\('Get the desktop app', 'getDesktopApp'\)/);
+  assert.match(js, /const allowed = \[[^\]]*'getDesktopApp'[^\]]*\]/);
+  assert.doesNotMatch(js, /https?:\/\/(?!www\.w3\.org\/2000\/svg)/, 'the host owns the download URL; the webview posts a bare action');
+});
 test('preview scenarios are fake, exercise partial and stale evidence, and escape injected text', () => {
   assert.equal(scenario('stale').connection.status, 'offline');
   assert.equal(scenario('restricted').trusted, false);
