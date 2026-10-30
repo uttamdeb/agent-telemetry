@@ -96,7 +96,7 @@ def install_windows():
         AT_INSTALL_ICON=str(target / "windows" / "assets" / "AgentTelemetry.ico"))
     subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
                    check=True, env=environment)
-    return {"platform": "win32", "entry": str(entry), "command": [str(pythonw), str(entry)], "version": "2.1.0"}
+    return {"platform": "win32", "entry": str(entry), "command": [str(pythonw), str(entry)], "version": "2.2.0"}
 
 
 def install_macos(bundle=None):
@@ -124,7 +124,7 @@ def install_macos(bundle=None):
                 old.rename(target)
             raise
     return {"platform": "darwin", "entry": str(target),
-            "command": ["/usr/bin/open", "-a", str(target), "--args"], "version": "2.1.0"}
+            "command": ["/usr/bin/open", "-a", str(target), "--args"], "version": "2.2.0"}
 
 
 def main():

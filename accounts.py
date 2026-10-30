@@ -183,7 +183,7 @@ def _codex_read():
             if not isinstance(result, dict): raise ValueError("Codex returned an unsupported account response.")
             return result
     try:
-        request(1, "initialize", {"clientInfo": {"name": "agent_telemetry", "title": "AgentTelemetry", "version": "2.1.0"}})
+        request(1, "initialize", {"clientInfo": {"name": "agent_telemetry", "title": "AgentTelemetry", "version": "2.2.0"}})
         process.stdin.write('{"method":"initialized","params":{}}\n'); process.stdin.flush()
         before = request(2, "account/read", {"refreshToken": False}).get("account")
         limits = request(3, "account/rateLimits/read", {}) if isinstance(before, dict) and before.get("type") == "chatgpt" else {}
