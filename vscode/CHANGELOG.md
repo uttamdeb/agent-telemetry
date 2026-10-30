@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.2.0 (unreleased)
+
+- **Active now** in the sidebar: the sessions in the current scope with activity recorded in the last 15 minutes (Claude Code, Codex, Copilot, Cursor and the others), newest first, with their tool, how long ago and tokens so far. Click one to open it in the Agent desk. The status-bar tooltip counts them too. It shows recent recorded activity, not proof that an agent is still running.
+- Bundles the AgentTelemetry 2.2.0 backend: Codex's compressed logs are read (Python 3.14+ or the `zstd` command needed in the editor's Python), GPT-6.1 Terra is priced, and more.
+
 ## 2.1.0
 
 - Include the latest AgentTelemetry backend, session activity and release notes in the Agent desk.
