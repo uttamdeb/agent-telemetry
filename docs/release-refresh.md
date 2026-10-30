@@ -28,6 +28,12 @@ built with **Build release downloads** using that tag, and published on GitHub a
 never as the latest release. The files in the repository keep the plain version (`2.2.0`); the tag
 carries the beta number, and the installer and DMG report it. Release notes inside the apps ignore
 pre-releases, so a stable install is never offered a beta, and a beta build shows no release-notes
-prompt. The Marketplace and Open VSX do not take pre-release versions of this extension: a beta VSIX
-is attached to the GitHub pre-release only. The stable `v<version>` tag is cut from `main` after
-`beta` is merged into it.
+prompt. The stable `v<version>` tag is cut from `main` after `beta` is merged into it.
+
+The editor extension's betas go to the Marketplace and Open VSX as **pre-releases** under their own
+plain numbers, because both accept only `major.minor.patch` and a pre-release cannot reuse a number a
+release will need: the 2.2.0 betas are extension **2.1.1**, 2.1.2, …, published with
+`vsce publish --pre-release` and `ovsx publish --pre-release`, and the stable release is extension
+**2.2.0**, which is higher, so beta testers move to it automatically. People opt in with "Switch to
+Pre-Release Version". The bundled backend reports the app version (`pyproject.toml`), not the
+extension's; `BUILD-INFO.json` records both.
