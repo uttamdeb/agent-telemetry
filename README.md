@@ -17,6 +17,12 @@ vendored copy of Chart.js.
 
 Covers **Claude Code · Claude Desktop · Codex · GitHub Copilot · Cursor · Antigravity · OpenCode · Hermes Agent · OpenClaw**.
 
+**Get AgentTelemetry:** [Desktop apps for macOS and Windows](#download-the-app) ·
+[VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=agenttelemetry-team.agenttelemetry) ·
+[Open VSX](https://open-vsx.org/extension/agenttelemetry-team/agenttelemetry) (Cursor and compatible editors) ·
+[Browser dashboard (Python or source)](#quick-start) ·
+[Product page](https://agenttelemetry-app.vercel.app/)
+
 ## Download the app
 
 Choose the installer for your platform from the release's **Assets** section.

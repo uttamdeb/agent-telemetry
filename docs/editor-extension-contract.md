@@ -138,8 +138,16 @@ Webview -> host allowlist (validate exact shapes; ignore unknown messages):
 {type:'selectSession', value:'known-key'}
 {type:'resetBaseline'}
 {type:'setupPython'}
+{type:'getDesktopApp'}
 {type:'openSettings'}
 ```
+
+`getDesktopApp` carries no other field. The host answers it (and the matching
+`AgentTelemetry: Get the desktop app` command) with `vscode.env.openExternal` on one
+fixed, hardcoded https URL, the latest GitHub release of the macOS/Windows apps. A
+webview message never supplies a URL, and the bundled interface still makes no
+network requests. The apps bundle their own Python, so this is also the setup
+action offered beside "Set up Python" when no Python 3.9+ is found.
 
 The host computes `since` from an in-memory baseline of the selected scope/date
 range. Changes to scope/date/range reset the baseline; reparses or decreasing

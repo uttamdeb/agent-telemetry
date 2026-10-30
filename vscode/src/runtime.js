@@ -94,7 +94,7 @@ async function findPython(configured, roots, cwd, options = {}) {
     if (options.stillAllowed && !options.stillAllowed()) throw new ServiceError('Starting Python requires a trusted active editor.', 'TRUST');
     if (supported) return real;
   }
-  throw new ServiceError('Python 3.9 or newer was not found. Install Python locally or choose an existing trusted executable in AgentTelemetry settings.', 'NO_PYTHON');
+  throw new ServiceError('Python 3.9 or newer was not found. Install Python locally, choose an existing trusted executable in AgentTelemetry settings, or install the AgentTelemetry desktop app, which includes its own Python.', 'NO_PYTHON');
 }
 async function acquireStartLock(base) {
   await fs.promises.mkdir(base, {recursive: true, mode: 0o700});

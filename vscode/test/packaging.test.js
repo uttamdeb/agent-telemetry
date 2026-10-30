@@ -37,6 +37,28 @@ function walk(root, prefix = '') {
   }).sort();
 }
 
+test('the store listing README points at every AgentTelemetry asset with absolute links', () => {
+  const readme = fs.readFileSync(path.join(__dirname, '../README.md'), 'utf8');
+  const desktop = readme.slice(readme.indexOf('## Get the desktop app'), readme.indexOf('## Follow the work'));
+  assert.ok(desktop, 'the desktop app section sits right after the screenshot, ahead of the feature list');
+  for (const required of [
+    'https://github.com/uttamdeb/agent-telemetry/releases/latest', 'https://agenttelemetry-app.vercel.app/',
+    'unsigned/unnotarized', 'Open Anyway', 'Run anyway', 'Apple Silicon or Intel', 'Windows 10/11 (x64']) {
+    assert.ok(desktop.includes(required), `desktop app section is missing ${required}`);
+  }
+  for (const required of [
+    'https://marketplace.visualstudio.com/items?itemName=agenttelemetry-team.agenttelemetry',
+    'https://open-vsx.org/extension/agenttelemetry-team/agenttelemetry',
+    'https://github.com/uttamdeb/agent-telemetry#quick-start']) {
+    assert.ok(readme.includes(required), `README is missing ${required}`);
+  }
+  assert.match(readme, /\*\*No Python\?\*\*/);
+  // vsce rewrites only the relative forms the VSIX verifier knows (screenshots, media, LICENSE); any other
+  // relative link would be broken on both store pages.
+  const relative = [...readme.matchAll(/\]\((?!https?:\/\/|#)([^)]+)\)/g)].map(match => match[1]);
+  assert.deepEqual(relative.filter(link => !/^(screenshots\/|LICENSE$)/.test(link)), []);
+});
+
 test('backend allowlist includes the dashboard and editor runtime dependencies', () => {
   for (const relative of dashboardRuntimeFiles) {
     assert.ok(files.includes(relative), `backend allowlist is missing ${relative}`);
