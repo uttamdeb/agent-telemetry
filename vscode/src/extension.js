@@ -10,6 +10,9 @@ const {getHtml} = require('./webview');
 const {forest} = require('./session-forest');
 let active;
 const COMMAND = 'agentTelemetry.';
+// The one page this extension opens to offer the desktop apps. Fixed in the host: a webview message never
+// supplies a URL. The apps bundle their own Python, so this also answers a computer without Python 3.9+.
+const DESKTOP_APP_URL = 'https://github.com/uttamdeb/agent-telemetry/releases/latest';
 const compact = value => Intl.NumberFormat(undefined, {notation: 'compact', maximumFractionDigits: 1}).format(value || 0);
 const money = value => Intl.NumberFormat(undefined, {style: 'currency', currency: 'USD', maximumFractionDigits: 2}).format(value || 0);
 const COVERAGE_STATES = new Set(['recorded', 'partial', 'unavailable', 'unknown']);
@@ -156,6 +159,7 @@ function activate(context) {
           case 'selectSession': monitor.select(message.value); break;
           case 'resetBaseline': monitor.resetBaseline(); break;
           case 'setupPython': void setupPython(); break;
+          case 'getDesktopApp': void getDesktopApp(); break;
           case 'openSettings': void settings(); break;
         }
       }));
@@ -165,9 +169,14 @@ function activate(context) {
   };
   const settings = () => vscode.commands.executeCommand('workbench.action.openSettings', '@ext:agenttelemetry-team.agenttelemetry');
   const setupPython = async () => {
-    const choice = await vscode.window.showInformationMessage('AgentTelemetry needs a local Python 3.9+ interpreter. Choose an existing executable in settings, or open Python’s download page. No packages are installed automatically.', 'Choose executable', 'Python downloads');
+    const choice = await vscode.window.showInformationMessage('AgentTelemetry needs a local Python 3.9+ interpreter. Choose an existing executable in settings, open Python’s download page, or get the AgentTelemetry desktop app, which includes its own Python. No packages are installed automatically.', 'Choose executable', 'Python downloads', 'Get the desktop app');
     if (choice === 'Choose executable') await vscode.commands.executeCommand('workbench.action.openSettings', 'agentTelemetry.pythonPath');
     if (choice === 'Python downloads') await vscode.env.openExternal(vscode.Uri.parse('https://www.python.org/downloads/'));
+    if (choice === 'Get the desktop app') await getDesktopApp();
+  };
+  const getDesktopApp = async () => {
+    try { await vscode.env.openExternal(vscode.Uri.parse(DESKTOP_APP_URL)); }
+    catch (error) { void vscode.window.showWarningMessage(`Could not open ${DESKTOP_APP_URL}: ${error.message}`); }
   };
   const browser = async () => {
     try { await monitor.client.health(); await vscode.env.openExternal(vscode.Uri.parse(monitor.client.endpoint)); }
@@ -188,12 +197,12 @@ function activate(context) {
       if (!monitor.disposed) await monitor.poll();
     } catch (error) {
       monitor.state.connection.status = 'error'; monitor.state.connection.message = error.message; monitor.emit();
-      const choice = await vscode.window.showWarningMessage(error.message, ...(error.code === 'NO_PYTHON' || error.code === 'PYTHON' ? ['Set up Python'] : ['Open settings']));
-      if (choice === 'Set up Python') await setupPython(); else if (choice === 'Open settings') await settings();
+      const choice = await vscode.window.showWarningMessage(error.message, ...(error.code === 'NO_PYTHON' || error.code === 'PYTHON' ? ['Set up Python', 'Get the desktop app'] : ['Open settings']));
+      if (choice === 'Set up Python') await setupPython(); else if (choice === 'Get the desktop app') await getDesktopApp(); else if (choice === 'Open settings') await settings();
     } finally { startPending = false; }
   };
   context.subscriptions.push(status, tree, vscode.window.createTreeView('agentTelemetry.activity', {treeDataProvider: tree, showCollapseAll: true}));
-  for (const [name, handler] of Object.entries({open, refresh: () => monitor.poll(true), start, openBrowser: browser, resetBaseline: () => monitor.resetBaseline(), setupPython, settings})) context.subscriptions.push(vscode.commands.registerCommand(COMMAND + name, handler));
+  for (const [name, handler] of Object.entries({open, refresh: () => monitor.poll(true), start, openBrowser: browser, resetBaseline: () => monitor.resetBaseline(), setupPython, getDesktopApp, settings})) context.subscriptions.push(vscode.commands.registerCommand(COMMAND + name, handler));
   context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(() => void monitor.setWorkspace(localRoots(), Boolean(vscode.env.remoteName), vscode.workspace.isTrusted)));
   context.subscriptions.push(vscode.workspace.onDidGrantWorkspaceTrust(() => void monitor.setWorkspace(localRoots(), Boolean(vscode.env.remoteName), true)));
   context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(event => { if (event.affectsConfiguration('agentTelemetry')) { const port = appSetting('port', 7878); if (port !== monitor.client.port) void monitor.setClient(new LocalClient(port)); else monitor.emit(); } }));
