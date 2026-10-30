@@ -97,6 +97,10 @@
         "title": "AgentTelemetry: Set up Python"
       },
       {
+        "command": "agentTelemetry.getDesktopApp",
+        "title": "AgentTelemetry: Get the desktop app"
+      },
+      {
         "command": "agentTelemetry.settings",
         "title": "AgentTelemetry: Open settings"
       }
