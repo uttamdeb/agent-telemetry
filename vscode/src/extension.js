@@ -53,11 +53,28 @@ function appSetting(name, fallback) {
   const value = vscode.workspace.getConfiguration('agentTelemetry').inspect(name);
   return value?.globalValue ?? value?.defaultValue ?? fallback;
 }
+// "Active now": sessions whose latest recorded activity is within the last 15 minutes, the same window the
+// desktop apps use. It reads the recorded end time of each session in the current scope, so it is evidence of
+// recent activity, not proof an agent is still running.
+const ACTIVE_WINDOW_MS = 15 * 60 * 1000;
+const ACTIVE_LIMIT = 5;
+const SOURCE_LABELS = {claude: 'Claude Code', 'claude-desktop': 'Claude Desktop', codex: 'Codex', copilot: 'Copilot', cursor: 'Cursor', opencode: 'OpenCode', antigravity: 'Antigravity', hermes: 'Hermes', openclaw: 'OpenClaw'};
+function activeSessions(sessions, now = Date.now()) {
+  return (sessions || [])
+    .map(session => ({session, at: Date.parse(session.end || '')}))
+    .filter(({session, at}) => !session.archived && Number.isFinite(at) && at <= now + 60000 && now - at <= ACTIVE_WINDOW_MS)
+    .sort((a, b) => b.at - a.at)
+    .slice(0, ACTIVE_LIMIT);
+}
+function ago(at, now = Date.now()) {
+  const minutes = Math.max(0, Math.floor((now - at) / 60000));
+  return minutes < 1 ? 'just now' : `${minutes} min ago`;
+}
 class ActivityTree {
   constructor(open) { this.changed = new vscode.EventEmitter(); this.onDidChangeTreeData = this.changed.event; this.open = open; this.state = null; }
   update(state) { this.state = state; this.changed.fire(); }
   getTreeItem(row) {
-    const item = new vscode.TreeItem(row.label, row.children?.length ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None);
+    const item = new vscode.TreeItem(row.label, row.children?.length ? (row.expanded ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed) : vscode.TreeItemCollapsibleState.None);
     item.id = row.id; item.description = row.description; item.tooltip = row.tooltip || row.label;
     item.iconPath = new vscode.ThemeIcon(row.icon || 'circle-outline');
     item.command = {command: COMMAND + (row.action || 'open'), title: row.action === 'start' ? 'Start monitoring' : 'Open Agent desk', arguments: row.session ? [row.session] : []};
@@ -75,6 +92,14 @@ class ActivityTree {
     rows.push({id: 'summary', label: `${compact(snapshot.summary.tokens)} tokens`, description: `${money(snapshot.summary.cost)} est.`, icon: 'pulse', tooltip: `${snapshot.scope.label} · ${snapshot.from} to ${snapshot.to}. Costs are estimates at API list prices.`});
     if (state.since) rows.push({id: 'since', label: `+${compact(state.since.tokens)} newly recorded`, description: `${money(state.since.cost)} est.`, icon: 'history', tooltip: 'Newly recorded usage since the in-memory baseline. This does not indicate currently running agents.'});
     rows.push({id: 'scope', label: snapshot.scope.label, description: state.range, icon: 'folder'});
+    const now = Date.now();
+    const active = activeSessions(snapshot.sessions, now);
+    if (active.length) rows.push({id: 'active', label: 'Active now', description: `${active.length} ${active.length === 1 ? 'session' : 'sessions'}`, icon: 'pulse', expanded: true,
+      tooltip: 'Sessions with activity recorded in the last 15 minutes in this scope. Recent activity, not proof an agent is still running.',
+      children: active.map(({session, at}) => ({id: `active:${session.key}`, session: session.key, label: session.title || 'Untitled session',
+        description: `${SOURCE_LABELS[session.source] || session.source || 'Agent'} · ${ago(at, now)}${session.usage_status === 'unavailable' ? '' : ' · ' + compact(session.tokens) + ' tokens'}`,
+        icon: session.subagent ? 'git-branch' : 'account',
+        tooltip: `${session.title || 'Untitled session'}\n${SOURCE_LABELS[session.source] || session.source || 'Agent'} · last activity ${ago(at, now)}\n${session.model || 'Model unavailable'}`}))});
     const graph = forest(snapshot.sessions);
     const make = session => {
       const children = (graph.children.get(session.key) || []).map(child => make(child));
@@ -109,6 +134,8 @@ function activate(context) {
       ? `${snapshot.scope.label} · ${snapshot.from} to ${snapshot.to}\n${[usageLine, costLine].filter(Boolean).join('\n')}${coverage.length ? '\n' + coverage.join('\n') : ''}\n${state.connection.status === 'connected' ? 'Local machine only' : 'Stale: ' + state.connection.message}`
       : `${snapshot.scope.label} · ${snapshot.from} to ${snapshot.to}\n${snapshot.summary.tokens.toLocaleString()} tokens · ${money(snapshot.summary.cost)} estimated API cost\n${state.connection.status === 'connected' ? 'Local machine only' : 'Stale: ' + state.connection.message}`
       : state.connection.message || 'Open local agent usage';
+    const activeCount = snapshot ? activeSessions(snapshot.sessions).length : 0;
+    if (activeCount) status.tooltip += `\nActive now: ${activeCount} ${activeCount === 1 ? 'session' : 'sessions'} in the last 15 minutes`;
     status.accessibilityInformation = {label: `AgentTelemetry. ${status.tooltip}`};
     appSetting('showStatusBar', true) ? status.show() : status.hide();
   }});
@@ -176,4 +203,4 @@ function activate(context) {
   return Object.freeze({getState: () => structuredClone(monitor.state), refresh: () => monitor.poll(true), setScope: scope => monitor.setScope(scope), setRange: range => monitor.setRange(range)});
 }
 function deactivate() { if (active) active.dispose(); active = undefined; }
-module.exports = {activate, deactivate, ActivityTree, appSetting, localRoots, statusSummaryText, statusCoverageLines};
+module.exports = {activeSessions, activate, deactivate, ActivityTree, appSetting, localRoots, statusSummaryText, statusCoverageLines};
