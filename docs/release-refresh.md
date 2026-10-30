@@ -20,3 +20,14 @@ The dashboard and native application remain **2.0.0**. PyPI's immutable archives
 the distribution revision **2.0.0.post1**; the Marketplace extension uses **2.0.1**.
 Neither revision changes the application version or requires rebuilding the durable
 ledger. Retain archived history and make a safety backup before local upgrades.
+
+## Beta releases
+
+A beta of the next version is tagged `v<version>-beta.<n>` (for example `v2.2.0-beta.1`) on `beta`,
+built with **Build release downloads** using that tag, and published on GitHub as a **pre-release**,
+never as the latest release. The files in the repository keep the plain version (`2.2.0`); the tag
+carries the beta number, and the installer and DMG report it. Release notes inside the apps ignore
+pre-releases, so a stable install is never offered a beta, and a beta build shows no release-notes
+prompt. The Marketplace and Open VSX do not take pre-release versions of this extension: a beta VSIX
+is attached to the GitHub pre-release only. The stable `v<version>` tag is cut from `main` after
+`beta` is merged into it.
