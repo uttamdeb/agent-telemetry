@@ -61,6 +61,28 @@ class WindowsPayloadTests(unittest.TestCase):
                         install._validate_windows_payload(payload)
                     marker.unlink()
 
+    def test_legacy_credentials_and_other_private_files_are_still_rejected(self):
+        # 2.1.0 users may still have these files beside a checkout or payload.
+        with tempfile.TemporaryDirectory(prefix="agenttelemetry-private-names-") as temporary:
+            payload = Path(temporary)
+            for name in (".usage_cache.json", ".peers.json", "mcp-access.json", "mcp-access.lock",
+                         ".mcp-access-stage.tmp", "server.log", "project-names.json"):
+                with self.subTest(name=name):
+                    path = payload / name
+                    path.write_text("private sentinel", encoding="utf-8")
+                    with self.assertRaisesRegex(ValueError, "personal telemetry"):
+                        install._validate_windows_payload(payload)
+                    path.unlink()
+
+    def test_payload_has_no_optional_extension_modules(self):
+        with tempfile.TemporaryDirectory(prefix="agenttelemetry-payload-names-") as temporary:
+            payload = Path(temporary) / "payload"
+            install.copy_windows_payload(payload)
+            names = {path.name for path in payload.rglob("*") if path.is_file()}
+            self.assertFalse({name for name in names if name.startswith(("mcp_", "telemetry_"))})
+            self.assertNotIn("mcp.js", names)
+            self.assertNotIn("insights.js", names)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -6,7 +6,6 @@ const context=vm.createContext({document,console,URLSearchParams,Set,Date,locati
   getComputedStyle:()=>({getPropertyValue:()=>"#000"})});
 vm.runInContext(fs.readFileSync(path.join(root,'static/core.js'),'utf8'),context);
 vm.runInContext(fs.readFileSync(path.join(root,'static/charts.js'),'utf8'),context);
-vm.runInContext(fs.readFileSync(path.join(root,'static/insights.js'),'utf8'),context);
 const views=fs.readFileSync(path.join(root,'static/views.js'),'utf8');
 vm.runInContext(views.slice(0,views.indexOf('document.getElementById("tabs").addEventListener')),context);
 const run=code=>vm.runInContext(code,context);
@@ -76,7 +75,7 @@ assert.doesNotMatch(run(`accountEntryHTML({source:'codex',profile:'<img src=x on
     document:{addEventListener(){},getElementById:node,
       querySelector:selector=>selector==='.tv[data-tv="monthlyRhythm"]'?node('monthToggle'):null},
     getComputedStyle:()=>({getPropertyValue:()=>"#000"})});
-  for(const file of ['static/core.js','static/charts.js','static/insights.js'])
+  for(const file of ['static/core.js','static/charts.js'])
     vm.runInContext(fs.readFileSync(path.join(root,file),'utf8'),overview);
   vm.runInContext(views.slice(0,views.indexOf('document.getElementById("tabs").addEventListener')),overview);
   const check=code=>vm.runInContext(code,overview);
@@ -159,7 +158,7 @@ assert.ok(costShell.indexOf('accountLimitsCard')>costShell.indexOf('tv-dailyCost
     S:{view:'cost',devs:new Set(),tools:new Set(['codex'])},VIEW_TITLES:{cost:'Cost',overview:'Overview'},
     document:{querySelectorAll:()=>[],getElementById:id=>id==='v-cost'?host:id==='filters'?filtersNode:node},
     syncRangeUI(){},syncMetricUI(){},buildFilterPanels(){},renderPills(){},renderSidebarDevices(){},filtersToURL(){},
-    runFinders:()=>[],slice:()=>({recs:[],sessions:[]}),viewCost(){costRenders++;}});
+    EXT:{views:[],panels:[]},slice:()=>({recs:[],sessions:[]}),viewCost(){costRenders++;}});
   emptyCost.hasPrev=()=>false;
   vm.runInContext(views.slice(views.indexOf('function activeQuotaSources('),views.indexOf('function quotaEntries(')),emptyCost);
   vm.runInContext(views.slice(views.indexOf('const VIEW_HTML={};'),views.indexOf('function syncSearchBoxes(')),emptyCost);
@@ -231,13 +230,10 @@ const near=(value,expected)=>assert.ok(Math.abs(value-expected)<1e-10,`${value} 
 near(run(`Object.values(tokenCostParts(haikuRow)).reduce((a,b)=>a+b,0)/1e6`),.00501231);
 near(run(`cacheSavings(haikuRow)`),.04500009);
 near(run(`cachedRequestRate(haikuRow)`),.03);
-near(run(`cacheWriteRate([haikuRow])`),6.2/9/1e6);
-near(run(`rateOf('Claude Haiku 5.5')[0]`),.5);
 run(`RAW.pricing['Legacy']=[1,5,0,0,.1];`);
 near(run(`tokenCostParts({model:'Legacy',in:1,out:2,cc:3,cr:4}).cw`),3);
 run(`RAW.prices['Legacy']=[1,5,0,0,.1]; RAW.pricing_history={'Legacy':[['2026-01-01',[2,10,0,0,.2]]]};`);
 near(run(`tokenCostParts({model:'Legacy',date:'2025-12-31',cc:3}).cw`),6);
-near(run(`cacheWriteRate([{model:'Legacy',date:'2025-12-31',cc:3}])`),1e-6);
 near(run(`cachedRequestRate({model:'Legacy',date:'2025-12-31',asst:1})`),.1);
 run(`RAW=haikuPreviousRaw;`);
 run(`RAW={device:{id:'Mac'},devices:[{id:'Mac',name:'Mac'},{id:'PC',name:'PC'}],
@@ -273,18 +269,7 @@ run(`S.models.clear(); RAW.sessions=[{source:'copilot',model:'M',exact_days:{'20
 assert.equal(run(`slice({from:'2026-10-02',to:'2026-10-02'}).sessions[0].in`),100);
 run(`S.exactOnly=false; RAW.sessions=[{source:'claude',model:'(user)',model_days:{'(user)':{'2026-10-02':[0,0,0,0,0,0,1]}},days:{'2026-10-02':[0,0,0,0,0,0,1]}}];`);
 assert.equal(run(`slice({from:'2026-10-02',to:'2026-10-02'}).sessions[0].user`),1);
-run(`S.exactOnly=false; RAW.mcp_servers=[{name:'fixture',tool:'codex'}];
- RAW.tools=[{date:'2026-09-01',source:'codex',device:'Mac',name:'mcp__fixture__call',count:1},
- {date:'2026-10-02',source:'claude',device:'Mac',name:'mcp__fixture__call',count:1}];`);
-assert.equal(run(`findIdleMCP({r:{from:'2026-10-02',to:'2026-10-02'}},'codex').rows.length`),1);
-run(`RAW.tools.push({date:'2026-10-02',source:'codex',device:'Mac',name:'mcp__fixture__call',count:1});`);
-assert.equal(run(`findIdleMCP({r:{from:'2026-10-02',to:'2026-10-02'}},'codex')`),null);
-run(`S.devs=new Set(['PC']);`);
-assert.equal(run(`onThisDevice(()=>({id:'fixture'}))({recs:[],sessions:[]})`),null);
-run(`S.devs.clear();`);
-run(`RAW.tools=[];RAW.mcp_inventory={servers:{},calls:[{date:'2026-10-02',source:'codex',server:'fixture',calls:1,tools:['mcp__fixture__call']}]};`);
-assert.equal(run(`findIdleMCP({r:{from:'2026-10-02',to:'2026-10-02'}},'codex')`),null);
-assert.equal(run(`findCacheWaste({sessions:[{source:'claude',model:'Haiku',cc:1000000,cr:0,cost:1.25}]}).impact`),0);
+run(`S.exactOnly=false; RAW.tools=[];`);
 run(`var deviceData={recs:[{device:'Mac',in:100,out:10,asst:2,cost:1},{device:'PC',in:200,out:20,asst:1,cost:4}]}; S.metric='tokens';`);
 assert.equal(run(`deviceDistribution(deviceData).reduce((n,x)=>n+x.value,0)`),330);
 assert.equal(run(`deviceDistribution(deviceData)[0].id`),'PC');
@@ -401,7 +386,7 @@ assert.equal(run(`slice({from:'2026-10-10',to:'2026-10-10'}).sessions.length`),0
 run(`S.devs.clear();S.projs=new Set(['Missing']);`);
 assert.equal(run(`slice({from:'2026-10-10',to:'2026-10-10'}).sessions.length`),0);
 run(`S.projs.clear();S.tools=new Set(['claude']);`);
-console.log('Frontend regression checks passed: pricing, precision, scope, model contributions, Optimize, device distribution, shared refresh and compaction metadata.');
+console.log('Frontend regression checks passed: pricing, precision, scope, model contributions, device distribution, shared refresh and compaction metadata.');
 (async()=>{
   const accountNode={innerHTML:''}, accountCard={hidden:true}; let accountCalls=[], resolveAccountOld;
   const fixtureDay=run('dkey(new Date())');
@@ -651,7 +636,7 @@ console.log('Frontend regression checks passed: pricing, precision, scope, model
   // Model labels are display metadata; synthetic vectors still drive accounting.
   const scoped=vm.createContext({console,Date,Set,URLSearchParams,document,
     location:{search:'',hash:''},getComputedStyle:()=>({getPropertyValue:()=> '#000'})});
-  for(const file of ['static/core.js','static/charts.js','static/insights.js'])
+  for(const file of ['static/core.js','static/charts.js'])
     vm.runInContext(fs.readFileSync(path.join(root,file),'utf8'),scoped);
   vm.runInContext(views.slice(0,views.indexOf('document.getElementById("tabs").addEventListener')),scoped);
   const check=code=>vm.runInContext(code,scoped),json=code=>JSON.parse(check(`JSON.stringify(${code})`));

@@ -23,13 +23,6 @@ ALLOWED_MODULES = {
     "parser",
     "release_notes",
     "session_names",
-    "mcp_access",
-    "mcp_backend",
-    "mcp_protocol",
-    "mcp_server",
-    "mcp_tools",
-    "telemetry_query",
-    "telemetry_insights",
 }
 
 

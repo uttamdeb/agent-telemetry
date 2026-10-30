@@ -19,7 +19,7 @@ const context=vm.createContext({console,URLSearchParams,Date,Set,location,
   document:{addEventListener(){},getElementById:node,querySelectorAll:()=>[],
     querySelector(selector){const m=selector.match(/^\[data-session-type="(all|subagents|other)"\]$/);return m?buttons.get(m[1]):null}},
   getComputedStyle:()=>({getPropertyValue:()=> '#000'})});
-for(const file of ['static/core.js','static/charts.js','static/insights.js','static/timeline.js'])
+for(const file of ['static/core.js','static/charts.js','static/timeline.js'])
   vm.runInContext(fs.readFileSync(path.join(root,file),'utf8'),context);
 const views=fs.readFileSync(path.join(root,'static/views.js'),'utf8');
 vm.runInContext(views.slice(0,views.indexOf('document.getElementById("tabs").addEventListener')),context);
@@ -140,8 +140,6 @@ for(const value of ['undefined','0','-1','1.5','"<img src=x>"'])
   assert.equal(run(`sessionDelegationBadge({source:'claude',subagent_children:${value}})`),'','Missing/invalid child evidence must not assert zero or a count');
 run(`var parentScope=clipSession({source:'claude',subagent_children:25,days:{'2026-10-18':[1,100,10,0,0,1,1,0,0,0,1]}},{from:'2026-10-18',to:'2026-10-18'})`);
 assert.equal(run('parentScope.subagent_children'),25,'The count keeps its stated whole-session scope');
-assert.equal(run(`findSubagents({sessions:[{source:'claude',tools:200,cost:20,subagent_children:2},{source:'claude',tools:200,cost:20,subagent_children:1}]})`),null,'Observed child transcripts rule out a no-delegation recommendation');
-assert.match(run(`findSubagents({sessions:[{source:'claude',tools:200,cost:20,title:'Unknown one'},{source:'claude',tools:200,cost:20,title:'Unknown two'},{source:'claude',tools:200,cost:20,subagent_children:2}]}).body`),/Delegation was recorded in 1 other session/);
 
 run(`S.search='';S.sessionType='all';viewSessions(slice());var opened='';openDrawer=html=>{opened=html};loadSessionTimeline=()=>{};openSession(2)`);
 assert.match(run('opened'),/Subagent session/);
@@ -189,7 +187,7 @@ assert.match(run('opened'),/whole-session figures/);
 assert.match(run('opened'),/cannot be scoped to your date or model filters/);
 assert.doesNotMatch(run('opened'),/Figures follow the selected date and model filters/);
 // Copilot inline children are a Sessions-only projection. Their receipt usage
-// must never enter Overview/Cost/Optimize slices a second time.
+// must never enter Overview/Cost slices a second time.
 run(`resetFilters();S.preset='custom';S.from='2026-10-18';S.to='2026-10-18';
   S.tools=new Set(['copilot']);S.search='';S.sessionType='all';
   var copilotParent={id:'cp-parent',rename_id:'copilot-full-parent',source:'copilot',title:'SDK parent',

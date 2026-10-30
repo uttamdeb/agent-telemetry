@@ -12,7 +12,7 @@ available. Use `native.set_project_preferences(mapping)` to validate and save
 local preferences. This function writes preferences only; it never moves folders.
 
 Display aliases group current and historical labels across dashboard views,
-MCP analytics, Storage and editor projections. Existing project filters in browser
+Storage and editor projections. Existing project filters in browser
 bookmarks are canonicalized to the current display label. Directory mappings apply
 only to this machine's recorded working directories, so editor workspace matching
 can follow an explicitly moved folder without relying on project basenames. Peer
@@ -25,12 +25,10 @@ version bump or rebuild is required. Original tool transcripts retain their reco
 paths; these settings do not rewrite history or relocate an original tool's logs.
 
 For an actual folder move, first back up the ledger and mutable configuration,
-stop the dashboard gracefully, rename the directory, update active launch/MCP and
+stop the dashboard gracefully, rename the directory, update active launch and
 workspace configuration, repair Git worktree metadata, and restart against the same
 ledger. Compatibility symlinks can keep currently open editors and processes working
-until they are reopened at the new path. Moving a data directory changes MCP's
-directory binding: preserve the user's existing scopes by confirming access again
-for the relocated ledger, then reconnect and verify the client.
+until they are reopened at the new path.
 
 Claude Code also keys its conversation history and project memory by the encoded
 working-folder path inside `~/.claude/projects/`. Renaming the repository does not

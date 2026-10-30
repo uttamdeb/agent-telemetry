@@ -76,10 +76,6 @@ AT_BACKEND_DIR="$AT_APP_PATH/Contents/Resources/AgentTelemetry"
 mkdir -p "$AT_BACKEND_DIR"
 cp "$AT_REPO_ROOT/dashboard.py" "$AT_REPO_ROOT/parser.py" "$AT_REPO_ROOT/native.py" \
    "$AT_REPO_ROOT/local_servers.py" "$AT_REPO_ROOT/local_servers_windows.py" \
-   "$AT_REPO_ROOT/mcp_access.py" "$AT_REPO_ROOT/mcp_backend.py" \
-   "$AT_REPO_ROOT/mcp_protocol.py" "$AT_REPO_ROOT/mcp_server.py" \
-   "$AT_REPO_ROOT/mcp_tools.py" "$AT_REPO_ROOT/telemetry_insights.py" \
-   "$AT_REPO_ROOT/telemetry_query.py" \
    "$AT_REPO_ROOT/index.html" "$AT_REPO_ROOT/chart.umd.min.js" \
    "$AT_REPO_ROOT/manifest.json" "$AT_REPO_ROOT/sw.js" \
    "$AT_REPO_ROOT/LICENSE" "$AT_BACKEND_DIR/"

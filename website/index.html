@@ -13,9 +13,9 @@
     gtag('js', new Date());
     gtag('config', 'G-X485NR8WPC');
   </script>
-  <meta name="description" content="A private, local dashboard for tokens, time and estimated cost across AI coding tools, with a desktop editor extension and optional MCP analytics. Free and open source.">
+  <meta name="description" content="A private, local dashboard for tokens, time and estimated cost across AI coding tools, with a desktop editor extension. Free and open source.">
   <meta property="og:title" content="AgentTelemetry — Every agent. One clear picture.">
-  <meta property="og:description" content="See recorded AI coding usage in one local dashboard, a desktop editor, and optional MCP analytics. Free and open source.">
+  <meta property="og:description" content="See recorded AI coding usage in one local dashboard and a desktop editor. Free and open source.">
   <meta property="og:type" content="website">
   <meta name="theme-color" content="#070d0d">
   <title>AgentTelemetry — Every agent. One clear picture.</title>
@@ -75,7 +75,7 @@
           </details>
           <a class="text-link" href="#source-install" data-analytics-event="at_install_cta_click" data-analytics-option="python_package" data-analytics-placement="hero" data-analytics-destination="source_section"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="m7 9 3 3-3 3m6 0h4"/></svg>Install with pip <span aria-hidden="true">↘</span></a>
         </div>
-        <p class="hero-meta">Free &amp; open source <span aria-hidden="true">·</span> macOS &amp; Windows apps · Linux via Python <span aria-hidden="true">·</span> <a href="#mcp-install" data-analytics-event="at_install_option_click" data-analytics-option="mcp_setup" data-analytics-placement="hero" data-analytics-destination="mcp_section">MCP setup</a></p>
+        <p class="hero-meta">Free &amp; open source <span aria-hidden="true">·</span> macOS &amp; Windows apps · Linux via Python</p>
       </div>
       <div class="hero-art" aria-label="Illustrative dashboard preview">
         <div class="art-orbit orbit-one" aria-hidden="true"></div>
@@ -138,7 +138,6 @@
               <button class="demo-side-item" type="button" id="view-tools" aria-controls="panel-tools" aria-pressed="false" data-demo-view="tools"><span aria-hidden="true">✳</span>Tools</button>
               <button class="demo-side-item" type="button" id="view-projects" aria-controls="panel-projects" aria-pressed="false" data-demo-view="projects"><span aria-hidden="true">⌑</span>Projects</button>
               <button class="demo-side-item" type="button" id="view-sessions" aria-controls="panel-sessions" aria-pressed="false" data-demo-view="sessions"><span aria-hidden="true">▤</span>Sessions</button>
-              <button class="demo-side-item" type="button" id="view-optimize" aria-controls="panel-optimize" aria-pressed="false" data-demo-view="optimize"><span aria-hidden="true">↗</span>Optimize</button>
               <button class="demo-side-item" type="button" id="view-storage" aria-controls="panel-storage" aria-pressed="false" data-demo-view="storage"><span aria-hidden="true">▦</span>Storage</button>
             </nav>
             <div class="demo-sidebar-bottom"><span class="tiny-shield" aria-hidden="true">◇</span>Local data</div>
@@ -160,7 +159,6 @@
                   <option value="tools">Tools</option>
                   <option value="projects">Projects</option>
                   <option value="sessions">Sessions</option>
-                  <option value="optimize">Optimize</option>
                   <option value="storage">Storage</option>
                   <option value="devices">Devices</option>
                 </select>
@@ -235,15 +233,6 @@
               <p class="panel-caption">Project names and usage above are invented examples from a local dashboard.</p>
             </section>
 
-            <section class="demo-panel" role="tabpanel" id="panel-optimize" aria-labelledby="view-optimize" tabindex="0" data-demo-panel="optimize">
-              <div class="panel-intro"><div><span>OPTIMIZE <i>·</i> SAMPLE DATA</span><h3>Patterns worth a closer look.</h3></div><span class="session-count">Observations, not instructions</span></div>
-              <div class="optimize-view-list">
-                <article class="optimize-view-row"><span class="optimize-icon">↗</span><div><h4>Cache reads are doing useful work</h4><p>In this sample, 82% of repeated context came from cache reads.</p></div><span class="optimize-value">82%</span></article>
-                <article class="optimize-view-row"><span class="optimize-icon optimize-icon-blue">◷</span><div><h4>Most activity arrived later in the day</h4><p>Usage rose after the afternoon coding sessions began.</p></div><span class="optimize-value">4–8 PM</span></article>
-                <article class="optimize-view-row"><span class="optimize-icon optimize-icon-lilac">◇</span><div><h4>Compare models on routine edits</h4><p>Review task needs alongside the model and cost breakdowns.</p></div><span class="optimize-value">Explore</span></article>
-              </div>
-              <p class="panel-caption">These are descriptive sample observations; the page does not change settings or estimate savings.</p>
-            </section>
 
             <section class="demo-panel" role="tabpanel" id="panel-storage" aria-labelledby="view-storage" tabindex="0" data-demo-panel="storage">
               <div class="panel-intro"><div><span>STORAGE <i>·</i> SAMPLE DATA</span><h3>Your records stay close to home.</h3></div><span class="privacy-chip"><i></i> Stored locally</span></div>
@@ -285,7 +274,7 @@
 
     <section class="how-section section-shell" id="how-it-works" aria-labelledby="how-title">
       <div class="section-index"><span>02</span><span class="index-rule"></span><span>Simple by design</span></div>
-      <div class="how-heading" data-reveal><h2 id="how-title">Already on your machine.<br><em>Finally in view.</em></h2><p>No account or API key is needed. Use the dashboard, check recorded sessions in your editor, or connect an AI client through optional MCP access.</p></div>
+      <div class="how-heading" data-reveal><h2 id="how-title">Already on your machine.<br><em>Finally in view.</em></h2><p>No account or API key is needed. Use the dashboard, or check recorded sessions in your editor.</p></div>
       <div class="steps" data-reveal>
         <article class="step"><span class="step-num">01</span><div class="step-icon step-install" aria-hidden="true"><i></i><i></i><i></i></div><h3>Install or run</h3><p>Choose the native app, the editor Agent desk, or start the local dashboard with one command.</p><span class="step-detail">YOUR COMPUTER</span></article>
         <div class="step-connector" aria-hidden="true"><span></span></div>
@@ -315,7 +304,7 @@
     <section class="privacy-section section-shell" id="privacy" aria-labelledby="privacy-title">
       <div class="section-index"><span>03</span><span class="index-rule"></span><span>Private by default</span></div>
       <div class="privacy-layout">
-        <div class="privacy-copy" data-reveal><p class="eyebrow">A clear boundary, by design</p><h2 id="privacy-title">Your work stays<br><em>your business.</em></h2><p class="privacy-lede">AgentTelemetry reads and summarizes logs on your computer. Optional LAN sharing lets your devices share usage with each other. Provider account lookups contact that provider only when you explicitly request one. Local MCP access is also opt-in.</p><div class="privacy-points"><div><span class="point-index">01</span><p><b>Local by default</b><br>Your usage ledger stays on your device. No AgentTelemetry account or API key required.</p></div><div><span class="point-index">02</span><p><b>Sharing is a choice</b><br>Optional device sharing is enabled by you and works across your local network.</p></div><div><span class="point-index">03</span><p><b>Account checks need consent</b><br>One-time provider lookups run only after you explicitly ask for them.</p></div><div><span class="point-index">04</span><p><b>Choose what MCP shares</b><br>Requested analytics go to your configured client; a cloud-backed client may forward results to its provider.</p></div></div></div>
+        <div class="privacy-copy" data-reveal><p class="eyebrow">A clear boundary, by design</p><h2 id="privacy-title">Your work stays<br><em>your business.</em></h2><p class="privacy-lede">AgentTelemetry reads and summarizes logs on your computer. Optional LAN sharing lets your devices share usage with each other. Provider account lookups contact that provider only when you explicitly request one.</p><div class="privacy-points"><div><span class="point-index">01</span><p><b>Local by default</b><br>Your usage ledger stays on your device. No AgentTelemetry account or API key required.</p></div><div><span class="point-index">02</span><p><b>Sharing is a choice</b><br>Optional device sharing is enabled by you and works across your local network.</p></div><div><span class="point-index">03</span><p><b>Account checks need consent</b><br>One-time provider lookups run only after you explicitly ask for them.</p></div><div><span class="point-index">04</span><p><b>No background upload</b><br>The app sends no telemetry on its own. Update checks run only when you click them.</p></div></div></div>
         <div class="privacy-art" aria-hidden="true"><div class="privacy-horizon"></div><div class="privacy-ring ring-a"></div><div class="privacy-ring ring-b"></div><div class="privacy-ring ring-c"></div><div class="privacy-core"><img src="assets/app-icon.png" alt="" aria-hidden="true"></div><div class="privacy-orbit-label label-top">YOUR DEVICE</div><div class="privacy-orbit-label label-bottom">YOUR CHOICE</div><div class="privacy-footnote">PRIVATE BY DEFAULT <span>·</span> SHARING OPTIONAL</div></div>
       </div>
       <div class="honesty-note"><span class="honesty-symbol" aria-hidden="true">◌</span><p><b>Honest numbers.</b> Costs are estimates at published API list prices; subscription plans can work differently. Recorded usage, estimates, and unavailable data are distinguished.</p><a href="https://github.com/uttamdeb/agent-telemetry#data-sources" target="_blank" rel="noopener noreferrer">How the data works <span aria-hidden="true">↗</span></a></div>
@@ -338,19 +327,13 @@
           <p class="platform-note">Unsigned installer. Review <a href="https://github.com/uttamdeb/agent-telemetry/releases/tag/v2.1.0">release details</a> and <a href="https://github.com/uttamdeb/agent-telemetry/releases/download/v2.1.0/SHA256SUMS.txt">SHA-256 checksums</a>.</p>
         </div>
       </div>
-      <div class="download-options integration-options" role="group" aria-label="Editor and MCP options">
+      <div class="download-options integration-options" role="group" aria-label="Editor options">
         <article class="download-platform integration-platform" id="editor-install" aria-labelledby="editor-install-title">
           <div class="platform-heading"><span class="platform-mark editor-mark" aria-hidden="true">&lt;/&gt;</span><div><h3 id="editor-install-title">Agent desk for VS Code</h3><p>Editor extension · 2.1.0</p></div></div>
           <p class="integration-copy">See recorded usage, estimated cost, and linked sessions beside your code. Supports desktop VS Code 1.85+; compatible desktop editors can install the VSIX.</p>
           <a class="download-link" href="https://marketplace.visualstudio.com/items?itemName=agenttelemetry-team.agenttelemetry" target="_blank" rel="noopener noreferrer" data-analytics-event="at_install_option_click" data-analytics-option="vscode_marketplace" data-analytics-placement="download_section" data-analytics-destination="visual_studio_marketplace" data-install-version="2.1.0"><span><b>Install from Visual Studio Marketplace</b><small>VS Code · AgentTelemetry Team · 2.1.0</small></span><span class="download-arrow" aria-hidden="true">↗</span></a>
           <a class="download-link download-link-secondary" href="https://open-vsx.org/extension/agenttelemetry-team/agenttelemetry" target="_blank" rel="noopener noreferrer" data-analytics-event="at_install_option_click" data-analytics-option="open_vsx" data-analytics-placement="download_section" data-analytics-destination="open_vsx" data-install-version="2.1.0"><span><b>Install from Open VSX</b><small>Cursor, Antigravity &amp; compatible editors · 2.1.0</small></span><span class="download-arrow" aria-hidden="true">↗</span></a>
           <p class="platform-note">If your editor does not offer either listing, <a href="https://github.com/uttamdeb/agent-telemetry/releases/download/v2.1.0/agenttelemetry-2.1.0.vsix" data-analytics-event="at_install_option_click" data-analytics-option="vsix" data-analytics-placement="download_section" data-analytics-destination="github_release" data-release-asset="agenttelemetry-2.1.0.vsix" data-install-version="2.1.0">download the universal VSIX</a> and <a href="https://github.com/uttamdeb/agent-telemetry/blob/main/vscode/README.md#install-a-vsix-in-another-desktop-editor" target="_blank" rel="noopener noreferrer">follow the install guide</a>. Requires Python 3.9+ or an installed AgentTelemetry runtime. Choose Start local monitoring in the extension to begin.</p>
-        </article>
-        <article class="download-platform integration-platform" id="mcp-install" aria-labelledby="mcp-install-title">
-          <div class="platform-heading"><span class="platform-mark mcp-mark" aria-hidden="true">M</span><div><h3 id="mcp-install-title">Connect your agent with MCP</h3><p>MCP server · 2.1.0 · off by default</p></div></div>
-          <p class="integration-copy">Ask your agent for daily tokens and estimated cost by project or tool, comparisons, and insights. Start the dashboard, then enable Settings → Local MCP access.</p>
-          <a class="download-link" href="https://github.com/uttamdeb/agent-telemetry/blob/main/docs/mcp.md" target="_blank" rel="noopener noreferrer" data-analytics-event="at_install_option_click" data-analytics-option="mcp_setup" data-analytics-placement="download_section" data-analytics-destination="github_docs"><span><b>Set up MCP</b><small>Enable access in the dashboard settings</small></span><span class="download-arrow" aria-hidden="true">↗</span></a>
-          <p class="platform-note">You choose whether to share project/device names or usage from other devices. A cloud-backed client may send these results to its provider. Prompts and credentials are excluded.</p>
         </article>
       </div>
       <div class="source-download" id="source-install" data-reveal>
@@ -384,7 +367,7 @@
       <div class="faq-heading" data-reveal><div class="section-index"><span>05</span><span class="index-rule"></span><span>Good to know</span></div><h2 id="faq-title">A few clear<br><em>answers.</em></h2><p>Know what to expect before you bring your usage into focus.</p></div>
       <div class="faq-list" data-reveal>
         <details><summary><span>01</span>Is AgentTelemetry free?</summary><div class="faq-answer"><p>Yes. AgentTelemetry is free and open source under the MIT license. You can inspect the code, run it from source, or use the native installer on macOS and Windows.</p></div></details>
-        <details><summary><span>02</span>Does it upload my usage?</summary><div class="faq-answer"><p>AgentTelemetry reads and stores app usage locally by default. Optional LAN sharing and provider account lookups require your action. When you enable Local MCP access, a compatible client receives analytics you request; a cloud-backed client may forward those results to its provider. Project/device display names and connected-device usage have separate opt-ins. The marketing website uses Google Analytics to count visits and install interactions, including opening the install chooser, which install option and page placement were clicked, and command-copy button use. It sends standard page-view details, including the page URL, to Google, but does not send command text, AgentTelemetry logs, or dashboard data. No AgentTelemetry account is needed.</p></div></details>
+        <details><summary><span>02</span>Does it upload my usage?</summary><div class="faq-answer"><p>AgentTelemetry reads and stores app usage locally by default. Optional LAN sharing and provider account lookups require your action. Connected-device usage is shared only after you pair devices. The marketing website uses Google Analytics to count visits and install interactions, including opening the install chooser, which install option and page placement were clicked, and command-copy button use. It sends standard page-view details, including the page URL, to Google, but does not send command text, AgentTelemetry logs, or dashboard data. No AgentTelemetry account is needed.</p></div></details>
         <details><summary><span>03</span>Is estimated cost my actual bill?</summary><div class="faq-answer"><p>No. Cost uses published API list prices as an estimate. Subscription plans, negotiated rates, and provider billing details may differ. Some per-request pricing rules cannot be represented exactly in daily summaries.</p></div></details>
         <details><summary><span>04</span>Which tools and usage are covered?</summary><div class="faq-answer"><p>It reads logs from Claude Code and Claude Desktop agent mode, Codex, GitHub Copilot, Cursor, OpenCode, Hermes Agent, and OpenClaw. Coverage depends on what each tool records: some sources provide partial usage or estimates, and recorded, estimated, and unavailable data are distinguished.</p></div></details>
         <details><summary><span>05</span>How do I get started?</summary><div class="faq-answer">
@@ -413,7 +396,6 @@
           <p class="command-note">After launch, open <code>127.0.0.1:7878</code>.</p>
         </div></details>
         <details><summary><span>06</span>Can I use AgentTelemetry in my code editor?</summary><div class="faq-answer"><p>The Agent desk extension supports desktop VS Code 1.85+ and compatible desktop editors such as Cursor and Antigravity. It shows recorded usage and linked sessions. If no dashboard is running, choose Start local monitoring; installation and opening the extension do not start it. <a href="#editor-install">See editor install options</a>.</p></div></details>
-        <details><summary><span>07</span>How does Local MCP access work?</summary><div class="faq-answer"><p>It is off until enabled in dashboard Settings, and the dashboard must already be running. Eight read-only tools return analytics to your configured client; a cloud-backed client may forward results to its provider. Project/device display names and connected-device usage require separate opt-ins. Results exclude prompts, session titles, native IDs, paths, credentials, and account identities. <a href="https://github.com/uttamdeb/agent-telemetry/blob/main/docs/mcp.md" target="_blank" rel="noopener noreferrer">Read the MCP setup and privacy guide</a>.</p></div></details>
       </div>
     </section>
 

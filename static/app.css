@@ -618,29 +618,6 @@ code.cmd{display:block;background:var(--surface-2);border:1px solid var(--border
 .dev-form input:focus{outline:none;border-color:var(--text-3)}
 @media (max-width:520px){ .dev-form{grid-template-columns:1fr} }
 
-/* ---------- optimize ---------- */
-.finding{background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--border-2);
-  border-radius:var(--r);padding:16px 20px;margin-bottom:12px}
-/* The stripe carries TOOL identity (inline --t-<source>) only when exactly one tool
-   is in scope; a finding spanning several stays neutral. Never severity. */
-.finding.sev-neutral{border-left-color:var(--border-2)}
-.finding-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}
-.finding-title{font-size:14.5px;font-weight:640;line-height:1.35}
-.finding-impact{text-align:right;font-size:18px;font-weight:680;white-space:nowrap}
-.finding-impact span{display:block;font-size:10.5px;font-weight:560;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;margin-top:1px}
-.finding-body{font-size:13px;line-height:1.65;color:var(--text-2);margin-top:8px}
-.finding-body b{color:var(--text);font-weight:640}
-.finding-body code{font-family:var(--mono);font-size:12px}
-.finding-todo{font-size:13px;line-height:1.6;color:var(--text-2);margin-top:10px;padding-top:10px;border-top:1px solid var(--border)}
-.finding-todo b{color:var(--text);font-weight:640;margin-right:6px}
-.finding-tbl{width:100%;margin-top:12px;border-collapse:collapse;font-size:12px}
-.finding-tbl td{padding:5px 8px 5px 0;border-top:1px solid var(--border);border-bottom:0;color:var(--text-2)}
-.finding-tbl td.name{color:var(--text);max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.finding-tbl tr:hover{background:none}
-.finding-scope{margin-top:6px;display:flex;gap:5px;flex-wrap:wrap}
-.scope-chip{display:inline-block;font-size:10.5px;font-weight:620;color:var(--text-3);background:var(--surface-2);
-  border:1px solid var(--border);border-radius:5px;padding:1px 6px}
-
 /* ---------- responsive ---------- */
 @media(max-width:1280px){
   .col-8,.col-7{grid-column:span 12}.col-6,.col-5,.col-4{grid-column:span 6}

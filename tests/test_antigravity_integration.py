@@ -14,12 +14,9 @@ from urllib.parse import urlencode
 import antigravity as AG
 import dashboard as D
 import editor_snapshot as ES
-import mcp_backend as MCP
 import native_activity as NA
 import session_names as SN
 import session_timeline as ST
-import telemetry_insights as TI
-import telemetry_query as TQ
 
 
 TODAY = date.today().isoformat()
@@ -108,7 +105,7 @@ class AntigravityIntegrationTests(unittest.TestCase):
         stack.enter_context(patch.object(D, "DEVICE", {"name": "Fixture device", "os": "test"}))
         return D._build_payload_locked()
 
-    def test_payload_native_and_mcp_keep_source_and_usage_quality(self):
+    def test_payload_and_native_keep_source_and_usage_quality(self):
         aggregate = _antigravity_aggregate()
         payload = self.dashboard_payload([aggregate])
         record = next(row for row in payload["records"] if row["source"] == "antigravity")
@@ -118,18 +115,6 @@ class AntigravityIntegrationTests(unittest.TestCase):
         self.assertEqual(session["usage_availability"]["reasoning"], "unavailable")
         self.assertNotIn("cwd", session)
         self.assertNotIn("/fixture/private/workspace", json.dumps(payload))
-        self.assertIn("antigravity", TI._EXACT_SOURCES)
-        self.assertEqual(TQ._KNOWN_TOOLS["antigravity"], "Antigravity")
-
-        usage = TQ.query_usage(payload, {"period": "all"}, today=TODAY)
-        source = next(row for row in usage["source_precision"] if row["tool"] == "Antigravity")
-        self.assertEqual(source["precision"], "exact")
-        self.assertEqual(source["usage_status"], "partial")
-        self.assertIn("not inferred", source["note"])
-        listed = TQ.list_sessions(payload, {"period": "all"}, today=TODAY)
-        antigravity = next(row for row in listed["sessions"] if row["tool"] == "antigravity")
-        self.assertEqual(antigravity["usage_status"], "partial")
-        self.assertEqual(antigravity["usage_availability"]["cache_read"], "partial")
 
         native = NA.project([(aggregate["path"], aggregate)], observed_at=_stamp(12),
                             identity=SN.identity, local_device=DEVICE)
@@ -338,22 +323,6 @@ class AntigravityIntegrationTests(unittest.TestCase):
         self.assertNotIn("usage_status", exported["sessions"][0])
         self.assertNotIn("usage_availability", exported["sessions"][0])
 
-        public_item = TQ._session_public_item(
-            {"source": "antigravity", "usage_status": [],
-             "usage_availability": {"cache_read": []}},
-            {field: 0 for field in TQ._VECTOR_FIELDS}, {"device": {"id": DEVICE}}, {},
-            False, False, {},
-        )
-        self.assertNotIn("usage_status", public_item)
-        self.assertNotIn("usage_availability", public_item)
-
-        safe_events = MCP._safe_timeline({"available": True, "events": [
-            {"kind": "model", "timestamp": _stamp(), "effort": [], "status": {}},
-            {"kind": "compaction", "timestamp": _stamp(), "trigger": {}},
-        ]})
-        self.assertNotIn("effort", safe_events["events"][0])
-        self.assertNotIn("trigger", safe_events["events"][1])
-
         native = NA.project([(malformed["path"], malformed)], observed_at=_stamp(12),
                             identity=SN.identity, local_device=DEVICE)
         self.assertNotIn("usage_status", native["sessions"][0])
@@ -365,31 +334,6 @@ class AntigravityIntegrationTests(unittest.TestCase):
             now=datetime.combine(date.fromisoformat(TODAY), time(12)).timestamp(),
         )
         self.assertNotIn("usage_status", editor["sessions"][0])
-
-    def test_mcp_timeline_status_checkpoint_allowlist_and_source_alias(self):
-        raw = {
-            "available": True, "detail": "source log", "events": [
-                {"kind": "tool", "timestamp": _stamp(), "label": "Read", "status": "error",
-                 "prompt": "PRIVATE", "arguments": "PRIVATE"},
-                {"kind": "checkpoint", "timestamp": _stamp(), "label": "Recorded checkpoint",
-                 "input": 256, "output": 16, "intent_only": True,
-                 "usage_availability": {"input_output": "recorded", "private": "bad"},
-                 "cwd": "/fixture/private"},
-            ],
-        }
-        safe = MCP._safe_timeline(raw)
-        self.assertEqual(safe["events"][0]["status"], "error")
-        checkpoint = safe["events"][1]
-        self.assertEqual((checkpoint["input"], checkpoint["output"]), (256, 16))
-        self.assertTrue(checkpoint["intent_only"])
-        self.assertEqual(checkpoint["usage_availability"], {"input_output": "recorded"})
-        self.assertNotIn("PRIVATE", json.dumps(safe))
-        self.assertNotIn("/fixture/private", json.dumps(safe))
-        self.assertEqual(MCP._safe_diagnostics({"unsupported_formats": [
-            {"source": "antigravity", "format": "legacy_pb", "count": 2,
-             "hint": "Standalone Antigravity legacy .pb conversations are unsupported; file contents were not read.",
-             "path": "/fixture/private"},
-        ]})["unsupported_formats"][0]["count"], 2)
 
     def test_runtime_packaging_allowlists_include_reader_and_attribution_assets(self):
         root = Path(__file__).resolve().parents[1]

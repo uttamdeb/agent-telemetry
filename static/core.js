@@ -106,6 +106,43 @@ function toolLabel(source){
 const recTokens = r => (r.in||0)+(r.out||0)+(r.cr||0)+(r.cc||0);
 const ctxTokens = r => (r.in||0)+(r.cr||0)+(r.cc||0);
 
+/* ---------- optional extensions ----------
+   A plain <script src> placed between core.js and views.js may add a view or a Settings
+   panel. Nothing registers in this repository, so both lists stay empty and every loop
+   over them is a no-op. views.js reads EXT when it loads and on every render.
+     view:  {id, title, label, icon (inner SVG markup, 16x16 viewBox), after (id of an
+            existing view to follow), html (the section's markup), render(d), badge(d)}
+     panel: {html(), begin() -> token, current(token), close(), load()} */
+const EXT = {views:[], panels:[]};
+function registerView(v){
+  if(!v || typeof v.id!=="string" || !/^[a-z][a-z0-9-]*$/.test(v.id)
+      || typeof v.title!=="string" || typeof v.render!=="function"
+      || EXT.views.some(x=>x.id===v.id) || document.getElementById("v-"+v.id)) return false;
+  const tabs = document.getElementById("tabs");
+  const first = document.querySelector(".view");
+  if(!tabs || !first) return false;
+  EXT.views.push(v);
+  const button = document.createElement("button");
+  button.dataset.v = v.id;
+  button.innerHTML = `<svg class="ic" viewBox="0 0 16 16" aria-hidden="true">${v.icon||""}</svg>`
+    + `<span>${esc(v.label||v.title)}</span>`
+    + (typeof v.badge==="function" ? `<span class="nav-count" id="navCount-${v.id}"></span>` : "");
+  const after = tabs.querySelector(`button[data-v="${v.after}"]`);
+  if(after) after.after(button); else tabs.appendChild(button);
+  const section = document.createElement("section");
+  section.className = "view";
+  section.id = "v-"+v.id;
+  section.innerHTML = v.html || "";
+  const storage = document.getElementById("v-storage");
+  if(storage) storage.before(section); else first.parentNode.appendChild(section);
+  return true;
+}
+function registerSettingsPanel(p){
+  if(!p || typeof p.html!=="function") return false;
+  EXT.panels.push(p);
+  return true;
+}
+
 /* ---------- state ---------- */
 let RAW = null, STORAGE = null;
 const S = {

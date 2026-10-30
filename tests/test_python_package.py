@@ -47,8 +47,7 @@ class PackageTests(unittest.TestCase):
         bare_names = (
             "parser", "antigravity", "cursor_data", "native", "session_names", "accounts", "local_servers",
             "local_servers_windows", "ledger_backups", "diagnostics", "session_timeline",
-            "release_notes", "native_activity", "mcp_access", "mcp_backend", "mcp_protocol", "mcp_server", "mcp_tools",
-            "telemetry_query", "telemetry_insights",
+            "release_notes", "native_activity",
         )
         bare_before = {name: sys.modules.get(name) for name in bare_names}
 
@@ -66,13 +65,6 @@ class PackageTests(unittest.TestCase):
         diagnostics = self.import_module("diagnostics")
         timeline = self.import_module("session_timeline")
         native_activity = self.import_module("native_activity")
-        mcp_access = self.import_module("mcp_access")
-        mcp_backend = self.import_module("mcp_backend")
-        mcp_protocol = self.import_module("mcp_protocol")
-        mcp_server = self.import_module("mcp_server")
-        mcp_tools = self.import_module("mcp_tools")
-        telemetry_query = self.import_module("telemetry_query")
-        telemetry_insights = self.import_module("telemetry_insights")
 
         self.assertIs(dashboard.P, parser)
         self.assertIs(self.import_module("session_timeline").AG, antigravity)
@@ -84,17 +76,6 @@ class PackageTests(unittest.TestCase):
         self.assertIs(dashboard.DG, diagnostics)
         self.assertIs(dashboard.ST, timeline)
         self.assertIs(dashboard.NA, native_activity)
-        self.assertIs(dashboard.MA, mcp_access)
-        self.assertIs(dashboard.MCP, mcp_backend)
-        self.assertIs(mcp_access.native, native)
-        self.assertIs(mcp_backend.mcp_access, mcp_access)
-        self.assertIs(mcp_backend.mcp_tools, mcp_tools)
-        self.assertIs(mcp_backend.telemetry_query, telemetry_query)
-        self.assertIs(mcp_backend.telemetry_insights, telemetry_insights)
-        self.assertIs(mcp_server.mcp_access, mcp_access)
-        self.assertIs(mcp_server.protocol, mcp_protocol)
-        self.assertIs(mcp_server.mcp_tools, mcp_tools)
-        self.assertIs(telemetry_insights._query_module(), telemetry_query)
         self.assertIs(timeline.normalize_codex, parser.normalize_codex)
         self.assertIs(dashboard.LocalServerInventory, local_servers.LocalServerInventory)
         self.assertIs(local_servers._windows(), windows_servers)
@@ -177,16 +158,6 @@ class PackageTests(unittest.TestCase):
                             patch.dict(os.environ, variables, clear=True):
                         self.assertEqual(native.support_dir(), expected)
                     self.assertFalse(expected.exists(), "resolving a support path must not create it")
-
-    def test_mcp_credentials_use_the_shared_namespaced_native_support_path(self):
-        native = self.import_module("native")
-        access = self.import_module("mcp_access")
-        self.assertIs(access.native, native)
-        with tempfile.TemporaryDirectory() as directory:
-            support = Path(directory) / "AgentTelemetryNative"
-            with patch.object(native, "support_dir", return_value=support):
-                self.assertEqual(access._path(), support / "mcp-access.json")
-            self.assertFalse(support.exists(), "resolving an MCP credential path must not create it")
 
     def test_busy_port_refuses_before_any_ledger_action_including_rebuild(self):
         dashboard = self.import_module("dashboard")

@@ -3,36 +3,6 @@
 These features use local aggregates and source logs. They do not request account
 information, contact a model, or introduce a new ledger schema.
 
-## Comparison definition
-
-Overview and Cost no longer show a "What changed?" card. The same contribution
-maths (`usageChange` and `changeParts` in `static/insights.js`) remains the
-reference for the MCP `compare_usage` tool ([mcp.md](mcp.md)), which is held in
-parity with it. By default the comparison is the immediately preceding range with
-the same number of calendar days. An unfinished window such as Today includes its
-available observations; there is no elapsed-hours adjustment. All time has no
-preceding range, so it needs an explicit baseline.
-
-For category `g`, its contribution is `current[g] - previous[g]`. Categories partition
-the records within one grouping, so the sum of contributions equals the difference
-in total usage. Projects, models, tools, and token types are alternative groupings;
-their contributions must never be added together. A zero net change may still
-contain offsetting movements.
-
-Contributions are signed absolute changes rather than percentages of the net change,
-which can be zero or small despite large offsetting movements. It also avoids a
-relative growth claim from a zero or absent previous observation. An empty previous
-range means no recorded usage, not proof that no external usage occurred. The
-[ONS guidance on percentage units](https://service-manual.ons.gov.uk/content/numbers/percentages)
-distinguishes percentage changes from percentage-point differences; contributions
-do not mix them. Contributions describe where the recorded difference lies and
-are not evidence of a causal effect.
-
-Token totals include input, output, cache reads, and cache writes; reasoning stays
-within output. Cost parts use the record's dated pricing, including existing pricing
-subsets. Unreconciled discounts/logged costs stay unsplit rather than being assigned
-to token types by assumption. Costs remain API-equivalent estimates.
-
 ## Source timelines
 
 The source reader resolves full native session identities through the local ledger

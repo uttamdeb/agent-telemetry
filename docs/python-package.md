@@ -5,8 +5,6 @@ The Python package requires Python 3.9+ and runs the same local browser dashboar
 It has no third-party runtime dependencies. The release wheels bundle the dashboard's
 HTML, JavaScript, styles, icons, and vendored Chart.js. Usage stays local by default;
 optional sharing and account lookups retain their existing explicit consent controls.
-The package also includes the optional stdlib-only MCP bridge and Settings assets; MCP
-access remains disabled until enabled and scoped in the dashboard.
 
 The PyPI distribution is named `agenttelemetry-app`. Its installed commands are
 `agenttelemetry-app`, `agenttelemetry`, and `agent-telemetry`;
@@ -42,8 +40,8 @@ services, give each a distinct `--port` and `--data-dir`.
 
 Build artifacts from a clean, reviewed source tree after setting the intended package
 distribution version in `pyproject.toml`. For a coordinated release, keep the package
-distribution version in `pyproject.toml`, the application version in `__init__.py`, and
-the bundled MCP server version aligned (all are `2.1.0` for this release). PyPI files are immutable:
+distribution version in `pyproject.toml` and the application version in `__init__.py`
+aligned (both are `2.2.0` for this release). PyPI files are immutable:
 
 ```sh
 python -m pip install --upgrade build twine

@@ -3,21 +3,11 @@
 **AgentTelemetry** — a local, **stdlib-only** dashboard that reads the logs your AI coding tools already write
 to this machine and shows tokens, estimated cost, and breakdowns by model / day / tool /
 project / hour. Inventory, telemetry and the ledger stay on this machine by default. Separate
-user actions can share selected exports with paired devices, return requested analytics to an
-enabled local MCP client (which may forward tool results to a model provider), contact a provider
+user actions can share selected exports with paired devices, contact a provider
 for a confirmed account lookup, or fetch upstream release metadata after a clicked update check
 or release-notes load.
 An explicitly started saved server command can access the network with the user's permissions.
 Nothing to install.
-
-## Local MCP access
-
-The optional stdio MCP bridge requires a running dashboard and is off until enabled in Settings.
-It exposes eight read-only tools; project/device display names and connected-device data have
-separate opt-in scopes. Results go to the configured local client, whose provider may receive
-tool results. The bridge never starts the dashboard, refreshes accounts, reads the ledger
-directly or edits MCP client configuration. See [docs/mcp.md](docs/mcp.md) for tool contracts,
-protocol versions, privacy limits and examples.
 
 ```bash
 python3 dashboard.py            # http://127.0.0.1:7878
@@ -152,14 +142,11 @@ accurately. Keep the existing public tag intact when adding packaging metadata/a
 | `release_notes.py` | Private cached GitHub release metadata and one-time first-open acknowledgement state; network access is explicit. |
 | `static/charts.js` | Chart.js theming, `mk()`/`hbar()`/`areaDS()`, calendar + heatmap SVG. |
 | `static/views.js` | The eight views, controls, events, boot. |
-| `mcp_server.py` | Local stdio MCP bridge; read-only, authenticated loopback queries. |
-| `mcp_backend.py`, `telemetry_query.py`, `telemetry_insights.py` | Authenticated MCP dispatch and shared analytics. |
-| `mcp_access.py`, `mcp_protocol.py`, `mcp_tools.py` | Local consent/credentials, protocol compatibility and tool contracts. |
 | `native_activity.py` | Pure, bounded projection for native clients' recent local-session list. |
 | `index.html` | Shell only: sidebar (device name, tabs, live/refresh/theme/settings), page header (period, range, metric, filters), card markup, an SVG icon sprite. |
 
 Eight tabs in the sidebar: Overview · Cost · Models · Tools · Projects · Sessions ·
-**Optimize** · Storage. Tab lives in `location.hash`. **Every filter lives in the query
+Local servers · Storage. Tab lives in `location.hash`. **Every filter lives in the query
 string too**, so a reload, bookmark or pasted link opens the same view: `filtersFromURL()`
 reads it at boot and `filtersToURL()` writes it after every `renderAll()`, both in `core.js`.
 The params are `?range=` (a preset, or `custom` with `&from=&to=` as YYYY-MM-DD),
@@ -174,8 +161,8 @@ sidechain tokens are whole-session evidence, not parent-child links; sidechain
 tokens are already included in the parent's total. See docs/subagent-sessions.md.
 Copilot SDK's inline child breakdowns are presented separately in payload
 `session_children`. Combine them only in the Sessions list, after the same shared
-filters/date scope. Never add them to `slice().sessions`, analytics records, Optimize,
-MCP totals or project counts: their usage is already included in the parent.
+filters/date scope. Never add them to `slice().sessions`, analytics records or project
+counts: their usage is already included in the parent.
 Keep full parent/agent identities, explicit parent links, unavailable usage labels
 and recorded activity dates; do not infer activity on idle days or rename these children.
 Only what differs from the default is written, params that aren't the filters' own are left
@@ -208,6 +195,17 @@ Aggregates are keyed `records["date\tmodel"]`, `tools["date\tname"]`,
 `hourly["date\thour"]` — **every dimension carries a date** so the UI can filter by range.
 In the payload every usage row (records, sessions, activity, tools, hourly, ctx, skills,
 reads) also carries a `device` id; see "Your devices".
+
+**Optional extensions.** `core.js` exposes a feature-neutral registry: `EXT`,
+`registerView({id, title, label, icon, after, html, render(d), badge(d)})` and
+`registerSettingsPanel({html, begin, current, close, load})`. A plain `<script src>`
+placed between `core.js` and `views.js` may call them; nothing in this repository does,
+so both lists are empty and every loop over them is a no-op. `registerView` builds the
+`#tabs` button and `#v-<id>` section, ignores an id that already exists, and `views.js`
+merges registered titles into `VIEW_TITLES` (an unregistered `#hash` falls back to
+Overview), dispatches `render(d)` inside `renderAll()`'s error guard and refreshes badges.
+`tests/test_extensions_frontend.js` covers it. Extensions use the shared globals
+(`RAW`, `slice()`, `fmt*`, `passSrc()`…) at call time, so renaming one is a contract change.
 
 ## Rules
 
@@ -409,13 +407,6 @@ labels and explicitly relocated local roots at presentation time. Use
 ledger entries or peer exports for a folder rename; no cache bump/rebuild is needed.
 See `docs/project-relocations.md` for migration and compatibility-link guidance.
 
-Overview and Cost no longer show a "What changed?" card. `static/insights.js` keeps
-only its period-contribution maths (`usageChange`, `changeParts`): the reference the
-MCP `compare_usage` engine is held in parity with (`tests/test_mcp_insights_parity.js`).
-Within each independent project/model/tool/token-type grouping, current minus previous
-must reconcile to the total delta. Keep decreases, departed categories, zero baselines
-and offsetting changes. These are accounting contributions, not causal findings.
-
 `ledger_backups.py` keeps private byte-preserving snapshots in `.usage-backups/`
 beside `CACHE_PATH`. Serialize create/preview/restore with `_refresh_lock`. Routine
 saves try one scheduled snapshot per UTC day; failures surface but do not prevent
@@ -568,8 +559,7 @@ existing guarded `GET /api/local-servers` for the separate local server list.
   never additional usage. The existing eight-response dedup window also bounds
   `state.haiku_context`; a streamed threshold correction reprices the request's earlier
   date/turn/skill contributions without changing counts. Old archives/peers and other
-  tools lacking this metadata use the short-prompt rate. Optimize model substitutions
-  use the higher published tier conservatively when the target request size is unknown.
+  tools lacking this metadata use the short-prompt rate.
 
 - **Claude compactions are durable session events, not inferred model usage.**
   `agg.compactions` maps boundary UUID → timestamp, local date, manual/auto/unknown
@@ -892,8 +882,7 @@ A new `claude-<tier>-<n>-<m>` id normalises by itself, so only the price row is 
 nothing warns: the model just costs $0 (Sonnet 5.5 did, for its first day). Diff the vendor's
 whole table against `PRICING`, and look for all-zero rows in the payload's `prices`.
 
-**A vendor changed a price** → the new tuple goes in `PRICING` (always today's rate — the
-Optimize tab re-prices savings from it) and the old one moves into `PRICE_HISTORY` with
+**A vendor changed a price** → the new tuple goes in `PRICING` (always today's rate) and the old one moves into `PRICE_HISTORY` with
 the last date it applied. `price_of(model, date)` picks by each record's date, so a cut
 never re-prices history. Record a change only once it has taken effect — never pre-encode
 an announced future price: Sonnet 5's scheduled $3/$15 increase was encoded ahead of time,
@@ -915,32 +904,14 @@ Sweep every tab at `?range=today` too: a line chart needs **two** points to draw
 so single-day ranges render as empty axes unless the dataset uses `pointRadius: soloPoint(data)`.
 Add `--screenshot=out.png --window-size=1560,2000` to eyeball it.
 
-## The Optimize tab
+## Setup inventory in the payload
 
-Findings are computed client-side in `static/views.js` by the functions in
-`OPT_FINDERS`, ranked by estimated saving. A finder returns `null` when it does not
-apply — **never render a finding that isn't backed by the user's own numbers**, and
-every one must carry the figure it came from plus something concrete to do.
-
-**Never hardcode a model name, price or tool list into a finding.** Savings are
-re-priced from `RAW.prices` (the real per-1M rates for the models that user actually
-ran) and candidate swaps come from `cheaperPeer()`, which only ever suggests a model
-they already use from the same maker. A finder that named specific models would go
-stale and would be wrong for anyone whose mix differs.
-
-A finding's left stripe carries **tool identity**, painted from the same
-`--t-<source>` token as every chart and badge — orange is still Claude Code, green
-still Codex. It is only painted when exactly one tool is in scope; a finding spanning
-several has no single owner and stays neutral. It must never encode severity again:
-`--accent` is byte-identical to `--t-opencode` and `--warn` collides with
-`--t-claude-desktop`, so a severity stripe silently painted findings in the colour of
-a tool they had nothing to do with.
-
-Each finding sets `tools: [...]`. `scopeLabel()` renders a "<tool> only" chip when a
-finding does not span every source present in the range — the MCP, Skills and
-`/compact` advice is Claude Code's, and a Codex or Cursor user must not read it as
-advice about their own setup. No chip is shown when it applies to everything, since
-then the label is noise.
+This repository ships no recommendation view. The parser and `build_payload` still produce
+the setup inventories below (`ctx`, `reads`, `installed`, `context_files`, `skills`,
+`mcp_servers`, `mcp_inventory`, `codex_effort`) because they are ledger-backed and part of
+the payload shape; an optional extension (see "Optional extensions" under Layout) may judge
+them. Keep their shape stable, and never remove a field without considering archived entries
+and `CACHE_VERSION`.
 
 **MCP attribution differs by tool.** Claude Code names MCP tools
 `mcp__<server>__<tool>`; Codex keeps the bare tool name and puts the server in a
@@ -950,8 +921,8 @@ Codex server looks unused. Configured servers come from `~/.claude.json` and the
 `[mcp_servers.*]` blocks of `~/.codex/config.toml` (parsed by regex, not tomllib,
 which is 3.11+).
 
-**Setup checks** (payload fields in brackets): instruction files over 8 KB, priced as the
-bytes actually sent × the requests that carried them at the cache-read rate
+**Setup inventories** (payload fields in brackets): instruction files over 8 KB, with the
+bytes actually sent and the requests that carried them
 (`context_files`, sizes only, never contents). `_context_files` follows each agent's own
 loading rules, which differ:
 - **Claude Code** reads ~/.claude/CLAUDE.md, then `CLAUDE.md`, `CLAUDE.local.md` and
@@ -966,7 +937,7 @@ loading rules, which differ:
   and stops at `project_doc_max_bytes` (32 KiB) in total, so `sent` can be less than
   `bytes`. Walking up past the git root counted files Codex never reads.
 
-The other setup checks: sessions that open heavier than the user's own leanest 10% (`open_ctx` on each
+The other inventories: sessions that open heavier than the user's own leanest 10% (`open_ctx` on each
 session: the first request's full input); re-reads of unchanged files and reads inside
 build / dependency folders, with the tokens they returned (`reads`, Claude Code — note it
 already answers an unchanged re-read with a short stub, so this rarely fires); installed
@@ -974,12 +945,12 @@ skills and subagents unused over ≥ 14 days (`installed`, description lengths o
 servers used for ≤ 10% of the tools they offer, or used in one project while loaded in
 several (`mcp_inventory.loaded/calls`, per project). Inventory calls retain their
 source and distinct tool names before the top-tools table folds its long tail into
-"(other)"; setup findings must use that complete inventory for zero-call claims.
+"(other)"; a zero-call claim must use that complete inventory.
 
-It leans on three signals the other tabs don't use: `attributionSkill` (which Skill
+The payload carries three signals most tabs don't use: `attributionSkill` (which Skill
 drove a request — this is how "/dataviz cost you $20" is possible), a per-request
 context-size histogram (`agg["ctx"]`, bucketed 0-50k / 50-150k / 150-400k / 400k+),
-and the MCP servers configured in `~/.claude.json` (`_mcp_servers()`) compared against
+and the MCP servers configured in `~/.claude.json` (`_mcp_servers()`), comparable with
 `mcp__<server>__*` tool calls. Server names are matched loosely — the same server
 appears as `claude-in-chrome` and `Claude_in_Chrome` across versions, and
 `google-workspace` shows up in tool names as `workspace`.
@@ -1019,8 +990,8 @@ costed per row by `_cost()`.
   builds, lints or runs the project (`_cmd_kinds` → "check"; a lookup like `rg`/`cat`/`git
   log` never is). Each check marks every file edited so far; editing a marked file counts
   one and re-arms it. `oneshot` = an editing turn with none. `retry_cost` is the whole turn's cost, not the
-  redo alone — the Optimize finder compares it with `edit_cost` (all editing turns) to get
-  an excess from the user's own averages rather than a guessed fraction.
+  redo alone, so a consumer compares it with `edit_cost` (all editing turns) to get an
+  excess from the user's own averages rather than a guessed fraction.
 - **Codex edits come from `patch_apply_end` / `item_completed:FileChange`**, the one place
   every build records each file a patch touched — Codex Desktop applies patches from inside
   its `exec` JS tool, which never shows as `apply_patch`. Once a rollout shows either event,
@@ -1120,8 +1091,8 @@ local network. Both switches are off until the user turns them on, and each asks
   `agg["_device"]`, keys everything by device the way it already does by IDE, and prices
   them with THIS machine's `PRICING`. Setup data (MCP inventory and calls, installed-skill
   use, instruction-file cwds, OpenClaw's undecoded count) is skipped for remote copies.
-  On the client, the Optimize setup finders are wrapped in `onThisDevice()`, which judges
-  only this machine's usage against this machine's files and adds a "<device> only" chip.
+  A consumer of that setup data must judge only this machine's usage against this machine's
+  files: another device has its own files, which never leave it.
 - The client's `passDev()` filter and the "on all devices" phrase (`#qDev`) appear only
   when `RAW.devices` has more than one entry. A single-device install looks exactly as
   it did before.
@@ -1150,9 +1121,7 @@ local network. Both switches are off until the user turns them on, and each asks
 The sidebar footer shows the running version from this checkout's git metadata
 (`VERSION` in `dashboard.py`: `git describe --tags`, commit, branch). Checking for updates
 contacts the upstream only after the user clicks; there are no periodic update requests.
-This is separate from opt-in device sharing and confirmed account lookups. The local MCP
-bridge returns selected tool results to its configured client when asked; that client may
-forward them to its model provider (see [docs/mcp.md](docs/mcp.md)). `POST /api/update` (through
+This is separate from opt-in device sharing and confirmed account lookups. `POST /api/update` (through
 `_csrf_ok()`): `check` fetches the upstream and reports how far behind; `apply`
 fast-forwards only — it refuses local edits to tracked files and commits the upstream
 doesn't have — then saves the cache and re-execs the process (`_restart`), and the page
