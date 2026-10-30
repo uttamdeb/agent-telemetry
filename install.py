@@ -14,8 +14,6 @@ BACKEND_FILES = ("dashboard.py", "editor_snapshot.py", "parser.py", "antigravity
                  "release_notes.py",
                  "local_servers.py", "local_servers_windows.py", "ledger_backups.py",
                  "session_timeline.py", "native_activity.py", "diagnostics.py", "index.html", "chart.umd.min.js",
-                 "mcp_access.py", "mcp_backend.py", "mcp_protocol.py", "mcp_server.py",
-                 "mcp_tools.py", "telemetry_insights.py", "telemetry_query.py",
                  "manifest.json", "sw.js", "LICENSE")
 WINDOWS_FILES = ("tray.py", "monitor.py", "win32.py", "popover.py", "presentation.py")
 WINDOWS_ASSETS = ("AgentTelemetry.ico", "TrayIcon.ico")

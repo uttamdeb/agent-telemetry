@@ -10,7 +10,7 @@ const context=vm.createContext({console,Date,Set,URLSearchParams,location,histor
   document:{addEventListener(){},getElementById:node,querySelector(){return null},querySelectorAll(){return []},documentElement:{}},
   getComputedStyle:()=>({getPropertyValue:()=> '#2468ac'}),
   fetch:async()=>({ok:true,json:async()=>({available:true,events:[]})})});
-for(const file of ['static/core.js','static/charts.js','static/insights.js','static/timeline.js'])
+for(const file of ['static/core.js','static/charts.js','static/timeline.js'])
   vm.runInContext(fs.readFileSync(path.join(root,file),'utf8'),context,{filename:file});
 const views=fs.readFileSync(path.join(root,'static/views.js'),'utf8');
 vm.runInContext(views.slice(0,views.indexOf('document.getElementById("tabs").addEventListener')),context,{filename:'static/views.js'});

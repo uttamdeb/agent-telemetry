@@ -16,7 +16,6 @@ import cursor_data as CD
 import native_activity as NA
 import session_timeline as ST
 import session_names as SN
-import telemetry_query as TQ
 
 
 TODAY = "2026-10-25"
@@ -113,7 +112,7 @@ class CursorIntegrationTests(unittest.TestCase):
         stack.enter_context(patch.object(D, "DEVICE", {"name": "Fixture local", "os": "test"}))
         return D._build_payload_locked()
 
-    def test_usage_quality_full_ids_and_explicit_parent_links_reach_payload_and_mcp(self):
+    def test_usage_quality_full_ids_and_explicit_parent_links_reach_payload(self):
         parent = _cursor_session(PARENT)
         parent.update({"current_model": "Fixture current setting", "model_status": "unavailable",
                        "requested_models": ["Fixture requested model"], "requested_model_status": "recorded",
@@ -147,57 +146,12 @@ class CursorIntegrationTests(unittest.TestCase):
         self.assertTrue(child_row["rename_id"].endswith(CHILD[-6:]))
         self.assertFalse(child_row["rename_available"])
 
-        usage = TQ.query_usage(payload, {"period": "all", "group_by": ["tool"]}, today=TODAY)
-        cursor_precision = next(item for item in usage["source_precision"] if item["tool"] == "Cursor")
-        self.assertEqual(cursor_precision["precision"], "lower_bound")
-        self.assertEqual(cursor_precision["usage_status"], "partial")
-        self.assertEqual(cursor_precision["usage_availability"]["cache_read"], "unavailable")
-        listed = TQ.list_sessions(payload, {"period": "all", "tools": ["Cursor"]}, today=TODAY)
-        child_public = next(session for session in listed["sessions"] if session["tool"] == "cursor"
-                            and session.get("model") == MODEL and session["subagent"])
-        self.assertEqual(child_public["usage_status"], "partial")
-        self.assertEqual(child_public["usage_availability"]["input_output"], "partial")
-        parent_public = next(session for session in listed["sessions"] if session["tool"] == "cursor"
-                             and not session["subagent"])
-        self.assertEqual(parent_public["model_status"], "unavailable")
-        self.assertEqual(parent_public["current_model"], "Fixture current setting")
-        self.assertEqual(parent_public["requested_models"], ["Fixture requested model"])
-        self.assertEqual(parent_public["current_context_tokens"], 24000)
-        self.assertEqual(parent_public["current_context_limit"], 50000)
         self.assertEqual(parent_row["undated_usage"], {"in": 64, "out": 9, "asst": 2})
         self.assertNotIn("PRIVATE-UNDATED-MODEL", json.dumps(payload))
         self.assertNotIn("PRIVATE-UNDATED-PROMPT", json.dumps(payload))
         self.assertNotIn("/Users/private/undated-work", json.dumps(payload))
-        self.assertEqual(parent_public["tokens"], 138)
-        self.assertEqual(parent_public["undated_usage"], {"in": 64, "out": 9, "asst": 2})
-        self.assertEqual(parent_public["undated_usage_scope"],
-                         "whole-session (not filtered by date range)")
-        self.assertEqual(listed["totals"]["tokens"], 276,
-                         "undated counters are disclosure only and never change selected totals")
 
-        scoped = TQ.list_sessions(payload, {"from": TODAY, "to": TODAY}, today=TODAY)
-        scoped_parent = next(session for session in scoped["sessions"] if session["tool"] == "cursor"
-                             and not session["subagent"])
-        self.assertEqual(scoped_parent["undated_usage"], {"in": 64, "out": 9, "asst": 2})
-        self.assertEqual(scoped_parent["undated_usage_scope"],
-                         "whole-session (not filtered by date range)")
-
-        payload_parent = next(session for session in payload["sessions"]
-                              if session["rename_id"] == PARENT)
-        payload_parent["undated_usage"] = {
-            "in": True, "out": -3, "asst": 2, "model": "PRIVATE-INVALID-MODEL",
-            "secret": "PRIVATE-INVALID-SENTINEL",
-        }
-        safe_mcp = TQ.list_sessions(payload, {"period": "all"}, today=TODAY)
-        safe_parent = next(session for session in safe_mcp["sessions"] if session["tool"] == "cursor"
-                           and not session["subagent"])
-        self.assertEqual(safe_parent["undated_usage"], {"asst": 2})
-        self.assertNotIn("model", safe_parent["undated_usage"])
-        self.assertNotIn("PRIVATE-INVALID-MODEL", json.dumps(safe_mcp))
-        self.assertNotIn("PRIVATE-INVALID-SENTINEL", json.dumps(safe_mcp))
-        self.assertNotIn(PARENT, json.dumps(usage), "MCP session references are opaque")
-
-    def test_metadata_only_cursor_records_remain_unavailable_in_usage_and_sessions(self):
+    def test_metadata_only_cursor_records_remain_unavailable_in_the_payload(self):
         session = _cursor_session(PARENT, usage="unavailable", title="Metadata only")
         payload = self.dashboard_payload([_cursor_aggregate(
             "/fixture/cursor/metadata-only.vscdb", [session])])
@@ -205,19 +159,6 @@ class CursorIntegrationTests(unittest.TestCase):
         self.assertEqual(record["asst"], 1)
         self.assertEqual(record["usage_status"], "unavailable")
         self.assertEqual(record["usage_availability"]["input_output"], "unavailable")
-
-        usage = TQ.query_usage(payload, {"period": "all", "group_by": []}, today=TODAY)
-        precision = next(row for row in usage["source_precision"] if row["tool"] == "Cursor")
-        self.assertEqual(precision["precision"], "lower_bound")
-        self.assertEqual(precision["usage_status"], "unavailable")
-        self.assertEqual(precision["usage_availability"]["input_output"], "unavailable")
-
-        listed = TQ.list_sessions(payload, {"period": "all"}, today=TODAY)
-        item = next(row for row in listed["sessions"] if row["tool"] == "cursor")
-        self.assertEqual(item["usage_status"], "unavailable")
-        self.assertIsNone(item["tokens"])
-        self.assertIsNone(item["estimated_cost_usd"])
-        self.assertIn("cursor_token_usage", item["missing_fields"])
 
     def test_parent_resolution_is_scoped_by_device_and_rejects_ambiguous_duplicates(self):
         parent = _cursor_session(PARENT)

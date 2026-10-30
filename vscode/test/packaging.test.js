@@ -11,10 +11,7 @@ const {buildBackend} = require('../scripts/build-backend');
 
 const dashboardRuntimeFiles = [
   'editor_snapshot.py',
-  'cursor_data.py',
-  'mcp_access.py', 'mcp_backend.py', 'mcp_protocol.py', 'mcp_server.py',
-  'mcp_tools.py', 'telemetry_query.py', 'telemetry_insights.py',
-  'static/mcp.js'
+  'cursor_data.py'
 ];
 
 function fixture() {
@@ -62,7 +59,7 @@ test('the store listing README points at every AgentTelemetry asset with absolut
   assert.deepEqual(relative.filter(link => !/^(screenshots\/|LICENSE$)/.test(link)), []);
 });
 
-test('backend allowlist includes dashboard editor and MCP runtime dependencies', () => {
+test('backend allowlist includes the dashboard and editor runtime dependencies', () => {
   for (const relative of dashboardRuntimeFiles) {
     assert.ok(files.includes(relative), `backend allowlist is missing ${relative}`);
   }

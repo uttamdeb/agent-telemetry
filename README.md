@@ -5,12 +5,11 @@ logs your tools already write to your own machine and serves a clean, interactiv
 dashboard — estimated spend, tokens, active time, cache efficiency, an **Anthropic vs OpenAI
 vs Google** provider comparison, an activity calendar, and breakdowns by **model, provider,
 day, hour, weekday, tool, IDE, project and session** — plus how much **disk** all these logs
-eat, and suggestions for spending less, drawn from your own numbers.
+eat.
 
 By default, log inventory, usage and the cache stay on this machine. Separate actions can
-share selected exports with [paired devices](#your-devices-optional), return requested
-analytics to an enabled [local MCP client](docs/mcp.md) (which may forward tool results to
-its model provider), contact a provider after a confirmed **Read once** account lookup, or
+share selected exports with [paired devices](#your-devices-optional), contact a provider
+after a confirmed **Read once** account lookup, or
 fetch GitHub update and release-note metadata after you click **Check for updates** or
 **Load notes**. Cached release notes can be shown offline after an upgrade. No account or API key is needed
 for the dashboard; it has no runtime dependencies beyond Python's standard library and a
@@ -225,21 +224,6 @@ retain one serialized snapshot per display tick, in memory only; the ledger is u
 as all writes. `POST /api/shutdown` additionally requires the owning Windows client's
 per-process control token; a normal standalone dashboard cannot be stopped by that route.
 
-## Local MCP access (optional)
-
-AgentTelemetry provides eight read-only MCP tools for usage, comparisons, supported insights,
-session summaries and timelines, data health, the telemetry catalog and saved subscription
-limits. MCP access is off by default. Enable it in Settings and confirm each scope. The local
-bridge requires an already-running dashboard and returns data only when the configured MCP
-client requests it. A cloud-backed client may send tool results to its provider; review that
-client's data-handling settings before enabling access. Project/device names and usage from
-connected devices require their own opt-in scopes. The MCP bridge never refreshes accounts,
-returns prompt text, or edits client configuration. See [MCP tools, setup and privacy
-limits](docs/mcp.md).
-
-The MCP bridge ships with the **2.1.0** application and Python package. It is not a separate
-marketplace listing; install/update AgentTelemetry, then use the [MCP setup guide](docs/mcp.md).
-
 > `--rebuild` deletes the cache, and with it every session whose log has since been deleted
 > from disk (see [Storage](#storage--what-these-logs-cost-you-in-disk)). Copy
 > `.usage_cache.json` somewhere safe first if you've cleaned up old logs.
@@ -390,14 +374,6 @@ a display-name override. See [subagent name behavior](docs/subagent-sessions.md)
 Tool/provider icons are bundled locally, including the OpenAI mark for Codex; no remote
 logo requests occur. Their sources and licenses are in `static/tool-icons/README.md`.
 
-**Optimize** — suggestions derived from your own logs, ranked by what they'd save: sessions
-re-reading a very large context, thinking share, tool-heavy sessions that never delegated,
-cache written but never read, a costly model doing light work, what each **Skill** costs,
-edits that needed a retry, oversized **CLAUDE.md / AGENTS.md**, sessions that open heavier
-than your leanest ones, wasted file reads, installed skills and agents you never use, and
-MCP servers you never call, barely use, or load everywhere but use in one project. Nothing is shown unless
-your data supports it, and because the estimates overlap they are never summed.
-
 **Storage** — see below.
 
 **Keyboard** — `1`/`7`/`3`/`9`/`a` ranges, `m` month-to-date, `,` / `.` previous / next
@@ -488,8 +464,7 @@ dollars**, so cost is always derived. Rates live in `parser.py → PRICING` as
   above 100K. The threshold includes cached input and applies to each request.
   Available Claude logs backfill this pricing detail on a normal restart; token and
   message counts stay unchanged. Older archives/peers and other tools without that
-  detail use the short-prompt rate. Optimize model substitutions conservatively use
-  the higher tier when the target request size is unknown.
+  detail use the short-prompt rate.
 - **Price changes are date-aware.** When a vendor cuts a price (OpenAI's GPT-5.6 cuts of
   2026-07-30 and 2026-08-21), usage from before the change keeps the rate it had then —
   see `parser.py → PRICE_HISTORY`.
@@ -580,8 +555,8 @@ What sharing sends: session titles (often the start of a prompt), project and br
 log file paths, models, token counts, costs and times. Full prompts, replies and file
 contents are never sent. Sharing opens one read-only port (7879) that answers only to the
 pairing code. The dashboard itself stays on `127.0.0.1`. The connection is **not
-encrypted**, so share only on a network you trust. The setup checks on the Optimize tab
-(instruction files, installed skills, MCP servers) and the Storage tab still describe only
+encrypted**, so share only on a network you trust. The Storage tab and setup inventories
+(instruction files, installed skills, MCP servers) still describe only
 the computer you're looking at. `.peers.json` and `.peers/` are gitignored.
 
 **If it can't connect**, the error says which of these it is:

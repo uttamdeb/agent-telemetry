@@ -84,7 +84,7 @@ class ProjectRelocationTests(unittest.TestCase):
         self.assertEqual(items[0][1]["cwd"], "/fixtures/new-project")
         self.assertEqual(items[1][1]["cwd"], "/fixtures/old-project")
 
-    def test_payload_mcp_and_editor_reconcile_without_mutating_the_ledger(self):
+    def test_payload_and_editor_reconcile_without_mutating_the_ledger(self):
         raw = aggregate(cwd="/fixtures/old-project")
         raw["project"] = raw["sessions"][0]["project"] = "old-project"
         before = copy.deepcopy(raw)
@@ -100,11 +100,6 @@ class ProjectRelocationTests(unittest.TestCase):
             self.assertEqual({s["project"] for s in payload["sessions"]}, {"new-project"})
             self.assertEqual(payload["projects"][0]["tokens"],135)
             self.assertEqual(payload["project_aliases"],{"old-project":"new-project"})
-            import telemetry_query
-            mcp = telemetry_query.query_usage(payload,{"period":"today","group_by":["project"]},
-                                               policy={"include_names":True})
-            self.assertEqual(mcp["rows"][0]["project"],"new-project")
-            self.assertEqual(mcp["totals"]["tokens"],135)
             snapshot = D.build_editor_snapshot(query(roots=("/fixtures/new-project",)))
             self.assertEqual(snapshot["summary"]["tokens"],135)
             self.assertEqual(snapshot["sessions"][0]["project"],"new-project")

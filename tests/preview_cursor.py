@@ -145,7 +145,7 @@ class Handler(SimpleHTTPRequestHandler):
             "/api/sync": {"seconds": 15, "revision": "synthetic:15:1"},
             "/api/native": {"supported": False, "installed": False, "running": False},
             "/api/local-servers": {"supported": False, "servers": [], "profiles": []},
-            "/api/settings": {}, "/api/mcp": {"enabled": False}, "/api/release-notes": {"available": False},
+            "/api/settings": {}, "/api/release-notes": {"available": False},
             "/api/health": {"ok": True},
             "/api/summary": {"date": data["records"][0]["date"], "tokens": 0, "spend": 0}}
         if route == "/api/session-timeline":

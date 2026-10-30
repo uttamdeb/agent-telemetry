@@ -3,7 +3,8 @@
    ========================================================================== */
 
 const VIEW_TITLES = {overview:"Overview", cost:"Cost", models:"Models", tools:"Tools & agents",
-  projects:"Projects", sessions:"Sessions", optimize:"Optimize", storage:"Storage", "local-servers":"Local servers"};
+  projects:"Projects", sessions:"Sessions", storage:"Storage", "local-servers":"Local servers"};
+for(const v of EXT.views) VIEW_TITLES[v.id]=v.title;
 let LOCAL_SERVERS={servers:[],updatedAt:"",supported:null,loading:false,loaded:false,stale:false,unavailable:false};
 let LOCAL_SERVER_SEARCH="";
 let LOCAL_SERVER_CONFIG_ID=null;
@@ -1895,7 +1896,9 @@ function viewStorage(){
 function shortPath(p){ return String(p||"").split(/[\\/]/).filter(Boolean).slice(-2).join("/"); }
 /* ---------------- SETTINGS ---------------- */
 async function openSettings(){
-  const mcpGeneration=typeof beginMcpSettings==="function"?beginMcpSettings():null;
+  const panelTokens=EXT.panels.map(p=>typeof p.begin==="function"?p.begin():null);
+  const panelsCurrent=()=>EXT.panels.every((p,i)=>typeof p.current!=="function"||p.current(panelTokens[i]));
+  const closePanels=()=>EXT.panels.forEach(p=>{ if(typeof p.close==="function") p.close(); });
   openDrawer('<div class="empty">Loading…</div>');
   const settingsDrawer=document.getElementById("drawerBody");
   const settingsPlaceholder=settingsDrawer?.firstElementChild;
@@ -1908,17 +1911,15 @@ async function openSettings(){
     cfg=await response.json();
   }
   catch(e){
-    if(mcpGeneration!==null&&typeof mcpSettingsGenerationCurrent==="function"
-        &&(!mcpSettingsGenerationCurrent(mcpGeneration)||!settingsLoadCurrent())){
-      if(mcpSettingsGenerationCurrent(mcpGeneration)&&typeof closeMcpSettings==="function") closeMcpSettings();
+    if(EXT.panels.length&&(!panelsCurrent()||!settingsLoadCurrent())){
+      if(panelsCurrent()) closePanels();
       return;
     }
-    if(typeof closeMcpSettings==="function") closeMcpSettings();
+    closePanels();
     openDrawer('<div class="empty">Could not read settings.</div>'); return;
   }
-  if(mcpGeneration!==null&&typeof mcpSettingsGenerationCurrent==="function"
-      &&(!mcpSettingsGenerationCurrent(mcpGeneration)||!settingsLoadCurrent())){
-    if(mcpSettingsGenerationCurrent(mcpGeneration)&&typeof closeMcpSettings==="function") closeMcpSettings();
+  if(EXT.panels.length&&(!panelsCurrent()||!settingsLoadCurrent())){
+    if(panelsCurrent()) closePanels();
     return;
   }
   renderSettings(cfg);
@@ -2088,7 +2089,7 @@ function renderSettings(cfg){
     <h2 class="stg-h stg-sec">Your devices</h2>
     <div id="devBox"><div class="stg-hint">Loading…</div></div>
 
-    ${typeof mcpSettingsPanelHTML==="function"?mcpSettingsPanelHTML():""}
+    ${EXT.panels.map(p=>p.html()).join("")}
 
     <div id="maintenanceSettings"></div>
 
@@ -2111,7 +2112,7 @@ function renderSettings(cfg){
     <div class="stg-path"><b>Cache file</b><span>${esc(cfg.cache_path||"")}</span></div>
   `);
   loadNativeSettings();
-  if(typeof loadMcpSettings==="function") loadMcpSettings();
+  for(const p of EXT.panels) if(typeof p.load==="function") p.load();
   renderMaintenance();
   nativeSettingsTimer=setInterval(()=>{
     if(!document.getElementById("nativeAppBox")){ clearInterval(nativeSettingsTimer); return; }
@@ -2317,653 +2318,6 @@ function renderDevices(st, msg){
   }));
 }
 
-/* ---------------- OPTIMIZE ----------------
-   Every finding below is derived from the user's own logs in the selected range
-   and must carry (a) a number it is based on and (b) something to actually do.
-   A finding that does not apply is not rendered — no filler, no scolding. */
-
-/* sessionRows() adds a display `name`; the finders run on the raw clipped
-   sessions, so derive it the same way rather than rendering a blank cell. */
-const sessName = s => s.title || s.project || s.id || "(unnamed)";
-
-/* Anthropic bills a cache WRITE at 1.25-2x input and a read at 0.1x. Writing a
-   cache you never read back is the one unambiguous waste in the data. */
-function findCacheWaste(d){
-  const bad = d.sessions.filter(s => s.cc > 20000 && s.cr < s.cc * 0.5);
-  if(!bad.length) return null;
-  const cc = bad.reduce((a,s)=>a+s.cc,0);
-  return {
-    id:"cache-waste", impact:0, sev:"info", tools:[...new Set(bad.map(x=>x.source))],
-    title:"Cache written with little reuse",
-    body:`${bad.length} session${bad.length>1?"s":""} wrote <b>${fmtNum(cc)}</b> cache tokens and `
-      +`read back less than half that amount. Cache billing differs by model and retention tier; `
-      +`low reuse alone cannot establish how much money could have been saved.`,
-    todo:"Keep related questions in the same session when useful. Check your tool's cache retention "
-      +"before paying for longer-lived writes.",
-    rows:bad.sort((a,b)=>b.cc-a.cc).slice(0,5).map(s=>
-      [sessName(s), `${fmtNum(s.cc)} written`, `${fmtNum(s.cr)} read`, fmtUSD(s.cost)])
-  };
-}
-
-/* An expensive model doing light work.
-
-   Nothing here is a hardcoded model list. The candidate replacements are the models
-   THIS user actually ran, priced from the rates the server sent, so it stays true as
-   models come and go and reflects what they realistically have access to. */
-/* NB: a global priceOf() already exists above (RAW.pricing, zero-tuple fallback).
-   This one is deliberately separate — it returns null for an unpriced model so the
-   savings math can skip it rather than quietly costing it at zero. */
-function rateOf(m){ return (RAW.pricing_long_context||{})[m] || (RAW.prices && RAW.prices[m]) || null; }
-function costAt(m, t){
-  const p = rateOf(m); if(!p) return null;
-  const [pin,pout,pcw5,pcw1,pcr] = p;
-  // a write with no tier split is a 5-minute write; a vendor with no write price
-  // (older OpenAI models) bills the write as plain input — never as free
-  const cw5 = (t.cc5||t.cc1) ? (t.cc5||0) : (t.cc||0);
-  return ((t.in||0)*pin + (t.out||0)*pout + (t.cr||0)*pcr
-        + cw5*(pcw5||pin) + (t.cc1||0)*(pcw1||pcw5||pin)) / 1e6;
-}
-/* The cheapest model the user ALSO used from the same vendor — a realistic swap,
-   not a recommendation to adopt something they've never touched. */
-function cheaperPeer(model, usedModels){
-  const p = rateOf(model); if(!p || !p[1]) return null;
-  const vendor = (RAW.model_vendor||{})[model];
-  let best=null, bestOut=p[1];
-  for(const m of usedModels){
-    if(m===model) continue;
-    if((RAW.model_vendor||{})[m] !== vendor) continue;
-    const q = rateOf(m);
-    if(q && q[1] && q[1] < bestOut){ bestOut=q[1]; best=m; }
-  }
-  return best;
-}
-function findModelFit(d){
-  const usedModels = [...new Set(d.recs.filter(r=>r.model!=="(user)").map(r=>r.model))];
-  const groups = {};
-  for(const s of d.sessions){
-    if(s.subagent) continue;
-    // "light work": short answer, barely any tool use — the shape where a smaller
-    // model rarely shows a quality difference. Thresholds are on the session's own
-    // output, not on any particular model's name.
-    if(!(s.out < 4000 && s.tools <= 3 && s.cost > 0.02)) continue;
-    (groups[s.model] = groups[s.model] || []).push(s);
-  }
-  const rows=[]; let saving=0, n=0, srcs=new Set();
-  for(const [model, list] of Object.entries(groups)){
-    const alt = cheaperPeer(model, usedModels);
-    if(!alt) continue;
-    let now=0, then=0;
-    for(const s of list){
-      const at = costAt(alt, s);
-      if(at===null) continue;
-      now += s.cost; then += at; srcs.add(s.source);
-    }
-    if(then >= now || now-then < 0.5) continue;
-    saving += now-then; n += list.length;
-    rows.push([`${list.length} session${list.length>1?"s":""} on ${model}`,
-               `→ ${alt}`, fmtUSD(now)+" spent", fmtUSD(now-then)+" saved"]);
-  }
-  if(!rows.length) return null;
-  rows.sort((a,b)=>parseFloat(b[3].replace(/[^0-9.]/g,""))-parseFloat(a[3].replace(/[^0-9.]/g,"")));
-  return {
-    id:"model-fit", impact: saving, sev: saving>20?"high":"low", tools:[...srcs],
-    title:"A costly model doing very light work",
-    body:`${n} session${n>1?"s":""} produced under 4k output tokens with 3 or fewer tool calls, `
-      +`yet ran on a model you also pay a premium for. Re-priced at the cheapest model of the `
-      +`same maker <i>you already use</i>, the same tokens would have cost `
-      +`<b>${fmtUSD(saving)}</b> less.`,
-    todo:"For quick lookups and one-shot questions, start the session on the smaller model.",
-    rows
-  };
-}
-
-/* MCP tool definitions ride in the system prompt of EVERY request. A server you
-   never call is a standing cost on every turn. */
-function findIdleMCP(d){
-  if(!RAW.mcp_servers || !RAW.mcp_servers.length) return null;
-  const norm = x => String(x||"").toLowerCase().replace(/[^a-z0-9]/g,"");
-  const used = {};
-  const wanted = arguments[1];
-  if(!passSrc(wanted) || (RAW.device && !passDev(RAW.device.id))) return null;
-  // Inventory calls retain every server, even when the top-tools table folds a
-  // rare tool into "(other)". Fall back only for older payloads without source tags.
-  const calls=RAW.mcp_inventory && RAW.mcp_inventory.calls;
-  if(calls && calls.every(x=>x.source)){
-    for(const x of calls) if(x.source===wanted && x.date>=d.r.from && x.date<=d.r.to)
-      used[norm(x.server)]=(used[norm(x.server)]||0)+x.calls;
-  }else for(const t of toolCounts(d.r, x=>isLocal(x) && x.source===wanted)){
-    if(!t.name.startsWith("mcp__")) continue;
-    const rest = t.name.slice(5), i = rest.indexOf("__");
-    const srv = norm(i>0 ? rest.slice(0,i) : rest);
-    used[srv] = (used[srv]||0) + t.count;
-  }
-  const idle = RAW.mcp_servers.filter(m => (m.tool||"claude")===wanted).filter(m => {
-    const n = norm(m.name);
-    // loose match: a server may appear in tool names under a shortened alias
-    return !Object.keys(used).some(u => u===n || u.includes(n) || n.includes(u));
-  });
-  if(!idle.length) return null;
-  const label = (SRC[wanted]||{label:wanted}).label;
-  return {
-    id:"idle-mcp-"+wanted, impact: 0, sev:"info", tools:[wanted],
-    title:`${idle.length} ${label} MCP server${idle.length>1?"s":""} configured but never called`,
-    body:(wanted==="claude" && RAW.mcp_inventory && Object.keys(RAW.mcp_inventory.servers).length
-        ? `Claude Code announces every connected server's tools to each session and loads a tool's full `
-          +`definition when it's searched for, so an idle server costs little context — but it is still `
-          +`started with every session and offered to the model. `
-        : `Every connected MCP server's tool definitions are injected into the system prompt of `
-          +`<b>every request</b>, whether you use them or not. `)
-      +`These ${idle.length} were not called once in the selected range: <b>${idle.map(m=>esc(m.name)).join(", ")}</b>.`,
-    todo: wanted==="codex"
-      ? "Remove the ones you don't reach for from the [mcp_servers.*] blocks in "
-        +"~/.codex/config.toml, and re-add when you next need them."
-      : "Disconnect the ones you don't reach for — in Claude Code, /mcp, or remove them from "
-        +"~/.claude.json. Re-add when you next need them.",
-    rows: idle.map(m => [m.name, m.scope==="global"?"global":"project-scoped",
-      m.projects && m.projects.length ? m.projects.slice(0,3).join(", ") : "—", "0 calls"])
-  };
-}
-
-/* Thinking tokens bill at the output rate. Worth surfacing only when the share is
-   high enough that dropping effort would actually move the bill. */
-function findThinking(d){
-  let reason=0, out=0, cost=0;
-  for(const r of d.recs){ reason += r.reason||0; out += r.out||0; cost += r.cost||0; }
-  if(!out || reason/out < 0.15) return null;
-  const share = reason/out;
-  return {
-    id:"thinking", impact: cost*share*0.3, sev: share>0.3?"high":"low", tools:[...new Set(d.recs.filter(r=>r.reason).map(r=>r.source))],
-    title:"Extended thinking is a large share of your output",
-    body:`<b>${fmtNum(reason)}</b> of ${fmtNum(out)} output tokens (${fmtPct(share)}) were `
-      +`thinking tokens, billed at the full output rate.`,
-    todo:"Thinking earns its cost on genuinely hard problems and wastes it on routine edits. "
-      +"Lower the default effort and raise it per-task rather than leaving it at max.",
-    rows: []
-  };
-}
-
-/* Sessions where each prompt costs far more than your own norm — usually context
-   that grew huge and is now re-read on every single turn. */
-function findContextTax(d){
-  const withPrompts = d.sessions.filter(s => s.user >= 5 && s.cost > 0);
-  if(withPrompts.length < 5) return null;
-  const per = withPrompts.map(s => s.cost/s.user).sort((a,b)=>a-b);
-  const med = per[Math.floor(per.length/2)];
-  const bad = withPrompts.filter(s => s.cost/s.user > Math.max(med*8, 1)).sort((a,b)=>b.cost-a.cost);
-  if(!bad.length) return null;
-  const excess = bad.reduce((a,s)=>a + (s.cost - med*s.user), 0);
-  return {
-    id:"context-tax", impact: Math.max(excess,0), sev: excess>50?"high":"low", tools:[...new Set(bad.map(x=>x.source))],
-    title:"Long sessions re-reading a very large context",
-    body:`${bad.length} session${bad.length>1?"s":""} cost more than 8× your median of `
-      +`<b>${fmtUSD2(med)}</b> per prompt. Every turn re-reads the whole conversation, so a session `
-      +`that has grown large keeps paying for it on each new question.`,
-    todo:"When a session drifts to a new task, start a fresh one — or /compact to drop the "
-      +"history you no longer need.",
-    rows: bad.slice(0,5).map(s => [sessName(s), `${fmtNum(s.user)} prompts`,
-      `${fmtUSD2(s.cost/s.user)}/prompt`, fmtUSD(s.cost)])
-  };
-}
-
-/* Recorded delegation can keep the parent's context small; missing markers do not prove none occurred. */
-function findSubagents(d){
-  const parents = d.sessions.filter(s => !s.subagent);
-  // Inline sidechain usage, source spawn counts and associated child transcripts
-  // are distinct evidence. Any positive evidence rules out "no recorded delegation".
-  const hasChildren=s=>Number.isSafeInteger(s.subagent_children) && s.subagent_children>0;
-  const heavy = parents.filter(s => s.tools >= 150 && !s.side && !s.subagents && !hasChildren(s));
-  if(heavy.length < 2) return null;
-  const spend = heavy.reduce((a,s)=>a+s.cost,0);
-  const used = parents.filter(s => s.side > 0 || s.subagents > 0 || hasChildren(s)).length;
-  return {
-    id:"subagents", impact: spend*0.15, sev: spend>100?"high":"low", tools:[...new Set(heavy.map(x=>x.source))],
-    title:"Tool-heavy sessions with no recorded delegation",
-    body:`${heavy.length} session${heavy.length>1?"s":""} made 150+ tool calls with no recorded subagent `
-      +`delegation, costing <b>${fmtUSD(spend)}</b>. ${used ? `Delegation was recorded in ${used} other `
-      +`session${used>1?"s":""}.` : ""} Every file a search reads lands in the main context and `
-      +`is re-read on every later turn; a subagent reads it in its own context and returns only the answer.`,
-    todo:"For broad searching or codebase exploration, hand it to a subagent and keep the summary.",
-    rows: heavy.sort((a,b)=>b.cost-a.cost).slice(0,5).map(s =>
-      [sessName(s), `${fmtNum(s.tools)} tool calls`, `${fmtNum(s.user)} prompts`, fmtUSD(s.cost)])
-  };
-}
-
-/* Cache hit rate, but only when it is genuinely low — the Cost tab already shows
-   the healthy case. */
-function findLowCache(d){
-  let cr=0, ctx=0;
-  for(const r of d.recs){ cr += r.cr||0; ctx += ctxTokens(r); }
-  if(!ctx || cr/ctx >= 0.7) return null;
-  const rate = cr/ctx;
-  return {
-    id:"low-cache", impact: 0, sev: rate<0.4?"high":"low", tools:[...new Set(d.recs.filter(r=>r.cr||r.cc).map(r=>r.source))],
-    title:"Prompt cache is doing less work than it could",
-    body:`Only <b>${fmtPct(rate)}</b> of your context tokens came from cache. A cache read costs `
-      +`a tenth of a fresh input token, so the gap is close to pure overhead.`,
-    todo:"Caching rewards stable context. Editing files near the top of the conversation, or "
-      +"switching models mid-session, invalidates it and forces a re-read.",
-    rows: []
-  };
-}
-
-
-/* Claude Code stamps attributionSkill on the requests a Skill drove. A skill that
-   fires often and pulls a lot of context is worth tightening or scoping. */
-function findSkills(d){
-  if(!RAW.skills || !RAW.skills.length) return null;
-  const inRange = RAW.skills.filter(x => passDev(x.device) && x.date>=d.r.from && x.date<=d.r.to);
-  if(!inRange.length) return null;
-  const by={};
-  for(const x of inRange){
-    const e=by[x.name]||(by[x.name]={tok:0,asst:0,cost:0});
-    e.tok+=x.tok; e.asst+=x.asst; e.cost+=x.cost;
-  }
-  const rows=Object.entries(by).sort((a,b)=>b[1].cost-a[1].cost);
-  const total=d.recs.reduce((a,r)=>a+(r.cost||0),0);
-  const spend=rows.reduce((a,[,v])=>a+v.cost,0);
-  if(!spend) return null;
-  return {
-    id:"skills", impact: 0, sev:"info", tools:["claude"],
-    title:"Where your Skills are spending",
-    body:`Skills drove <b>${fmtUSD(spend)}</b>${total?` of ${fmtUSD(total)} (${fmtPct(spend/total)})`:""} `
-      +`in this range. A skill that runs often carries its whole instruction file into context `
-      +`each time, so a frequently-fired one is worth scoping tightly.`,
-    todo:"For the expensive ones, narrow when they trigger, or point their subagents at a "
-      +"cheaper model.",
-    rows: rows.slice(0,6).map(([n,v]) =>
-      [`/${n}`, `${fmtNum(v.asst)} requests`, fmtNum(v.tok)+" tokens", fmtUSD(v.cost)])
-  };
-}
-
-/* Every request re-sends the whole conversation. Past ~150k that is expensive even
-   at cache-read rates, because the read itself scales with the context. */
-function findBigContext(d){
-  if(!RAW.ctx || !RAW.ctx.length) return null;
-  // ctx rows carry a source but no model/project, so only the tool filter applies
-  const inRange = RAW.ctx.filter(x => passSrc(x.source) && passDev(x.device) && x.date>=d.r.from && x.date<=d.r.to);
-  if(!inRange.length) return null;
-  const by={}; let tot=0; const srcs=new Set();
-  for(const x of inRange){ by[x.bucket]=(by[x.bucket]||{tok:0,n:0});
-    by[x.bucket].tok+=x.tok; by[x.bucket].n+=x.n; tot+=x.tok;
-    if(x.source) srcs.add(x.source); }
-  if(!tot) return null;
-  const big=(by["150-400k"]?.tok||0)+(by["400k+"]?.tok||0);
-  const share=big/tot;
-  if(share < 0.4) return null;
-  // the share was measured on the tools that log context size, so apply it to theirs
-  const total=d.recs.reduce((a,r)=>a+(srcs.has(r.source)?(r.cost||0):0),0);
-  const order=["0-50k","50-150k","150-400k","400k+"];
-  return {
-    id:"big-context", impact: total*share*0.15, sev: share>0.7?"high":"low", tools:[...srcs],
-    title:`${fmtPct(share)} of your tokens were sent at over 150k context`,
-    body:`Every turn re-sends the whole conversation. Past roughly 150k the re-read dominates `
-      +`the bill even when it is cached, because a cache read is charged per token too.`,
-    todo: srcs.has("claude")
-      ? "/compact once a task is done to drop the history behind it, and /clear (or a fresh "
-        +"session) when you switch to something unrelated."
-      : "Start a fresh session when you switch tasks rather than continuing a long one — "
-        +"the whole history is re-sent on every turn.",
-    rows: order.filter(b=>by[b]).map(b =>
-      [b+" context", `${fmtNum(by[b].n)} requests`, fmtNum(by[b].tok)+" tokens",
-       fmtPct(by[b].tok/tot)])
-  };
-}
-
-/* Subagents each run their own request loop, so a subagent-heavy day is a real cost
-   centre even though it is often the right call. */
-function findSubagentShare(d){
-  const subs=d.sessions.filter(s=>s.subagent);
-  if(!subs.length) return null;
-  const subCost=subs.reduce((a,s)=>a+s.cost,0);
-  const total=d.sessions.reduce((a,s)=>a+s.cost,0);
-  if(!total || subCost/total < 0.2) return null;
-  return {
-    id:"subagent-share", impact: 0, sev:"info", tools:[...new Set(subs.map(x=>x.source))],
-    title:`${fmtPct(subCost/total)} of your spend ran inside subagents`,
-    body:`${fmtNum(subs.length)} subagent transcript${subs.length>1?"s":""} cost <b>${fmtUSD(subCost)}</b>. `
-      +`Each subagent runs its own request loop with its own context, which is exactly why they keep `
-      +`the parent small — but it does mean spawning one is never free.`,
-    todo:"Worth it for broad exploration; wasteful for a task you could answer inline. For simple "
-      +"delegated work, point the subagent at a cheaper model.",
-    rows: subs.sort((a,b)=>b.cost-a.cost).slice(0,5).map(s =>
-      [sessName(s), `${fmtNum(s.tools)} tools`, fmtNum(s.tok)+" tokens", fmtUSD(s.cost)])
-  };
-}
-
-
-/* Codex pins a global reasoning effort in ~/.codex/config.toml. Worth raising only
-   when the setting is at the top of the scale AND the logs show reasoning actually
-   dominating the output — otherwise it is someone's deliberate choice, not a finding. */
-function findCodexEffort(d){
-  const eff = RAW.codex_effort;
-  if(!eff || !["high","xhigh","ultra","max"].includes(String(eff).toLowerCase())) return null;
-  let reason=0, out=0, cost=0;
-  for(const r of d.recs){
-    if(r.source!=="codex") continue;
-    reason += r.reason||0; out += r.out||0; cost += r.cost||0;
-  }
-  if(!out || !cost) return null;
-  const share = reason/out;
-  if(share < 0.2) return null;
-  return {
-    id:"codex-effort", impact: cost*share*0.25, sev: share>0.5?"high":"low", tools:["codex"],
-    title:`Codex reasoning effort is set to "${esc(eff)}"`,
-    body:`<b>${fmtNum(reason)}</b> of ${fmtNum(out)} Codex output tokens (${fmtPct(share)}) were `
-      +`reasoning, billed at the output rate, against <b>${fmtUSD(cost)}</b> of Codex spend in `
-      +`this range. <code>model_reasoning_effort</code> is a global default, so it applies to `
-      +`trivial turns as much as hard ones.`,
-    todo:"Lower model_reasoning_effort in ~/.codex/config.toml and raise it per-task when a "
-      +"problem actually warrants it.",
-    rows: []
-  };
-}
-
-/* An editing prompt that needed edit → run → re-edit of the same file cost more
-   than one that landed first time. The saving is that difference, from this user's
-   own averages: (avg retried prompt − avg one-shot prompt) × retried prompts. */
-function findRetryTax(d){
-  const by = actSum(actRows(d), x=>x.source);
-  const rows = [];
-  let impact = 0, retried = 0, spend = 0;
-  for(const k of ORDER){ const x = by[k]; if(!x || x.edits < 10) continue;
-    const nr = x.edits - x.oneshot; if(!nr || !x.oneshot) continue;
-    const avgR = x.retry_cost/nr, avgO = (x.edit_cost - x.retry_cost)/x.oneshot;
-    const extra = Math.max(0, (avgR - avgO) * nr);
-    if(extra <= 0) continue;
-    impact += extra; retried += nr; spend += x.retry_cost;
-    rows.push([SRC[k].label, `${fmtPct(x.oneshot/x.edits)} one-shot`,
-      `${fmtUSD2(avgR)} vs ${fmtUSD2(avgO)} per prompt`, `${fmtUSD(extra)} extra`]);
-  }
-  if(!rows.length || impact < 1) return null;
-  return {
-    id:"retry-tax", impact, sev: impact > 50 ? "high" : "low",
-    tools: rows.map(r => ORDER.find(k => SRC[k].label === r[0])),
-    title:`Edits that didn't land first time cost ${fmtUSD(impact)} extra`,
-    body:`<b>${fmtNum(retried)}</b> editing prompts needed a retry — an edit, a run that checked it, and another `
-      +`edit to the same file. Together they cost <b>${fmtUSD(spend)}</b>; at the price of a prompt that `
-      +`landed first time they'd have cost ${fmtUSD(Math.max(0, spend-impact))}.`,
-    todo:"Say how to check the change up front — the test or build command, the expected output — so the "
-      +"agent verifies before it edits again. For a fiddly change, ask for a plan first.",
-    rows
-  };
-}
-
-/* ---- setup checks: what every request carries before any work starts ---- */
-const inRangeD = (x, d) => x.date>=d.r.from && x.date<=d.r.to;
-/* requests and what one more token costs on each, for records matching fn */
-function perTokenCost(d, fn, useReq){
-  let n = 0, per = 0;
-  for(const r of d.recs){ if(r.model==="(user)" || !fn(r)) continue;
-    const calls = useReq ? (r.req||r.asst||0) : (r.asst||0);
-    n += calls; per += calls * cachedRequestRate(r) / 1e6; }
-  return {n, per};           // per = $ for one extra token on every one of those requests
-}
-const famOf = src => src==="codex" ? "codex" : (src==="claude"||src==="claude-desktop") ? "claude" : null;
-/* $ per token written to cache across these records, weighted by the writes they made
-   (a model with no write rate writes at its input rate, as _cost() bills it) */
-function cacheWriteRate(recs){
-  let tok = 0, usd = 0;
-  for(const r of recs){
-    const c5 = r.cc5||0, c1 = r.cc1||0, flat = (c5||c1) ? 0 : (r.cc||0);
-    tok += c5 + c1 + flat; usd += tokenCostParts(r,true).cw;
-  }
-  return tok ? usd / tok / 1e6 : 0;
-}
-
-/* CLAUDE.md / AGENTS.md ride along on every request (cached, so at the cache-read
-   rate). Priced from this user's own request count and rates in range. */
-function findInstructionFiles(d){
-  // `sent` is what the agent actually includes (Codex stops at 32 KiB); `since` is the
-  // first day it could have (Claude Code reads AGENTS.md only from 2.1.277)
-  const files = (RAW.context_files||[]).filter(f => (f.sent ?? f.bytes) > 8192);
-  if(!files.length) return null;
-  const rows = []; let impact = 0; const tools = new Set();
-  for(const f of files){
-    const sent = f.sent ?? f.bytes, tok = sent/4;
-    const {n, per} = perTokenCost(d, r => famOf(r.source)===f.source && (f.project==="*" || r.project===f.project)
-      && (!f.since || r.date >= f.since), f.source==="codex");
-    if(!n) continue;
-    const cost = tok * per, save = cost * (sent-4096)/sent;
-    impact += save; tools.add(f.source==="codex" ? "codex" : "claude");
-    rows.push([f.file.replace(RAW.home||"~","~"),
-      `${fmtBytes(f.bytes)}${sent<f.bytes ? ` (first ${fmtBytes(sent)} sent)` : ""} · ~${fmtTok(tok)} tokens`,
-      `${fmtNum(n)} requests`, fmtUSD(cost)]);
-  }
-  if(!rows.length || impact < 0.5) return null;
-  return {
-    id:"instruction-files", impact, sev: impact>20?"high":"low", tools:[...tools],
-    title:`${rows.length} instruction file${rows.length>1?"s are":" is"} over 8 KB and sent with every request`,
-    body:`CLAUDE.md and AGENTS.md are loaded into the context of <b>every</b> request in that project — `
-      +`cheap per request because they're cached, but it adds up. Trimmed to 4 KB, these would cost about `
-      +`<b>${fmtUSD(impact)}</b> less over the range.`,
-    todo:"Keep only what the agent needs on every turn: commands, conventions, gotchas. Move long "
-      +"reference material into separate files the agent reads when relevant.",
-    rows
-  };
-}
-
-/* The first request of a session carries the fixed opening load: system prompt,
-   tool definitions, instruction files, memory. Compared with the user's OWN leanest
-   sessions (10th percentile), not with a guessed baseline. */
-function findHeavyOpeners(d){
-  const out = [], tools = [];
-  let impact = 0;
-  for(const src of ["claude","codex"]){
-    const ss = d.sessions.filter(s => famOf(s.source)===src && !s.subagent && s.open_ctx);
-    if(ss.length < 5) continue;
-    const v = ss.map(s=>s.open_ctx).sort((a,b)=>a-b);
-    const lean = v[Math.floor(v.length*0.1)], med = v[Math.floor(v.length/2)];
-    if(med < lean*1.3 || med < 20000) continue;
-    const {n, per} = perTokenCost(d, r => famOf(r.source)===src, src==="codex");
-    const reqPerSess = n / Math.max(1, ss.length);
-    const extra = ss.reduce((a,s)=>a+Math.max(0, s.open_ctx-lean),0) * reqPerSess * (per/Math.max(1,n));
-    if(extra <= 0) continue;
-    impact += extra; tools.push(src);
-    out.push([src==="codex"?"Codex":"Claude Code", `median ${fmtTok(med)} tokens`, `leanest ${fmtTok(lean)}`, `${fmtUSD(extra)} over the range`]);
-  }
-  if(!out.length || impact < 1) return null;
-  return {
-    id:"heavy-openers", impact, sev: impact>30?"high":"low", tools,
-    title:"Sessions start heavier than they need to",
-    body:`Before you type anything, a session already carries its system prompt, tool definitions, `
-      +`instruction files and memory — and every later request re-reads them. Your typical session opens well `
-      +`above your leanest ones; the difference costs about <b>${fmtUSD(impact)}</b> in this range.`,
-    todo:"Disconnect MCP servers and plugins you don't use in this project, trim CLAUDE.md / AGENTS.md, "
-      +"and prune stale memory. Compare a fresh session's first request after each change.",
-    rows: out
-  };
-}
-
-/* Re-reading an unchanged file, or reading generated / vendored folders, adds tokens
-   to context for nothing. Lower-bound cost: each such token written to cache once. */
-function findReadWaste(d){
-  const rs = (RAW.reads||[]).filter(x => passSrc(x.source) && passProj(x.project) && passDev(x.device) && inRangeD(x, d));
-  const t = rs.reduce((a,x)=>({rr:a.rr+x.rereads, j:a.j+x.junk, rt:a.rt+x.reread_tok, jt:a.jt+x.junk_tok, n:a.n+x.reads}), {rr:0,j:0,rt:0,jt:0,n:0});
-  const tok = t.rt + t.jt;
-  if(tok < 20000) return null;
-  // each day × project's wasted tokens at the cache-write rate that day's own requests
-  // there paid (its models, its 5-minute / 1-hour mix), not one model's rate for all
-  const recs = d.recs.filter(r => famOf(r.source)==="claude" && r.model!=="(user)");
-  const at = {};
-  for(const r of recs){ const k = r.date+"\t"+r.project; (at[k] = at[k] || []).push(r); }
-  const anyRate = cacheWriteRate(recs);
-  const impact = rs.reduce((a,x) => a + (x.reread_tok + x.junk_tok)
-    * (at[x.date+"\t"+x.project] ? cacheWriteRate(at[x.date+"\t"+x.project]) : anyRate), 0);
-  if(impact < 0.5) return null;
-  return {
-    id:"read-waste", impact, sev:"low", tools:["claude"],
-    title:`${fmtTok(tok)} tokens of reads that added nothing new`,
-    body:`${fmtNum(t.rr)} of ${fmtNum(t.n)} file reads re-read a file that hadn't changed since the last `
-      +`read (${fmtTok(t.rt)} tokens), and ${fmtNum(t.j)} read generated or dependency folders — `
-      +`node_modules, dist, build, lockfiles (${fmtTok(t.jt)} tokens). Each stays in context for the rest `
-      +`of the session.`,
-    todo:"Point the agent at source, not build output: add those folders to .gitignore / a "
-      +"permissions deny list, and ask for a specific range when a file is large.",
-    rows: []
-  };
-}
-
-/* Installed skills and subagents are described in every session's context whether
-   used or not. Only judged over at least two weeks, so a quiet week isn't "unused". */
-function findUnusedInstalled(d){
-  const inst = (RAW.installed||{}).items||[];
-  if(!inst.length || !passSrc("claude") || rangeDays() < 14) return null;
-  const norm = x => String(x||"").toLowerCase().replace(/^.*:/,"");
-  const used = new Set();
-  for(const u of (RAW.installed.used||[])) if(inRangeD(u, d)) used.add(u.kind+"\t"+norm(u.name));
-  for(const x of (RAW.skills||[])) if(isLocal(x) && inRangeD(x, d)) used.add("skill\t"+norm(x.name));
-  const idle = inst.filter(i => !used.has(i.kind+"\t"+norm(i.name)));
-  if(!idle.length) return null;
-  const {n, per} = perTokenCost(d, r => famOf(r.source)==="claude", false);
-  const tok = idle.reduce((a,i)=>a+i.desc_chars/4, 0);
-  const impact = tok * per;
-  return {
-    id:"unused-installed", impact, sev:"info", tools:["claude"],
-    title:`${idle.length} installed skill${idle.length>1?"s":""} or agent${idle.length>1?"s":""} never used in this range`,
-    body:`Each installed skill and subagent is listed, with its description, in every Claude Code session — `
-      +`about ${fmtTok(tok)} tokens for these ${idle.length} across ${fmtNum(n)} requests.`,
-    todo:"Remove the ones you don't reach for from ~/.claude/skills and ~/.claude/agents (or the "
-      +"project's .claude/), or move project-specific ones into that project.",
-    rows: idle.slice(0,8).map(i => [i.name, i.kind, i.scope==="user"?"all projects":i.project,
-      i.desc_chars ? `~${fmtTok(i.desc_chars/4)} tokens` : "no description"])
-  };
-}
-
-/* MCP servers whose tools are mostly unused, and servers used in one project but
-   loaded in many — both from what Claude Code offered each session. */
-function findMcpShape(d){
-  const inv = RAW.mcp_inventory; if(!inv || !passSrc("claude")) return null;
-  const loaded = {}, calls = {}, projL = {}, projC = {};
-  for(const x of inv.loaded) if(inRangeD(x, d)){ loaded[x.server]=(loaded[x.server]||0)+x.sessions;
-    (projL[x.server]=projL[x.server]||new Set()).add(x.project); }
-  for(const x of (inv.calls||[])) if((!x.source || x.source==="claude") && inRangeD(x, d)){ calls[x.server]=(calls[x.server]||0)+x.calls;
-    (projC[x.server]=projC[x.server]||new Set()).add(x.project); }
-  const usedTools = {};
-  const names=new Set();
-  for(const x of (inv.calls||[])) if(x.source==="claude" && inRangeD(x,d))
-    for(const name of x.tools||[]) names.add(name);
-  if(!(inv.calls||[]).every(x=>x.source))
-    for(const t of toolCounts(d.r,x=>isLocal(x)&&x.source==="claude")) if(t.name.startsWith("mcp__")) names.add(t.name);
-  for(const name of names){ const sv=name.slice(5).split("__")[0];usedTools[sv]=(usedTools[sv]||0)+1; }
-  const rows = [];
-  for(const sv in loaded){
-    const offered = ((inv.servers[sv]||{}).tools||[]).length, used = usedTools[sv]||0;
-    const nl = (projL[sv]||new Set()).size, nc = (projC[sv]||new Set()).size;
-    if(loaded[sv] >= 3 && offered >= 10 && used && used/offered <= 0.1)
-      rows.push([sv, `${used} of ${offered} tools used`, `${fmtNum(loaded[sv])} sessions`, "mostly unused"]);
-    else if(nc === 1 && nl >= 3 && calls[sv])
-      rows.push([sv, `used only in ${[...projC[sv]][0]}`, `loaded in ${nl} projects`, "scope it"]);
-  }
-  if(!rows.length) return null;
-  return {
-    id:"mcp-shape", impact:0, sev:"info", tools:["claude"],
-    title:`${rows.length} MCP server${rows.length>1?"s":""} loaded far more widely than they're used`,
-    body:`Every session a server is loaded in starts it and offers its tools to the model. These are either `
-      +`used for a sliver of what they offer, or only ever used in one project while loaded in several.`,
-    todo:"For a one-project server, move it from ~/.claude.json into that project's .mcp.json. For a "
-      +"mostly-unused one, check whether a lighter server or a plain CLI covers the few tools you call.",
-    rows
-  };
-}
-
-/* The setup checks judge THIS machine's files (instruction files, installed skills,
-   MCP config), so only this machine's usage is measured against them — another
-   device has its own files, which never leave it. */
-const isLocal = x => !x.device || !RAW.device || x.device === RAW.device.id;
-function localSlice(d){
-  return Object.assign({}, d, {recs:d.recs.filter(isLocal), sessions:d.sessions.filter(isLocal)});
-}
-const onThisDevice = fn => d => {
-  if(RAW.device && !passDev(RAW.device.id)) return null;
-  const f=fn(localSlice(d));if(f) f.local=true;return f;
-};
-const OPT_FINDERS = [findBigContext, findCacheWaste, findModelFit, findContextTax,
-                     findSubagents, findSubagentShare, findSkills, findCodexEffort,
-                     onThisDevice(d => findIdleMCP(d, "claude")), onThisDevice(d => findIdleMCP(d, "codex")),
-                     findThinking, findLowCache, findRetryTax, onThisDevice(findInstructionFiles),
-                     findHeavyOpeners, findReadWaste, onThisDevice(findUnusedInstalled),
-                     onThisDevice(findMcpShape)];
-
-/* Say plainly when a suggestion only applies to one tool — the MCP, Skills and
-   /compact advice is Claude Code's, and a Codex or Cursor user should not read it
-   as advice about their own setup. Nothing is labelled when it spans every tool
-   present in the range, because then the label is noise. */
-/* The left stripe carries TOOL identity, using the very same --t-<source> tokens as
-   every chart and badge in the app — so orange still means Claude Code and green
-   still means Codex here. It is only painted when exactly one tool is in scope;
-   a finding spanning several has no single owner and stays neutral.
-
-   It deliberately does NOT encode severity any more. --accent is byte-identical to
-   --t-opencode and --warn sits on top of --t-claude-desktop, so a severity stripe
-   was painting findings in tool colours that had nothing to do with the tool. */
-function stripeClass(f){
-  const t=(f.tools||[]).filter(Boolean);
-  return t.length===1 && SRC[t[0]] ? "" : " sev-neutral";
-}
-function stripeStyle(f){
-  const t=(f.tools||[]).filter(Boolean);
-  if(t.length!==1 || !SRC[t[0]]) return "";
-  return ` style="border-left-color:var(${SRC[t[0]].v})"`;
-}
-
-function scopeLabel(f){
-  const chips = [];
-  const t = (f.tools||[]).filter(Boolean);
-  const present = new Set(SLICE_SOURCES);
-  if(t.length && !(t.length >= present.size && [...present].every(x=>t.includes(x)))){
-    const names = t.map(toolLabel);
-    // "X only" reads right for a single tool; for several it is nonsense ("A only,
-    // B only"), so just name them.
-    chips.push(names.length === 1 ? names[0] + " only" : names.join(" · "));
-  }
-  // a setup check reads this machine's files; with other devices in the data, say so
-  if(f.local && multiDevice()) chips.push(esc(deviceName(RAW.device.id)) + " only");
-  return chips.length ? `<div class="finding-scope">${chips.map(c=>
-    `<span class="scope-chip">${c}</span>`).join(" ")}</div>` : "";
-}
-let SLICE_SOURCES=[];
-
-function runFinders(d){
-  SLICE_SOURCES=[...new Set(d.recs.map(r=>r.source))];
-  return OPT_FINDERS.map(f => { try{ return f(d); }catch(e){ console.error("finder failed", e); return null; } })
-                    .filter(Boolean).sort((a,b) => b.impact - a.impact);
-}
-function viewOptimize(d){
-  const found = runFinders(d);
-  const totalSpend = d.recs.reduce((a,r)=>a+(r.cost||0),0);
-  const missingPriceModels=unpricedModelNames(d.recs);
-  // Findings overlap — the same long session feeds "large context", "no recorded delegation"
-  // and "thinking share" — so their savings are NOT additive. Lead with the largest.
-  const best = found.filter(f=>f.impact>0.5)[0];
-  document.getElementById("optHero").innerHTML = `
-    <div class="hero-stat" style="min-width:240px"><div class="hero-label">Largest single saving</div>
-      <div class="hero-value">${best?fmtUSD(best.impact):missingPriceModels.length?"Unavailable":"—"}</div>
-      <div class="hero-delta"><span>${best?`${fmtPct(best.impact/(totalSpend||1))} of ${fmtUSD(totalSpend)} priced spend in range · estimates overlap, so they don't add up`:
-        missingPriceModels.length?"No price row means cost-based savings are unavailable, not zero.":"nothing with a dollar figure in this range"}</span></div>
-      ${missingPriceModels.length?`<div class="hero-delta"><span>${esc(costCoverageNote(missingPriceModels))}</span></div>`:""}</div>
-    <div class="hero-stat"><div class="l">Findings</div><div class="v">${found.length}</div><div class="s">${found.length?"ranked by estimated saving":"nothing to flag"}</div></div>
-    <div class="hero-stat"><div class="l">Sessions analysed</div><div class="v">${fmtNum(d.sessions.length)}</div><div class="s">from your own logs</div></div>`;
-  const host = document.getElementById("optFindings");
-  if(!found.length){
-    host.innerHTML = `<div class="card"><div class="empty">Nothing worth flagging in this range — your cache hit
-      rate, model mix and session lengths all look reasonable.</div></div>`;
-    return;
-  }
-  host.innerHTML = found.map(f => `
-    <div class="finding${stripeClass(f)}"${stripeStyle(f)}>
-      <div class="finding-head">
-        <div><div class="finding-title">${f.title}</div>${scopeLabel(f)}</div>
-        ${f.impact > 0.5 ? `<div class="finding-impact num">${fmtUSD(f.impact)}<span>est. saving</span></div>` : ""}
-      </div>
-      <div class="finding-body">${f.body}</div>
-      <div class="finding-todo"><b>What to do</b>${f.todo}</div>
-      ${f.rows && f.rows.length ? `<table class="finding-tbl"><tbody>${
-        f.rows.map(r=>`<tr>${r.map((c,i)=>
-          `<td${i===0?' class="name"':(i===r.length-1?' class="r"':' class="dim"')}>${esc(c)}</td>`
-        ).join("")}</tr>`).join("")}</tbody></table>` : ""}
-    </div>`).join("");
-}
-
 /* ---------------- dispatch ---------------- */
 const VIEW_HTML={};
 function localServerTime(value){
@@ -3074,9 +2428,12 @@ function renderAll(){
   const d = slice();
   const host = document.getElementById("v-"+S.view);
   if(!VIEW_HTML[S.view]) VIEW_HTML[S.view] = host.innerHTML;
-  let nFound = 0;
-  try{ nFound = runFinders(d).length; }catch(e){}
-  document.getElementById("optCount").textContent = nFound || "";
+  for(const v of EXT.views){
+    const badge = typeof v.badge==="function" ? document.getElementById("navCount-"+v.id) : null;
+    if(!badge) continue;
+    let n = 0; try{ n = v.badge(d); }catch(e){ console.error("view badge failed", e); }
+    badge.textContent = n || "";
+  }
   const empty = !d.recs.length && !d.sessions.length && S.view!=="sessions";
   const priorUsage = hasPrev() && ["overview","cost"].includes(S.view) && filteredRecords(prevRange()).length;
   if(empty && !priorUsage && S.view!=="storage" && !(S.view==="cost"&&activeQuotaSources().length)){
@@ -3093,8 +2450,8 @@ function renderAll(){
     else if(S.view==="tools") viewTools(d);
     else if(S.view==="projects") viewProjects(d);
     else if(S.view==="sessions") viewSessions(d);
-    else if(S.view==="optimize") viewOptimize(d);
     else if(S.view==="storage") viewStorage();
+    else EXT.views.find(v=>v.id===S.view)?.render(d);
   }catch(err){
     console.error("render failed", err);
     document.documentElement.dataset.jsError = "render "+S.view+": "+(err&&err.message||err);
@@ -3479,7 +2836,7 @@ document.addEventListener("click",e=>{
     renderAll(); return; }
 });
 function closeSettingsDrawer(){
-  if(typeof closeMcpSettings==="function") closeMcpSettings();
+  for(const p of EXT.panels) if(typeof p.close==="function") p.close();
   closeDrawer();
 }
 document.getElementById("drawerX").addEventListener("click",closeSettingsDrawer);
@@ -3491,7 +2848,7 @@ document.getElementById('sessionNameDialog').addEventListener('cancel',e=>{if(se
 document.getElementById('sessionNameDialog').addEventListener('close',()=>{if(!sessionRenameSaving&&!document.getElementById('sessionNameDialog').open)sessionRenameTarget=null;});
 document.getElementById("scrim").addEventListener("click",closeSettingsDrawer);
 document.addEventListener("keydown",e=>{
-  if(e.key==="Escape"&&!document.querySelector("dialog.modal[open]")&&typeof closeMcpSettings==="function") closeMcpSettings();
+  if(e.key==="Escape"&&!document.querySelector("dialog.modal[open]")) for(const p of EXT.panels) if(typeof p.close==="function") p.close();
 });
 addEventListener("scroll",()=>{ document.getElementById("filters").classList.toggle("stuck", scrollY>8); },{passive:true});
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change",()=>{

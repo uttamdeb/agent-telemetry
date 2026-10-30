@@ -66,11 +66,7 @@ The dashboard runs locally and reads the coding-tool logs already on that comput
 figures are estimates at API list prices; subscription users do not pay per token, and
 some source usage is unavailable in the logs. Optional device sharing is opt-in over a
 local network. Optional account snapshots make a provider lookup only after the user
-confirms it. The stdio MCP bridge is off by default, requires a running dashboard, and
-returns requested analytics to the configured client after the user enables access in
-Settings. A cloud-backed client may forward those results to its provider. Project/device
-display names and connected-device usage have separate opt-ins; MCP results exclude
-prompts, session titles, native IDs, paths, credentials, and account identities. The editor
+confirms it. The editor
 extension shows recorded usage and does not start monitoring on installation or opening.
 The marketing page uses Google Analytics for visits and install interactions; it does not
 read the ledger or send product telemetry, logs, or dashboard data.
@@ -133,11 +129,8 @@ its full design.
   file-type labels, the editor link, and the Linux/source link. Follow the editor link;
   check the Marketplace target, universal VSIX download, desktop editor guide, and the
   separate app/extension version labels.
-- On a fresh page load, follow both hero links to the editor and MCP cards; their
-  headings must settle below the fixed navigation at desktop and mobile widths.
-- Check the MCP setup card and guide link. Confirm the off-by-default state, running
-  dashboard requirement, consent path, separate name/device opt-ins, and cloud-client
-  forwarding warning appear near the setup entry point and in the privacy section/FAQ.
+- On a fresh page load, follow the hero link to the editor card; its heading must settle
+  below the fixed navigation at desktop and mobile widths.
 - Follow the source link and check the visible pip command and launch step, copy status,
   and expandable uvx alternative.
 - Try command copying in a secure browser context, then with clipboard access unavailable;

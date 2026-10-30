@@ -12,7 +12,7 @@ between start and end are not inferred. Missing child usage stays unavailable.
 
 Copilot's parent total already includes child usage. The web payload keeps these
 rows separately in `session_children`; only the Sessions view combines them with
-ordinary sessions. They never enter shared analytics slices, Optimize, MCP session
+ordinary sessions. They never enter shared analytics slices, session
 totals, project counts or daily usage a second time. The drawer explains the overlap
 and links to the parent for detailed source activity. Prompt/reply/tool-call counts
 and active time are not reconstructed from token receipts. Child names remain
