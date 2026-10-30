@@ -3,6 +3,7 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import re
 import shutil
@@ -23,6 +24,19 @@ HERE = Path(__file__).resolve().parent
 
 # A release tag, or a beta pre-release of one (published on GitHub as a pre-release; release notes ignore those).
 RELEASE_TAG_RE = re.compile(r"v\d+\.\d+\.\d+(?:-beta\.\d+)?")
+
+
+def signing_arguments(command):
+    """ISCC arguments that sign the setup EXE and its uninstaller, or none for an unsigned build.
+
+    ``command`` is one signtool command with ``$f`` where the file goes, e.g. ``signtool.exe sign /fd sha256 /tr
+    http://timestamp.digicert.com /td sha256 /sha1 <certificate thumbprint> $f`` (a certificate in the Windows store
+    by thumbprint keeps passwords off the command line)."""
+    if not command:
+        return []
+    if not re.search(r"\bsign\b", command, re.I) or "$f" not in command or "\n" in command or "\r" in command:
+        raise ValueError("AGENT_TELEMETRY_SIGNTOOL must be one signtool \"sign\" command line with $f for the file.")
+    return ["/DSignToolName=atsign", "/Satsign=" + command]
 
 
 def validate_source(source, tag, source_commit=None):
@@ -108,6 +122,7 @@ def main():
         stage(source, payload, archive, args.tag[1:])
         subprocess.run([str(args.compiler), "/Qp", "/DPayload=" + str(payload),
             "/DOutput=" + str(output), "/DAppVersion=" + args.tag[1:],
+            *signing_arguments(os.environ.get("AGENT_TELEMETRY_SIGNTOOL")),
             str(HERE / "AgentTelemetry.iss")], check=True)
     print("Created " + str(output / ("AgentTelemetry-" + args.tag[1:] + "-windows-x64-setup.exe")))
 
