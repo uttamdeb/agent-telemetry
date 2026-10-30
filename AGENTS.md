@@ -142,7 +142,7 @@ accurately. Keep the existing public tag intact when adding packaging metadata/a
 | File | Role |
 |---|---|
 | `dashboard.py` | stdlib `http.server`. Serves `/`, `/static/*`, `/chart.js`, `/manifest.json`, `/sw.js`, `/api/{data,storage,refresh,settings,cache,update,release-notes,devices}`. Owns the cache, the aggregate merge, `_cost()` and the device sharing listener. |
-| `parser.py` | `discover()` lists log files; `update_file()` routes each to a `parse_*`. Holds `PRICING` and the model-name normalizers. |
+| `parser.py` | **AgentTelemetry Pulsar**, the log-ingestion engine (the module stays `parser.py`). `discover()` lists log files; `update_file()` routes each to a `parse_*`. Holds `PRICING` and the model-name normalizers. |
 | `cursor_data.py` | Bounded read-only Cursor metadata and conversation-event projection; no raw content retained. |
 | `antigravity.py` | Read-only Antigravity SQLite conversation snapshot and bounded safe event reader; parser integration routes the same records to every client. |
 | `static/core.js` | `SRC`/`ORDER`, state `S`, formatting, date ranges, filtering. |
@@ -240,6 +240,9 @@ reads) also carries a `device` id; see "Your devices".
     carry the full tool name/provider as an accessible label and tooltip.
     OpenCode's display name is `OpenCode`; its source id, paths and asset names
     remain `opencode` for compatibility with existing ledgers and saved filters.
+11. **"AgentTelemetry Pulsar" is `parser.py`'s user-facing name, nothing more.** The brand
+    appears only in user text and docs. Never rename the module or file: `dashboard.py`, the
+    tests, the packaging allowlists and downstream builds import `parser` by name.
 
 ## The IDE dimension
 

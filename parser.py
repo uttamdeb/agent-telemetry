@@ -1,10 +1,14 @@
 """
-parser.py — Incremental usage-log parser for local AI coding tools.
+parser.py — AgentTelemetry Pulsar: the incremental usage-log parser for local AI coding tools.
+
+"AgentTelemetry Pulsar" is this module's user-facing name. It appears only in user text and
+docs: the file and module stay `parser.py` because other modules, the tests and the packaging
+allowlists import it by that name, so never rename it.
 
 Sources: Claude Code, Claude Desktop (agent mode), Codex CLI, GitHub Copilot
-(VS Code / Insiders / Cursor), Cursor native AI, opencode, and Hermes Agent. Each tool stores
-interaction logs locally; this module discovers those files, parses them
-incrementally (append-only .jsonl read from a byte offset; rewritten stores
+(VS Code / Insiders / Cursor), Cursor native AI, Google Antigravity, opencode, Hermes Agent
+and OpenClaw. Each tool stores interaction logs locally; this module discovers those
+files, parses them incrementally (append-only .jsonl read from a byte offset; rewritten stores
 and SQLite databases re-read on change), and produces per-file aggregates the
 server merges into one dataset. Everything is keyed off the user's own home
 dir — nothing is hardcoded to a machine or account, so it works on any

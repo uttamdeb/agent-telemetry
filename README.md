@@ -272,6 +272,11 @@ instead of cloning, delete `.usage_cache.json` first — that file is your perso
 
 ## Data sources
 
+**AgentTelemetry Pulsar** is the engine that reads these sources. It finds each tool's
+local logs, picks the usage signal out of them and turns every tool's format into the one
+shared usage shape the dashboard shows. It runs on your machine, and its code lives in
+`parser.py`.
+
 | Tool | Where it reads | Tokens |
 |---|---|---|
 | **Claude Code** | `~/.claude/projects/**/*.jsonl` | exact (in/out/cache read+write, 5m/1h tiers) |
@@ -543,7 +548,7 @@ and extend this from that file).
 
 ## Files
 
-`dashboard.py` (server + cache + cost + `/api/storage`) · `parser.py` (log parsers + pricing) ·
+`dashboard.py` (server + cache + cost + `/api/storage`) · `parser.py` (AgentTelemetry Pulsar: log parsers + pricing) ·
 `index.html` (shell) · `static/app.css` · `static/core.js` · `static/charts.js` ·
 `static/views.js` · `chart.umd.min.js` (vendored Chart.js) · `AGENTS.md` · `run.sh`.
 

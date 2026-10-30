@@ -2,7 +2,7 @@
 
 # AgentTelemetry for desktop editors
 
-An **Agent desk** for the coding tools you use: recorded tokens, estimated API cost, sessions and delegation, beside your code. It reads the local logs your tools already write through AgentTelemetry's shared Python backend. No provider API key or additional Python packages are required.
+An **Agent desk** for the coding tools you use: recorded tokens, estimated API cost, sessions and delegation, beside your code. It reads the local logs your tools already write through AgentTelemetry's shared Python backend, whose log-ingestion engine is AgentTelemetry Pulsar. No provider API key or additional Python packages are required.
 
 <p><img src="screenshots/agent-desk-dark.png" alt="AgentTelemetry Agent desk in dark mode, showing a workspace usage brief and linked main-agent and subagent sessions with demonstration data"></p>
 
