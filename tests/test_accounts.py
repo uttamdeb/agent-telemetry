@@ -5,9 +5,11 @@ import io
 import json
 import os
 from pathlib import Path
+import shutil
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from unittest.mock import patch
 
@@ -17,6 +19,27 @@ import dashboard as D
 import parser as P
 
 AT = 1791806400
+
+
+def remove_when_released(path, timeout=30.0):
+    """Remove a folder that a child which has just exited may still hold open for a moment.
+
+    On Windows, deleting the empty Codex profile right after the real CLI read it failed with WinError 32 (file in use)
+    in three of three runs on a PC, although no Codex process was still running ten seconds later: a short-lived
+    helper, or a virus scan of the files Codex had just written. Retrying for a bounded time removes that race; a
+    folder still held after `timeout` fails the test, because then something is genuinely left running.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            shutil.rmtree(path)
+            return
+        except FileNotFoundError:
+            return
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.5)
 
 
 def limits(used=11, camel=False):
@@ -282,13 +305,32 @@ class AccountTests(unittest.TestCase):
         self.assertEqual(entry["identity"]["auth"], "api_key")
         self.assertIsNone(entry["identity"]["plan"]); self.assertNotIn("DO NOT COPY", json.dumps(entry))
 
+    def test_a_profile_held_for_a_moment_is_removed_and_one_held_too_long_fails(self):
+        calls = []
+
+        def held_twice(path):
+            calls.append(path)
+            if len(calls) < 3:
+                raise PermissionError(32, "The process cannot access the file because it is being used by another process")
+
+        with patch.object(shutil, "rmtree", held_twice), patch.object(time, "sleep"):
+            remove_when_released(self.root / "briefly-held")
+        self.assertEqual(len(calls), 3)
+        with patch.object(shutil, "rmtree", side_effect=PermissionError(32, "in use")), patch.object(time, "sleep"), \
+                patch.object(time, "monotonic", side_effect=[0.0, 31.0]):
+            with self.assertRaises(PermissionError):
+                remove_when_released(self.root / "still-held")
+        remove_when_released(self.root / "never-created")  # already gone is fine
+
     @unittest.skipUnless(A.shutil.which("codex"), "Optional installed Codex CLI is unavailable")
     def test_actual_codex_account_read_in_empty_isolated_profile(self):
         environment = os.environ.copy()
         for name in ("OPENAI_API_KEY", "CODEX_AUTH_TOKEN", "AGENT_TELEMETRY_CONTROL_TOKEN"):
             environment.pop(name, None)
-        environment["CODEX_HOME"] = str(self.root / "empty-codex-profile")
-        Path(environment["CODEX_HOME"]).mkdir()
+        # Its own folder, not under self.root, so its slower removal (see remove_when_released) stands alone.
+        profile = Path(tempfile.mkdtemp(prefix="telemetry-codex-profile-"))
+        self.addCleanup(remove_when_released, profile)
+        environment["CODEX_HOME"] = str(profile)
         with patch.object(A, "_environment", return_value=environment):
             account, quota = A._codex_read()
         self.assertIsNone(account); self.assertEqual(quota, {})
