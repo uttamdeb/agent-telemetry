@@ -34,6 +34,12 @@ DisableDirPage=yes
 CloseApplications=no
 RestartApplications=no
 Uninstallable=yes
+; Signing: build.py defines SignToolName (and passes the signtool command with /S) only when
+; AGENT_TELEMETRY_SIGNTOOL is set, so an unsigned build compiles exactly as before.
+#ifdef SignToolName
+SignTool={#SignToolName}
+SignedUninstaller=yes
+#endif
 
 [Files]
 ; An isolated, bundled-Python guard runs BEFORE any installed files are changed.

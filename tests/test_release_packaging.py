@@ -149,6 +149,17 @@ class PackagingTests(unittest.TestCase):
         for tag in ("2.2.0", "v2.2", "v2.2.0-rc.1", "v2.2.0-beta", "v2.2.0-beta.1x", "v2.2.0+build", "beta"):
             self.assertIsNone(BUILD.RELEASE_TAG_RE.fullmatch(tag), tag)
 
+    def test_the_installer_is_signed_only_when_a_signtool_command_is_configured(self):
+        self.assertEqual(BUILD.signing_arguments(None), [])
+        self.assertEqual(BUILD.signing_arguments(""), [])
+        command = "signtool.exe sign /fd sha256 /sha1 0123 $f"
+        self.assertEqual(BUILD.signing_arguments(command), ["/DSignToolName=atsign", "/Satsign=" + command])
+        for bad in ("signtool.exe sign /fd sha256", "echo $f", "signtool sign $f\nmore"):
+            with self.assertRaises(ValueError):
+                BUILD.signing_arguments(bad)
+        iss = (ROOT / "windows" / "installer" / "AgentTelemetry.iss").read_text()
+        self.assertIn("#ifdef SignToolName\nSignTool={#SignToolName}\nSignedUninstaller=yes\n#endif", iss)
+
     def test_runtime_checksum_failure_never_extracts_archive(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
