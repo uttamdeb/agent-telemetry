@@ -585,6 +585,9 @@ class MonitorTests(unittest.TestCase):
                 self._redirect()
 
             def do_POST(self):
+                # Read the body before answering: closing a socket with unread data makes Windows reset the
+                # connection, and the client then saw ConnectionAbortedError instead of the redirect (a race).
+                self.rfile.read(int(self.headers.get("Content-Length") or 0))
                 self._redirect()
 
             def log_message(self, *args):

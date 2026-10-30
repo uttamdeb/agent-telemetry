@@ -235,7 +235,7 @@ class Monitor:
                 self.data_dir.mkdir(parents=True, exist_ok=True)
                 self.token = secrets.token_urlsafe(32)
                 environment = dict(os.environ, AGENT_TELEMETRY_CONTROL_TOKEN=self.token,
-                                   AGENT_TELEMETRY_VERSION="2.1.0", PYTHONDONTWRITEBYTECODE="1")
+                                   AGENT_TELEMETRY_VERSION="2.2.0", PYTHONDONTWRITEBYTECODE="1")
                 # Child parser diagnostics remain available locally, never in a release.
                 with open(self.data_dir / "server.log", "ab") as log:
                     self.process = subprocess.Popen([self.python, str(self.root / "dashboard.py"),

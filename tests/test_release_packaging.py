@@ -143,6 +143,12 @@ class PackagingTests(unittest.TestCase):
         self.assertIn("dashboard", names)
         self.assertEqual((names | {"windows"}) & set(sys.stdlib_module_names), {"antigravity"})
 
+    def test_release_and_beta_tags_are_accepted_nothing_else(self):
+        for tag in ("v2.2.0", "v2.2.0-beta.1", "v10.0.12-beta.30"):
+            self.assertTrue(BUILD.RELEASE_TAG_RE.fullmatch(tag), tag)
+        for tag in ("2.2.0", "v2.2", "v2.2.0-rc.1", "v2.2.0-beta", "v2.2.0-beta.1x", "v2.2.0+build", "beta"):
+            self.assertIsNone(BUILD.RELEASE_TAG_RE.fullmatch(tag), tag)
+
     def test_runtime_checksum_failure_never_extracts_archive(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

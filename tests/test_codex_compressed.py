@@ -438,6 +438,11 @@ class ReadingCompressedRollouts(LedgerCase):
                         self.assertEqual(spy.call_count, 1)
                         self.assertEqual(D._meta["parse_errors"], 1)
                     path.write_bytes(good)                               # a fixed copy replaces it
+                    # A damaged file is not decoded again until its size or mtime changes. "wrong magic" keeps the
+                    # size, and NTFS can give two quick writes one timestamp, so move the copy's mtime on, as any
+                    # real replacement does.
+                    later = path.stat().st_mtime_ns + 2_000_000_000
+                    os.utime(path, ns=(later, later))
                     self.scan(path)
                     self.assertEqual(D._meta["parse_errors"], 0)
                     self.assertEqual(codex_tokens(D.build_payload()), 2 * TURN_TOKENS)

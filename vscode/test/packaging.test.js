@@ -20,7 +20,8 @@ const dashboardRuntimeFiles = [
 function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'at-editor-package-'));
   fs.mkdirSync(path.join(root, 'vscode'));
-  fs.writeFileSync(path.join(root, 'vscode', 'package.json'), '{"version":"2.0.0"}');
+  fs.writeFileSync(path.join(root, 'vscode', 'package.json'), '{"version":"2.0.1"}');
+  fs.writeFileSync(path.join(root, 'pyproject.toml'), '[project]\nname = "agenttelemetry-app"\nversion = "2.0.0"\n');
   execFileSync('git', ['init', '-q', root]);
   execFileSync('git', ['-C', root, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
     'commit', '--allow-empty', '-qm', 'Fixture']);
@@ -56,7 +57,8 @@ test('backend packaging copies only the explicit allowlist, with byte digests', 
     fs.writeFileSync(path.join(target, 'stale-module.py'), 'must disappear');
     const info = buildBackend(root, target);
     assert.deepEqual(walk(target), [...files, 'BUILD-INFO.json'].sort());
-    assert.equal(info.version, '2.0.0');
+    assert.equal(info.version, '2.0.0', 'the app version (pyproject.toml), not the extension\'s');
+    assert.equal(info.extension_version, '2.0.1');
     assert.equal(info.cache_version, 60);
     assert.match(info.source_commit, /^[a-f0-9]{40}$/);
     for (const relative of files) {
