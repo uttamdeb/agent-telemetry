@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.2.0
+
+- The stable release of everything in 2.1.1: **Active now** in the sidebar, **Get the desktop app**, and the AgentTelemetry 2.2.0 backend (Antigravity and first-class Cursor telemetry, Codex's compressed logs, usage kept when a tool deletes it from a log).
+- The bundled backend no longer includes the Optimize tab or the local MCP bridge; both are now part of AgentTelemetry Pro. Remove any AI client entry that still points at the old `mcp_server.py`.
+
 ## 2.1.1 (pre-release of 2.2.0)
 
 - **Active now** in the sidebar: the sessions in the current scope with activity recorded in the last 15 minutes (Claude Code, Codex, Copilot, Cursor and the others), newest first, with their tool, how long ago and tokens so far. Click one to open it in the Agent desk. The status-bar tooltip counts them too. It shows recent recorded activity, not proof that an agent is still running.
