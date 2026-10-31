@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agenttelemetry-app"
-version = "2.1.0"
+version = "2.2.0"
 description = "A private, local dashboard for AI coding agent usage"
 readme = "README.md"
 license = "MIT"
@@ -51,18 +51,18 @@ agent_telemetry = [
   "static/core.js",
   "static/icon-192.png",
   "static/icon-512.png",
-  "static/insights.js",
   "static/maintenance.js",
   "static/release-notes.js",
-  "static/mcp.js",
   "static/timeline.js",
   "static/tool-icons/LICENSE.hermes.txt",
+  "static/tool-icons/LICENSE.antigravity.txt",
   "static/tool-icons/LICENSE.openclaw.txt",
   "static/tool-icons/LICENSE.simple-icons.txt",
   "static/tool-icons/README.md",
   "static/tool-icons/claude.svg",
   "static/tool-icons/copilot.svg",
   "static/tool-icons/cursor.svg",
+  "static/tool-icons/antigravity.svg",
   "static/tool-icons/hermes.svg",
   "static/tool-icons/openai.svg",
   "static/tool-icons/openclaw.svg",

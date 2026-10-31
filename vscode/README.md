@@ -2,17 +2,24 @@
 
 # AgentTelemetry for desktop editors
 
-An **Agent desk** for the coding tools you use: recorded tokens, estimated API cost, sessions and delegation, beside your code. It reads the local logs your tools already write through AgentTelemetry's shared Python backend. No provider API key or additional Python packages are required.
+An **Agent desk** for the coding tools you use: recorded tokens, estimated API cost, sessions and delegation, beside your code. It reads the local logs your tools already write through AgentTelemetry's shared Python backend, whose log-ingestion engine is AgentTelemetry Pulsar. No provider API key or additional Python packages are required.
 
 <p><img src="screenshots/agent-desk-dark.png" alt="AgentTelemetry Agent desk in dark mode, showing a workspace usage brief and linked main-agent and subagent sessions with demonstration data"></p>
 
 Shown with demonstration data. [See the light theme](screenshots/agent-desk-light.png).
+
+## Get the desktop app
+
+AgentTelemetry also ships as a **macOS menu bar app** and a **Windows tray app**. Each bundles its own Python, so there is no terminal setup and no separate Python install: open the app, make sure monitoring is on, and this extension attaches to its local service automatically. If your computer has no Python 3.9 or newer, the app is the simplest way to start.
+
+**[Download the latest release](https://github.com/uttamdeb/agent-telemetry/releases/latest)** for macOS 13+ (Apple Silicon or Intel DMG) or Windows 10/11 (x64 installer), or see the [product and install page](https://agenttelemetry-app.vercel.app/). These builds are unsigned/unnotarized: macOS may require **System Settings → Privacy & Security → Open Anyway**, and Windows SmartScreen may require **More info → Run anyway**. You can also run **AgentTelemetry: Get the desktop app** from the Command Palette.
 
 ## Follow the work
 
 - **Start with your workspace.** The brief matches recorded absolute working directories to your open local folders. Two projects with the same folder name do not get merged by name. Switch to **All local projects** to include history without a recorded workspace path.
 - **See delegation with evidence.** A keyboard-operable outline links sessions only when the source records their parent identities. Filter **All sessions**, **Main agents** or **Subagents**, then inspect a session's model, recorded effort, context compactions and input/output/cache composition. Missing parents stay visibly unavailable or outside the selected scope.
 - **Measure newly recorded usage.** The **Recorded in this window** counter subtracts an in-memory baseline from the selected scope's recorded totals. It shows its start time and can be reset. It measures new log observations, including delayed records; it does not identify running agents or measure activity inside this editor.
+- **See what's active now.** The sidebar's **Active now** section lists the sessions in the selected scope with activity recorded in the last 15 minutes, newest first, with their tool, how long ago and tokens so far; click one to open it in the Agent desk. It is recent recorded activity, not proof that an agent is still running.
 - **Keep the wider picture close.** The native activity sidebar and status bar show the selected scope's usage. Open the Agent desk for detail or the full local dashboard for the rest of AgentTelemetry.
 
 The Agent desk uses AgentTelemetry's app icon and light/dark design, with editor high-contrast support, visible keyboard focus and reduced-motion support. Its bundled interface makes no network requests; the extension host communicates with the local service.
@@ -54,6 +61,8 @@ If no service is running, choose **Start local monitoring** in the Agent desk or
 
 Starting needs **Python 3.9 or newer** on this computer. Discovery first checks supported installed AgentTelemetry runtime locations on macOS and Windows, then trusted local `PATH` entries. You can choose an existing interpreter with **AgentTelemetry: Set up Python** or set `agentTelemetry.pythonPath` to its absolute executable path. The interpreter must be outside the workspace. The extension does not install Python or packages automatically.
 
+**No Python?** Install the [desktop app](https://github.com/uttamdeb/agent-telemetry/releases/latest) instead. It bundles its own Python, which the discovery above checks first, so **Start local monitoring** can use it, and a running app is attached automatically. The Agent desk's offline notice and the Python setup prompts also offer **Get the desktop app**.
+
 A service started by the extension uses port **7878** and AgentTelemetry's native default ledger directory:
 
 | System | Ledger directory |
@@ -81,7 +90,8 @@ The recorded-usage counter resets when the extension host reloads, the workspace
 | `AgentTelemetry: Start monitoring` | Explicitly attach to or start the shared local service. |
 | `AgentTelemetry: Open local dashboard` | Open the identified service in your browser. |
 | `AgentTelemetry: Reset usage baseline` | Reset the in-memory counter for this scope. |
-| `AgentTelemetry: Set up Python` | Choose an existing interpreter or open Python's download page. |
+| `AgentTelemetry: Set up Python` | Choose an existing interpreter, open Python's download page or get the desktop app. |
+| `AgentTelemetry: Get the desktop app` | Open the latest release page with the macOS and Windows installers. |
 | `AgentTelemetry: Open settings` | Open the extension's settings. |
 
 ## Remote and restricted windows
@@ -98,28 +108,12 @@ Restricted Mode permits read-only attachment to an existing local service. Start
 | `agentTelemetry.pythonPath` | Empty | Discover an interpreter, or use an absolute trusted Python executable path outside the workspace. |
 | `agentTelemetry.showStatusBar` | `true` | Show the selected scope's tokens and estimated cost in the status bar. |
 
-## Optional MCP analytics
+## Updating
 
-Version **2.1.0** bundles the current AgentTelemetry backend, including its optional
-read-only MCP bridge. The application and MCP server are also **2.1.0**. Updating this extension
-does not replace a dashboard service that is already running: update and restart the
-installation owning that service to use its newest features.
-
-To connect a compatible AI client, open **AgentTelemetry: Open local dashboard**,
-then **Settings → Local MCP access**. Review the sharing warning, enable access and
-copy the generated configuration into your MCP client. Keep the local dashboard
-running; the bridge does not start it automatically. Project/device display names
-and usage from paired devices require separate consent and are off by default.
-Revoke access in Settings at any time. The extension never changes an AI client's
-configuration or enables MCP on installation.
-
-The eight tools cover usage, comparisons, insights, sessions, session timelines,
-data health, available dimensions and saved subscription-limit observations.
-They cannot rename sessions, run server commands, change settings, refresh account
-credentials or make model calls. Results exclude prompts, transcript text, session
-titles, native IDs, paths and account identities. A cloud-backed client may send
-the returned telemetry to its provider, so enable access only when intended.
-See the [MCP setup and privacy guide](https://github.com/uttamdeb/agent-telemetry/blob/HEAD/docs/mcp.md).
+Updating this extension does not replace a dashboard service that is already running:
+update and restart the installation owning that service to use its newest features.
+The bundled backend no longer includes the Optimize tab or the local MCP bridge; both
+are part of AgentTelemetry Pro.
 
 ## Read the numbers accurately
 
@@ -129,7 +123,14 @@ Parent and child rows retain their own recorded usage. A tool can already includ
 
 Connection failures retain the last successful snapshot and mark it stale while retries continue. The counter also stays marked stale until a successful connection. This is recorded history, not a live agent process monitor.
 
-The extension performs no account lookup, provider model call, credential read or session rename. Analytics stay local: the extension does not upload telemetry. Explicit browser actions can open the local dashboard or Python's download page. The full dashboard's separate opt-in features retain their own consent controls.
+The extension performs no account lookup, provider model call, credential read or session rename. Analytics stay local: the extension does not upload telemetry. Explicit browser actions can open the local dashboard, Python's download page or the desktop app's release page on GitHub. The full dashboard's separate opt-in features retain their own consent controls.
+
+## More ways to get AgentTelemetry
+
+- **Desktop apps** for [macOS and Windows](https://github.com/uttamdeb/agent-telemetry/releases/latest), with their own Python.
+- **[Product and install page](https://agenttelemetry-app.vercel.app/)**.
+- **This extension** on the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=agenttelemetry-team.agenttelemetry) and on [Open VSX](https://open-vsx.org/extension/agenttelemetry-team/agenttelemetry).
+- **Browser dashboard and source**: the [Python package or source checkout](https://github.com/uttamdeb/agent-telemetry#quick-start) on GitHub.
 
 ## License
 

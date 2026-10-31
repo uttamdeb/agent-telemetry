@@ -10,12 +10,10 @@ import tempfile
 import native
 
 ROOT = Path(__file__).resolve().parent
-BACKEND_FILES = ("dashboard.py", "editor_snapshot.py", "parser.py", "native.py", "session_names.py", "accounts.py",
+BACKEND_FILES = ("dashboard.py", "editor_snapshot.py", "parser.py", "antigravity.py", "cursor_data.py", "native.py", "session_names.py", "accounts.py",
                  "release_notes.py",
                  "local_servers.py", "local_servers_windows.py", "ledger_backups.py",
                  "session_timeline.py", "native_activity.py", "diagnostics.py", "index.html", "chart.umd.min.js",
-                 "mcp_access.py", "mcp_backend.py", "mcp_protocol.py", "mcp_server.py",
-                 "mcp_tools.py", "telemetry_insights.py", "telemetry_query.py",
                  "manifest.json", "sw.js", "LICENSE")
 WINDOWS_FILES = ("tray.py", "monitor.py", "win32.py", "popover.py", "presentation.py")
 WINDOWS_ASSETS = ("AgentTelemetry.ico", "TrayIcon.ico")
@@ -96,7 +94,7 @@ def install_windows():
         AT_INSTALL_ICON=str(target / "windows" / "assets" / "AgentTelemetry.ico"))
     subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
                    check=True, env=environment)
-    return {"platform": "win32", "entry": str(entry), "command": [str(pythonw), str(entry)], "version": "2.1.0"}
+    return {"platform": "win32", "entry": str(entry), "command": [str(pythonw), str(entry)], "version": "2.2.0"}
 
 
 def install_macos(bundle=None):
@@ -124,7 +122,7 @@ def install_macos(bundle=None):
                 old.rename(target)
             raise
     return {"platform": "darwin", "entry": str(target),
-            "command": ["/usr/bin/open", "-a", str(target), "--args"], "version": "2.1.0"}
+            "command": ["/usr/bin/open", "-a", str(target), "--args"], "version": "2.2.0"}
 
 
 def main():

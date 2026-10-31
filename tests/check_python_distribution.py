@@ -12,25 +12,22 @@ import zipfile
 
 
 MODULES = {
-    "__init__.py", "__main__.py", "cli.py", "dashboard.py", "editor_snapshot.py", "parser.py",
+    "__init__.py", "__main__.py", "cli.py", "dashboard.py", "editor_snapshot.py", "parser.py", "antigravity.py", "cursor_data.py",
     "native.py", "accounts.py", "session_names.py", "release_notes.py",
     "local_servers.py", "local_servers_windows.py",
     "ledger_backups.py", "diagnostics.py", "session_timeline.py", "native_activity.py",
-    "mcp_access.py", "mcp_backend.py", "mcp_protocol.py", "mcp_server.py",
-    "mcp_tools.py", "telemetry_query.py", "telemetry_insights.py",
 }
 ASSETS = {
     "index.html", "chart.umd.min.js", "manifest.json", "sw.js",
     "static/app.css", "static/core.js", "static/charts.js", "static/views.js",
-    "static/insights.js", "static/maintenance.js", "static/timeline.js",
-    "static/mcp.js",
+    "static/maintenance.js", "static/timeline.js",
     "static/release-notes.js",
     "static/apple-touch-icon.png", "static/icon-192.png", "static/icon-512.png",
-    "static/tool-icons/claude.svg", "static/tool-icons/copilot.svg",
+    "static/tool-icons/claude.svg", "static/tool-icons/antigravity.svg", "static/tool-icons/copilot.svg",
     "static/tool-icons/cursor.svg", "static/tool-icons/hermes.svg",
     "static/tool-icons/openai.svg", "static/tool-icons/openclaw.svg",
     "static/tool-icons/opencode.svg", "static/tool-icons/README.md",
-    "static/tool-icons/LICENSE.hermes.txt", "static/tool-icons/LICENSE.openclaw.txt",
+    "static/tool-icons/LICENSE.hermes.txt", "static/tool-icons/LICENSE.antigravity.txt", "static/tool-icons/LICENSE.openclaw.txt",
     "static/tool-icons/LICENSE.simple-icons.txt",
 }
 METADATA = {"PKG-INFO", "SOURCES.txt", "dependency_links.txt", "entry_points.txt", "top_level.txt"}
@@ -58,7 +55,8 @@ def check_archives(wheel, sdist):
         expected = MODULES | ASSETS | {
             "pyproject.toml", "setup.py", "setup.cfg", "MANIFEST.in", "README.md",
             "LICENSE", "PKG-INFO", "docs/python-package.md",
-            "docs/mcp.md", "docs/release-notes.md", "docs/native-activity.md",
+            "docs/release-notes.md", "docs/native-activity.md",
+            "docs/antigravity.md",
         }
         extras = paths - expected
         assert all(path.startswith("agenttelemetry_app.egg-info/")
@@ -160,13 +158,6 @@ def check_install(wheel, version):
         subprocess.run([str(python), "-m", "agent_telemetry", "--help"], check=True,
                        cwd=root, env=environment, capture_output=True, text=True)
         assert_home_empty("python -m agent_telemetry --help")
-        for arguments in (("--help",), ("--version",)):
-            result = subprocess.run([str(python), "-m", "agent_telemetry.mcp_server", *arguments],
-                                    cwd=root, env=environment, capture_output=True, text=True)
-            assert result.returncode == 0, (arguments, result.stderr)
-            assert ("AgentTelemetry MCP server" in result.stdout if arguments == ("--version",)
-                    else "--backend" in result.stdout)
-            assert_home_empty("python -m agent_telemetry.mcp_server " + " ".join(arguments))
         paths = ["/", "/chart.js", "/manifest.json", "/sw.js", "/api/health",
                  "/api/release-notes", "/api/native-activity"]
         paths += ["/" + asset for asset in sorted(ASSETS) if asset.startswith("static/")]

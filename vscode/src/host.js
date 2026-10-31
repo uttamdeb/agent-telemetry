@@ -3,7 +3,7 @@ const {LocalClient} = require('./client');
 const COUNTERS = ['tokens', 'input', 'output', 'cache_read', 'cache_write', 'cost', 'sessions', 'main_agents', 'subagents', 'compactions'];
 function validMessage(message, snapshot) {
   if (!message || typeof message !== 'object' || Array.isArray(message) || typeof message.type !== 'string') return false;
-  const simple = ['ready', 'refresh', 'start', 'openBrowser', 'resetBaseline', 'setupPython', 'openSettings'];
+  const simple = ['ready', 'refresh', 'start', 'openBrowser', 'resetBaseline', 'setupPython', 'getDesktopApp', 'openSettings'];
   if (simple.includes(message.type)) return Object.keys(message).length === 1;
   if (Object.keys(message).length !== 2 || !Object.hasOwn(message, 'value')) return false;
   if (message.type === 'changeScope') return ['workspace', 'all'].includes(message.value);

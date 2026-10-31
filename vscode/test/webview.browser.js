@@ -72,10 +72,13 @@ async function checkBrowser(page, base) {
   await open('upgrade');
   ensure(await page.getByRole('button', {name: 'Start local monitoring', exact: true}).count() === 0, 'outdated service must not offer competing start');
   ensure(await page.getByRole('button', {name: 'Open dashboard to upgrade', exact: true}).isVisible(), 'actionable backend upgrade');
+  ensure(await page.getByRole('button', {name: 'Get the desktop app', exact: true}).count() === 0, 'an outdated running service is not offered another app');
   await open('no-workspace');
   ensure(await page.getByRole('button', {name: 'This workspace', exact: true}).isDisabled(), 'empty workspace scope disabled');
   await open('restricted');
   ensure(await page.getByRole('button', {name: 'Start local monitoring', exact: true}).isDisabled(), 'restricted workspace cannot start Python');
+  await page.getByRole('button', {name: 'Get the desktop app', exact: true}).click();
+  ensure(await page.evaluate(() => window.__deskPreview.messages.some(message => message.type === 'getDesktopApp')), 'desktop app request is a bare host message');
   await open('remote');
   ensure(await page.getByRole('button', {name: 'This workspace', exact: true}).isDisabled(), 'remote workspace scope disabled');
   ensure((await page.locator('#notice').textContent()).includes('remote workspace'), 'local-machine remote disclosure');

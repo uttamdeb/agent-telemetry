@@ -161,7 +161,7 @@ class NativeActivityTests(unittest.TestCase):
             finally:
                 connection.close()
             cursor_agg = P.update_file(None, "cursor", str(cursor_db), "Cursor", {})
-            self.assertNotIn("_sid", cursor_agg["sessions"][0])
+            self.assertEqual(cursor_agg["sessions"][0]["_sid"], sid)
 
             open_db = root / "opencode.db"
             connection = sqlite3.connect(open_db)
@@ -178,7 +178,9 @@ class NativeActivityTests(unittest.TestCase):
             finally:
                 connection.close()
             opencode_agg = P.update_file(None, "opencode", str(open_db), "OpenCode", {})
-            self.assertNotIn("_sid", opencode_agg["sessions"][0])
+            # The full native id is retained: OpenCode's eight-character display
+            # ids repeat within minutes, so retention and renames need the whole id.
+            self.assertEqual(opencode_agg["sessions"][0]["_sid"], sid)
 
             copilot_dir = root / "copilot" / "12345678-1234-4234-8234-123456789012"
             copilot_dir.mkdir(parents=True)
@@ -198,7 +200,11 @@ class NativeActivityTests(unittest.TestCase):
                 rows.extend(NA.project([(str(path), source_agg)], observed_at=NOW)["sessions"])
             self.assertEqual({row["source"] for row in rows}, {"cursor", "opencode", "copilot"})
             self.assertEqual({row["title"] for row in rows}, {"Cursor title", "OpenCode title", "Copilot title"})
-            self.assertTrue(all(row["tokens"] is not None for row in rows))
+            cursor_row = next(row for row in rows if row["source"] == "cursor")
+            self.assertIsNone(cursor_row["tokens"], "Cursor has no recorded cache-read/write fields")
+            self.assertEqual(cursor_row["usage_availability"]["input_output"], "recorded")
+            self.assertEqual(cursor_row["usage_availability"]["cache_read"], "unavailable")
+            self.assertTrue(all(row["tokens"] is not None for row in rows if row["source"] != "cursor"))
             self.assertEqual({row["provider"] for row in rows if row["source"] == "opencode"}, {None})
             self.assertEqual(len({row["key"] for row in rows}), 3)
             # Identical native IDs in different log profiles remain separate.

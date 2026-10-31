@@ -87,11 +87,10 @@ existing refresh endpoint. No provider/account lookup is performed.
 
 The backend is bundled from an explicit source allowlist by a build script.
 Keep every direct and transitive `dashboard.py` runtime import in that allowlist,
-including `editor_snapshot.py`, `mcp_access.py`, `mcp_backend.py`,
-`mcp_protocol.py`, `mcp_server.py`, `mcp_tools.py`, `telemetry_query.py`,
-`telemetry_insights.py`, and `static/mcp.js` for the dashboard Settings view.
+including `editor_snapshot.py` and the dashboard's static scripts.
 The extension packaging test guards these entries; the VSIX verifier also
-rejects MCP credential files and staging files alongside ledger and device state.
+rejects credential files (including legacy MCP ones) and staging files alongside
+ledger and device state.
 The user explicitly chooses Start monitoring; discover a trusted Python 3.9+
 interpreter (including an installed AT runtime where safely discoverable), or
 show a useful setup action. Never run workspace code, use shell interpolation,
@@ -139,8 +138,16 @@ Webview -> host allowlist (validate exact shapes; ignore unknown messages):
 {type:'selectSession', value:'known-key'}
 {type:'resetBaseline'}
 {type:'setupPython'}
+{type:'getDesktopApp'}
 {type:'openSettings'}
 ```
+
+`getDesktopApp` carries no other field. The host answers it (and the matching
+`AgentTelemetry: Get the desktop app` command) with `vscode.env.openExternal` on one
+fixed, hardcoded https URL, the latest GitHub release of the macOS/Windows apps. A
+webview message never supplies a URL, and the bundled interface still makes no
+network requests. The apps bundle their own Python, so this is also the setup
+action offered beside "Set up Python" when no Python 3.9+ is found.
 
 The host computes `since` from an in-memory baseline of the selected scope/date
 range. Changes to scope/date/range reset the baseline; reparses or decreasing

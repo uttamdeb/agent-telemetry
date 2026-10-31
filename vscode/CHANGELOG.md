@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.2.0
+
+- The stable release of everything in 2.1.1: **Active now** in the sidebar, **Get the desktop app**, and the AgentTelemetry 2.2.0 backend (Antigravity and first-class Cursor telemetry, Codex's compressed logs, usage kept when a tool deletes it from a log).
+- The bundled backend no longer includes the Optimize tab or the local MCP bridge; both are now part of AgentTelemetry Pro. Remove any AI client entry that still points at the old `mcp_server.py`.
+
+## 2.1.1 (pre-release of 2.2.0)
+
+- **Active now** in the sidebar: the sessions in the current scope with activity recorded in the last 15 minutes (Claude Code, Codex, Copilot, Cursor and the others), newest first, with their tool, how long ago and tokens so far. Click one to open it in the Agent desk. The status-bar tooltip counts them too. It shows recent recorded activity, not proof that an agent is still running.
+- **Get the desktop app**: the Marketplace and Open VSX listing now explains the macOS menu bar and Windows tray apps, which bundle their own Python, and links the latest release, the product page and the other store listing. The Agent desk's offline notice, the Python setup prompts and a new **AgentTelemetry: Get the desktop app** command open the latest release's download page (a fixed GitHub link opened by the editor, never supplied by the webview).
+- Bundles the AgentTelemetry 2.2.0 backend: Codex's compressed logs are read (Python 3.14+ or the `zstd` command needed in the editor's Python), GPT-6.1 Terra is priced, and more.
+- The bundled backend no longer includes the Optimize tab or the local MCP bridge; both are now part of AgentTelemetry Pro. Configurations that point an AI client at the old `mcp_server.py` stop working: remove that server from the client.
+
 ## 2.1.0
 
 - Include the latest AgentTelemetry backend, session activity and release notes in the Agent desk.

@@ -3,6 +3,7 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import re
 import shutil
@@ -12,15 +13,36 @@ import tempfile
 import urllib.request
 import zipfile
 
-PYTHON_URL = "https://www.python.org/ftp/python/3.13.16/python-3.13.16-embed-amd64.zip"
-PYTHON_SHA256 = "97dae5274cc54867065e8d5a3226e48c35017ed332a0fdb0e27d5b5821961297"
+# CPython 3.15 includes compression.zstd, so the installed app reads Codex's compressed rollouts itself.
+PYTHON_VERSION = "3.15.2"
+PYTHON_URL = f"https://www.python.org/ftp/python/{PYTHON_VERSION}/python-{PYTHON_VERSION}-embed-amd64.zip"
+PYTHON_SHA256 = "d012f3aa29cf07436dae8aea1fec0fd195c2612a0b059b1f915ae0afb9ad1f62"
+# The embeddable runtime reads only the ._pth named for its own version (python315._pth for 3.15).
+PYTHON_TAG = "python" + "".join(PYTHON_VERSION.split(".")[:2])
 HERE = Path(__file__).resolve().parent
+
+
+# A release tag, or a beta pre-release of one (published on GitHub as a pre-release; release notes ignore those).
+RELEASE_TAG_RE = re.compile(r"v\d+\.\d+\.\d+(?:-beta\.\d+)?")
+
+
+def signing_arguments(command):
+    """ISCC arguments that sign the setup EXE and its uninstaller, or none for an unsigned build.
+
+    ``command`` is one signtool command with ``$f`` where the file goes, e.g. ``signtool.exe sign /fd sha256 /tr
+    http://timestamp.digicert.com /td sha256 /sha1 <certificate thumbprint> $f`` (a certificate in the Windows store
+    by thumbprint keeps passwords off the command line)."""
+    if not command:
+        return []
+    if not re.search(r"\bsign\b", command, re.I) or "$f" not in command or "\n" in command or "\r" in command:
+        raise ValueError("AGENT_TELEMETRY_SIGNTOOL must be one signtool \"sign\" command line with $f for the file.")
+    return ["/DSignToolName=atsign", "/Satsign=" + command]
 
 
 def validate_source(source, tag, source_commit=None):
     """Keep the release tag intact; an explicit refresh must pin its descendant."""
-    if not re.fullmatch(r"v\d+\.\d+\.\d+", tag):
-        raise ValueError("Expected a release tag such as v2.1.0.")
+    if not RELEASE_TAG_RE.fullmatch(tag):
+        raise ValueError("Expected a release tag such as v2.2.0 or v2.2.0-beta.1.")
     def git(*arguments):
         return subprocess.check_output(["git", "-C", str(source), *arguments], text=True).strip()
     tagged = git("rev-parse", "--verify", "refs/tags/" + tag + "^{commit}")
@@ -57,13 +79,16 @@ def stage(source, destination, archive, version):
             if path.is_absolute() or len(path.parts) != 1 or path.name in ("..", "."):
                 raise ValueError("Unexpected path in embedded Python archive.")
         zipped.extractall(runtime)
-    # Isolate imports from machine/user Python; expose only stdlib and this app.
-    (runtime / "python313._pth").write_text("python313.zip\n.\n..\n", encoding="utf-8")
+    # Isolate imports from machine/user Python; expose only stdlib and this app. The app comes FIRST, as a
+    # script's own folder does elsewhere: a ._pth also stops Python adding the script's folder, so with the
+    # stdlib first `python dashboard.py` got the stdlib "antigravity" (the xkcd joke, which opens a browser)
+    # instead of the Antigravity parser, and the backend could not start.
+    (runtime / f"{PYTHON_TAG}._pth").write_text(f"..\n{PYTHON_TAG}.zip\n.\n", encoding="utf-8")
     shutil.copy2(HERE / "register_install.py", destination / "windows" / "register_install.py")
     commit = subprocess.check_output(["git", "-C", str(source), "rev-parse", "HEAD"], text=True).strip()
     packaging_commit = subprocess.check_output(["git", "-C", str(HERE.parents[1]), "rev-parse", "HEAD"], text=True).strip()
     (destination / "BUILD-INFO.json").write_text(json.dumps({"version": version,
-        "commit": commit, "packaging_commit": packaging_commit, "python": "3.13.16", "python_url": PYTHON_URL,
+        "commit": commit, "packaging_commit": packaging_commit, "python": PYTHON_VERSION, "python_url": PYTHON_URL,
         "python_sha256": PYTHON_SHA256}, indent=2) + "\n", encoding="utf-8")
     assert (runtime / "pythonw.exe").is_file()
     forbidden = {".usage_cache.json", ".usage-backups", ".peers.json", ".peers", "server.log",
@@ -97,6 +122,7 @@ def main():
         stage(source, payload, archive, args.tag[1:])
         subprocess.run([str(args.compiler), "/Qp", "/DPayload=" + str(payload),
             "/DOutput=" + str(output), "/DAppVersion=" + args.tag[1:],
+            *signing_arguments(os.environ.get("AGENT_TELEMETRY_SIGNTOOL")),
             str(HERE / "AgentTelemetry.iss")], check=True)
     print("Created " + str(output / ("AgentTelemetry-" + args.tag[1:] + "-windows-x64-setup.exe")))
 

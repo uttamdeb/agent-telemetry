@@ -5,19 +5,20 @@ AT_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AT_PACKAGE_DIR="$(cd "$AT_SCRIPT_DIR/.." && pwd)"
 AT_REPO_ROOT="$(cd "$AT_PACKAGE_DIR/../.." && pwd)"
 AT_OUTPUT_DIR="${AGENT_TELEMETRY_OUTPUT_DIR:-$AT_PACKAGE_DIR/build}"
-AT_RELEASE="20261003"
-AT_PYTHON_VERSION="3.13.16"
+# CPython 3.15 includes compression.zstd, so the app reads Codex's compressed rollouts itself.
+AT_RELEASE="20261026"
+AT_PYTHON_VERSION="3.15.2"
 AT_SIGN_IDENTITY="${AGENT_TELEMETRY_SIGN_IDENTITY:--}"
 AT_ARCH="$(uname -m)"
 
 case "$AT_ARCH" in
   arm64)
     AT_PYTHON_TARGET="aarch64-apple-darwin"
-    AT_PYTHON_SHA256="9e01f63bbb08576cd9c8bc2d0564d098cb30c8453a0cd4bcf6aef458f6d2a147"
+    AT_PYTHON_SHA256="1b1b03fca8aa351698403f3d100ee83db7a5d99748fc7707681ac31a6a846ad9"
     ;;
   x86_64)
     AT_PYTHON_TARGET="x86_64-apple-darwin"
-    AT_PYTHON_SHA256="b4dad38ba6a344555ccb71a1b08caad0a6c0dda88c5803658bc95bd7f04e9f5c"
+    AT_PYTHON_SHA256="6ec04346b578656b5d5597144cbe0f4773acea6af6048cb8fe0cac3e92c702ac"
     ;;
   *)
     echo "Unsupported build architecture: $AT_ARCH" >&2
@@ -75,10 +76,6 @@ AT_BACKEND_DIR="$AT_APP_PATH/Contents/Resources/AgentTelemetry"
 mkdir -p "$AT_BACKEND_DIR"
 cp "$AT_REPO_ROOT/dashboard.py" "$AT_REPO_ROOT/parser.py" "$AT_REPO_ROOT/native.py" \
    "$AT_REPO_ROOT/local_servers.py" "$AT_REPO_ROOT/local_servers_windows.py" \
-   "$AT_REPO_ROOT/mcp_access.py" "$AT_REPO_ROOT/mcp_backend.py" \
-   "$AT_REPO_ROOT/mcp_protocol.py" "$AT_REPO_ROOT/mcp_server.py" \
-   "$AT_REPO_ROOT/mcp_tools.py" "$AT_REPO_ROOT/telemetry_insights.py" \
-   "$AT_REPO_ROOT/telemetry_query.py" \
    "$AT_REPO_ROOT/index.html" "$AT_REPO_ROOT/chart.umd.min.js" \
    "$AT_REPO_ROOT/manifest.json" "$AT_REPO_ROOT/sw.js" \
    "$AT_REPO_ROOT/LICENSE" "$AT_BACKEND_DIR/"
@@ -89,7 +86,7 @@ fi
 if [[ -f "$AT_REPO_ROOT/accounts.py" ]]; then
   cp "$AT_REPO_ROOT/accounts.py" "$AT_BACKEND_DIR/"
 fi
-for AT_MODULE in ledger_backups.py session_timeline.py native_activity.py diagnostics.py editor_snapshot.py release_notes.py; do
+for AT_MODULE in antigravity.py cursor_data.py ledger_backups.py session_timeline.py native_activity.py diagnostics.py editor_snapshot.py release_notes.py; do
   if [[ -f "$AT_REPO_ROOT/$AT_MODULE" ]]; then
     cp "$AT_REPO_ROOT/$AT_MODULE" "$AT_BACKEND_DIR/"
   fi
@@ -107,9 +104,13 @@ tar -xzf "$AT_TEMP_DIR/$AT_ARCHIVE_NAME" -C "$AT_TEMP_DIR/unpacked"
 ditto "$AT_TEMP_DIR/unpacked/python" "$AT_APP_PATH/Contents/Resources/AgentTelemetryRuntime"
 
 # The backend uses only CPython's standard library. Remove its unused package installer.
-rm -rf "$AT_APP_PATH/Contents/Resources/AgentTelemetryRuntime/lib/python3.13/site-packages/pip" \
-       "$AT_APP_PATH/Contents/Resources/AgentTelemetryRuntime/lib/python3.13/site-packages/pip-"*.dist-info \
-       "$AT_APP_PATH/Contents/Resources/AgentTelemetryRuntime/lib/python3.13/ensurepip"
+# The folder follows the pinned version; refuse to go on if it is not there, or the removal does nothing.
+AT_PYTHON_LIB="$AT_APP_PATH/Contents/Resources/AgentTelemetryRuntime/lib/python${AT_PYTHON_VERSION%.*}"
+if [[ ! -d "$AT_PYTHON_LIB" ]]; then
+  echo "The bundled runtime has no $AT_PYTHON_LIB" >&2
+  exit 1
+fi
+rm -rf "$AT_PYTHON_LIB/site-packages/pip" "$AT_PYTHON_LIB/site-packages/pip-"*.dist-info "$AT_PYTHON_LIB/ensurepip"
 rm -f "$AT_APP_PATH/Contents/Resources/AgentTelemetryRuntime/bin/pip"* \
       "$AT_APP_PATH/Contents/Resources/AgentTelemetryRuntime/bin/idle3"* \
       "$AT_APP_PATH/Contents/Resources/AgentTelemetryRuntime/bin/pydoc3"*

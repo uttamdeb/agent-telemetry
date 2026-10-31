@@ -16,6 +16,10 @@ from typing import Callable, Iterable, Optional
 WINDOW_SECONDS = 15 * 60
 MAX_SESSIONS = 3
 MAX_TITLE_CHARS = 90
+_USAGE_STATUSES = frozenset(("recorded", "partial", "unavailable"))
+_AVAILABILITY_FIELDS = frozenset((
+    "input_output", "cache_read", "cache_write", "reasoning", "response_output",
+))
 
 # Keep these aligned with the dashboard's source (tool) dimension. The billed
 # model never determines the tool or provider shown here.
@@ -28,6 +32,7 @@ TOOLS = {
     "opencode": ("OpenCode", None),
     "hermes": ("Hermes Agent", None),
     "openclaw": ("OpenClaw", None),
+    "antigravity": ("Antigravity", "Google"),
 }
 
 _UTC = timezone.utc
@@ -102,6 +107,30 @@ def _sum_bucket_records(records) -> Optional[int]:
 
 
 def _session_tokens(session, aggregate, session_count) -> Optional[int]:
+    if aggregate.get("source") == "cursor":
+        status = session.get("usage_status")
+        availability = session.get("usage_availability")
+        if (status != "recorded" or not isinstance(availability, dict)
+                or any(availability.get(field) != "recorded"
+                       for field in ("input_output", "cache_read", "cache_write"))):
+            # Native clients render a numeric total as complete lifetime usage
+            # including cache reads/writes, and have no partial-count affordance.
+            # Keep input/output lower bounds available in the dashboard/MCP with
+            # their explicit field-quality labels.
+            return None
+    if aggregate.get("source") == "antigravity":
+        status = session.get("usage_status", aggregate.get("usage_status"))
+        availability = session.get("usage_availability", aggregate.get("usage_availability"))
+        if status == "unavailable":
+            return None
+        if isinstance(availability, dict):
+            # A token total requires all four additive token buckets. Reasoning
+            # and response-output availability do not change that total.
+            if any(availability.get(field) != "recorded"
+                   for field in ("input_output", "cache_read", "cache_write")):
+                return None
+        elif status in ("partial", "unavailable"):
+            return None
     parts = [_counter(session.get(field)) for field in _USAGE_FIELDS]
     if all(value is not None for value in parts):
         direct = sum(parts)
@@ -146,7 +175,16 @@ def _path_namespace(path, aggregate) -> Optional[str]:
 
 def _source_id(aggregate, session, identity=None, ordinal=0) -> Optional[str]:
     source = aggregate.get("source")
-    if callable(identity) and source in ("claude", "codex"):
+    if source == "cursor":
+        # Cursor's visible id is only eight characters. Its full composer id is
+        # restored by the parser after per-session record attribution.
+        value = session.get("_sid")
+        if (isinstance(value, str) and value and len(value) <= 4096
+                and not any(ord(char) < 32 or ord(char) == 127 for char in value)
+                and "/" not in value and "\\" not in value):
+            return "native:" + value
+        return None
+    if callable(identity) and source in ("claude", "codex", "antigravity"):
         try:
             value = identity(aggregate, session)
         except (KeyError, OSError, TypeError, ValueError):
@@ -237,6 +275,11 @@ def project(items: Iterable, *, observed_at=None, identity: Optional[Callable] =
             if end is None or end < cutoff or end > now:
                 continue
             source_id = _source_id(aggregate, session, identity, ordinal)
+            if source_id is None:
+                # In particular, a Cursor short display id is not a stable
+                # native identity. The parser restores full composer IDs before
+                # this projection; older/incomplete mirrors stay unlisted.
+                continue
             subagent = bool(session.get("subagent") or aggregate.get("subagent"))
             title = _safe_title(session.get("title"))
             row = {
@@ -249,6 +292,18 @@ def project(items: Iterable, *, observed_at=None, identity: Optional[Callable] =
                 "last_activity_at": _iso_utc(end),
                 "subagent": subagent,
             }
+            if source in ("antigravity", "cursor"):
+                status = session.get("usage_status", aggregate.get("usage_status"))
+                if isinstance(status, str) and status in _USAGE_STATUSES:
+                    row["usage_status"] = status
+                availability = session.get("usage_availability", aggregate.get("usage_availability"))
+                if isinstance(availability, dict):
+                    safe_availability = {
+                        field: value for field, value in availability.items()
+                        if field in _AVAILABILITY_FIELDS and isinstance(value, str) and value in _USAGE_STATUSES
+                    }
+                    if safe_availability:
+                        row["usage_availability"] = safe_availability
             alias = None
             if source == "claude" and subagent and isinstance(path, str):
                 alias_id = source_id[len("native:"):] if source_id.startswith("native:") else source_id

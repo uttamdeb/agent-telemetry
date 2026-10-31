@@ -5,18 +5,23 @@ logs your tools already write to your own machine and serves a clean, interactiv
 dashboard — estimated spend, tokens, active time, cache efficiency, an **Anthropic vs OpenAI
 vs Google** provider comparison, an activity calendar, and breakdowns by **model, provider,
 day, hour, weekday, tool, IDE, project and session** — plus how much **disk** all these logs
-eat, and suggestions for spending less, drawn from your own numbers.
+eat.
 
 By default, log inventory, usage and the cache stay on this machine. Separate actions can
-share selected exports with [paired devices](#your-devices-optional), return requested
-analytics to an enabled [local MCP client](docs/mcp.md) (which may forward tool results to
-its model provider), contact a provider after a confirmed **Read once** account lookup, or
+share selected exports with [paired devices](#your-devices-optional), contact a provider
+after a confirmed **Read once** account lookup, or
 fetch GitHub update and release-note metadata after you click **Check for updates** or
 **Load notes**. Cached release notes can be shown offline after an upgrade. No account or API key is needed
 for the dashboard; it has no runtime dependencies beyond Python's standard library and a
 vendored copy of Chart.js.
 
-Covers **Claude Code · Claude Desktop · Codex · GitHub Copilot · Cursor · OpenCode · Hermes Agent · OpenClaw**.
+Covers **Claude Code · Claude Desktop · Codex · GitHub Copilot · Cursor · Antigravity · OpenCode · Hermes Agent · OpenClaw**.
+
+**Get AgentTelemetry:** [Desktop apps for macOS and Windows](#download-the-app) ·
+[VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=agenttelemetry-team.agenttelemetry) ·
+[Open VSX](https://open-vsx.org/extension/agenttelemetry-team/agenttelemetry) (Cursor and compatible editors) ·
+[Browser dashboard (Python or source)](#quick-start) ·
+[Product page](https://agenttelemetry-app.vercel.app/)
 
 ## Download the app
 
@@ -41,9 +46,9 @@ These builds are unsigned/unnotarized. macOS may require **System Settings → P
 Security → Open Anyway**; Windows SmartScreen may require **More info → Run anyway**.
 [Product and install page](https://agenttelemetry-app.vercel.app/) ·
 [All releases](https://github.com/uttamdeb/agent-telemetry/releases) ·
-[What's new in 2.1.0](docs/releases/v2.1.0.md) ·
+[What's new in 2.2.0](docs/releases/v2.2.0.md) ·
 [SHA-256 checksums in release assets](https://github.com/uttamdeb/agent-telemetry/releases/latest) ·
-[PyPI package 2.1.0](https://pypi.org/project/agenttelemetry-app/2.1.0/)
+[PyPI package 2.2.0](https://pypi.org/project/agenttelemetry-app/2.2.0/)
 
 ---
 
@@ -219,24 +224,14 @@ retain one serialized snapshot per display tick, in memory only; the ledger is u
 as all writes. `POST /api/shutdown` additionally requires the owning Windows client's
 per-process control token; a normal standalone dashboard cannot be stopped by that route.
 
-## Local MCP access (optional)
-
-AgentTelemetry provides eight read-only MCP tools for usage, comparisons, supported insights,
-session summaries and timelines, data health, the telemetry catalog and saved subscription
-limits. MCP access is off by default. Enable it in Settings and confirm each scope. The local
-bridge requires an already-running dashboard and returns data only when the configured MCP
-client requests it. A cloud-backed client may send tool results to its provider; review that
-client's data-handling settings before enabling access. Project/device names and usage from
-connected devices require their own opt-in scopes. The MCP bridge never refreshes accounts,
-returns prompt text, or edits client configuration. See [MCP tools, setup and privacy
-limits](docs/mcp.md).
-
-The MCP bridge ships with the **2.1.0** application and Python package. It is not a separate
-marketplace listing; install/update AgentTelemetry, then use the [MCP setup guide](docs/mcp.md).
-
 > `--rebuild` deletes the cache, and with it every session whose log has since been deleted
 > from disk (see [Storage](#storage--what-these-logs-cost-you-in-disk)). Copy
 > `.usage_cache.json` somewhere safe first if you've cleaned up old logs.
+
+Deleting a session inside a tool doesn't remove it from your totals either. If OpenCode,
+Hermes or OpenClaw delete a session from their database, the dashboard keeps the usage it
+already counted and marks that session as deleted. The same applies to turns you undo in
+OpenCode and to a Claude or Copilot log that gets shorter.
 
 **Requirements:** Python 3.8+ on **macOS, Linux or Windows**. On Windows run
 `python dashboard.py` (or `run.cmd`); on macOS/Linux `python3 dashboard.py` (or `./run.sh`).
@@ -261,20 +256,32 @@ instead of cloning, delete `.usage_cache.json` first — that file is your perso
 
 ## Data sources
 
+**AgentTelemetry Pulsar** is the engine that reads these sources. It finds each tool's
+local logs, picks the usage signal out of them and turns every tool's format into the one
+shared usage shape the dashboard shows. It runs on your machine, and its code lives in
+`parser.py`.
+
 | Tool | Where it reads | Tokens |
 |---|---|---|
 | **Claude Code** | `~/.claude/projects/**/*.jsonl` | exact (in/out/cache read+write, 5m/1h tiers) |
 | **Claude Desktop** (agent mode) | `Claude/local-agent-mode-sessions/**` under App Support / `%APPDATA%` / `~/.config` | exact |
-| **Codex** | `~/.codex/sessions/**`, `~/.codex/archived_sessions/**` | exact (in/cached/out/reasoning); subagents are identified and labelled |
+| **Codex** | `~/.codex/sessions/**`, `~/.codex/archived_sessions/**` (plain `*.jsonl` and the zstd-compressed `*.jsonl.zst` Codex swaps in for idle threads) | exact (in/cached/out/reasoning); subagents are identified and labelled. Compressed rollouts are read with Python 3.14+ or the `zstd` command; without either they are counted as unread (never dropped) and the sidebar says how many |
 | **GitHub Copilot** | VS Code-family `chatSessions/*.{json,jsonl}`; SDK/CLI `~/.copilot/session-state/*/events.jsonl`, enriched from VS Code `agentSessionData/*/session.db` | recorded request/turn tokens where available; SDK shutdown totals where safely dated. SDK gaps show a warning tooltip and unavailable/partial usage; older non-SDK chats retain text estimates. Premium multipliers are separate from estimated dollars. |
-| **Cursor** (native AI) | `Cursor/User/globalStorage/state.vscdb` under App Support / `%APPDATA%` / `~/.config` | partial — model, mode, timestamps, tool calls and AI-line stats are exact; tokens are on only ~2% of messages |
+| **Cursor** (native AI) | `Cursor/User/globalStorage/state.vscdb` under App Support / `%APPDATA%` / `~/.config` | recorded, partial or unavailable per session/model: explicit message input/output tokens, models, tools and AI-line stats where the local records expose them |
+| **Google Antigravity** | `~/.gemini/antigravity/conversations/*.db`, `~/.gemini/antigravity-ide/conversations/*.db`, `~/.gemini/antigravity-cli/conversations/*.db` | recorded SQLite usage with per-field availability; standalone legacy `.pb` files are unsupported |
 | **OpenCode** | `~/.local/share/opencode/opencode.db`, `%LOCALAPPDATA%\opencode\opencode.db`, `~/.opencode/opencode.db` (or `$OPENCODE_DATA_DIR`) | V1/V2 SQLite; exact (in/out/reasoning/cache), prompts and tools; cost is read from OpenCode's own per-message value |
 | **Hermes Agent** | `~/.hermes/state.db` (or `$HERMES_HOME`, `%LOCALAPPDATA%\hermes`) | exact (in/out/cache/reasoning, per model) |
 | **OpenClaw** | `~/.openclaw/agents/<agent>/agent/openclaw-agent.sqlite` (or `$OPENCLAW_STATE_DIR`; also the older `~/.clawdbot`, `~/.moltbot`) and the older per-session `sessions/*.jsonl` | exact (in/out/cache read/cache write/reasoning, per response); its own logged cost is used only for a model with no verified price. Large events are stored zstd-compressed: read with the `zstd` command or Python 3.14+ |
 
 A tool you don't use simply contributes nothing. **Attribution is by tool, not by model** —
-a Claude or GPT model used *inside* Copilot/Cursor/OpenCode/Hermes/OpenClaw counts under that tool, and the
+a Claude, Gemini, or GPT model used *inside* Copilot/Cursor/Antigravity/OpenCode/Hermes/OpenClaw counts under that tool, and the
 Models table lists each `model × tool` row separately.
+
+Antigravity's supported SQLite schema, duplicate-row handling, recorded checkpoint detail,
+and format limits are documented in [Google Antigravity support](docs/antigravity.md).
+
+Cursor's local conversation metadata is documented in [Cursor support](docs/cursor.md),
+including its model/token coverage states, workspace associations, subagents, and limits.
 
 Copilot's newer SDK-based agent sessions use a different store from older Copilot Chat.
 AgentTelemetry joins their event history to VS Code's saved per-turn usage using native
@@ -367,14 +374,6 @@ a display-name override. See [subagent name behavior](docs/subagent-sessions.md)
 Tool/provider icons are bundled locally, including the OpenAI mark for Codex; no remote
 logo requests occur. Their sources and licenses are in `static/tool-icons/README.md`.
 
-**Optimize** — suggestions derived from your own logs, ranked by what they'd save: sessions
-re-reading a very large context, thinking share, tool-heavy sessions that never delegated,
-cache written but never read, a costly model doing light work, what each **Skill** costs,
-edits that needed a retry, oversized **CLAUDE.md / AGENTS.md**, sessions that open heavier
-than your leanest ones, wasted file reads, installed skills and agents you never use, and
-MCP servers you never call, barely use, or load everywhere but use in one project. Nothing is shown unless
-your data supports it, and because the estimates overlap they are never summed.
-
 **Storage** — see below.
 
 **Keyboard** — `1`/`7`/`3`/`9`/`a` ranges, `m` month-to-date, `,` / `.` previous / next
@@ -465,17 +464,21 @@ dollars**, so cost is always derived. Rates live in `parser.py → PRICING` as
   above 100K. The threshold includes cached input and applies to each request.
   Available Claude logs backfill this pricing detail on a normal restart; token and
   message counts stay unchanged. Older archives/peers and other tools without that
-  detail use the short-prompt rate. Optimize model substitutions conservatively use
-  the higher tier when the target request size is unknown.
+  detail use the short-prompt rate.
 - **Price changes are date-aware.** When a vendor cuts a price (OpenAI's GPT-5.6 cuts of
   2026-07-30 and 2026-08-21), usage from before the change keeps the rate it had then —
   see `parser.py → PRICE_HISTORY`.
 - **These are API-equivalent values.** If you're on a subscription (Claude Max/Pro, Codex,
   Copilot), you don't pay per token — the $ is "what this would cost at API rates."
-- **Cursor** rarely logs token counts, and **older Copilot chats** have none, so their tokens
-  (and thus $) are rough. Current Copilot builds log real per-request tokens, which are used.
-  Copilot's honest metric is **request count** and its **premium-request** total (both shown);
-  Cursor's is **messages, tool calls and AI lines kept** (also shown).
+- **Cursor** exposes explicit input/output token receipts for some messages; missing and
+  placeholder values are unavailable, and usage coverage can be partial. Cache and reasoning
+  values remain unavailable unless recorded. Overview shows observed Cursor prompts, replies,
+  and tool calls separately when they have no token/cost coverage. It does not estimate tokens
+  from text or context meters, infer subscription charges, or count metadata as tokens. The
+  **Exact tokens only** filter omits Cursor because local token coverage is incomplete. See
+  [Cursor support](docs/cursor.md). **Older Copilot chats** may have no token data; current
+  Copilot builds log real per-request tokens. Copilot's honest metric is **request count** and
+  its **premium-request** total (both shown); Cursor also exposes **AI lines kept**.
 - **Billing details that change the price are applied**: prompt-cache writes at their own
   rate (Claude and GPT-5.6/GPT-6), Claude fast mode, US-only inference (1.1x) and web
   searches ($10/1K). A forked or subagent Codex thread's replay of its parent is skipped,
@@ -520,7 +523,7 @@ and extend this from that file).
 
 ## Files
 
-`dashboard.py` (server + cache + cost + `/api/storage`) · `parser.py` (log parsers + pricing) ·
+`dashboard.py` (server + cache + cost + `/api/storage`) · `parser.py` (AgentTelemetry Pulsar: log parsers + pricing) ·
 `index.html` (shell) · `static/app.css` · `static/core.js` · `static/charts.js` ·
 `static/views.js` · `chart.umd.min.js` (vendored Chart.js) · `AGENTS.md` · `run.sh`.
 
@@ -552,8 +555,8 @@ What sharing sends: session titles (often the start of a prompt), project and br
 log file paths, models, token counts, costs and times. Full prompts, replies and file
 contents are never sent. Sharing opens one read-only port (7879) that answers only to the
 pairing code. The dashboard itself stays on `127.0.0.1`. The connection is **not
-encrypted**, so share only on a network you trust. The setup checks on the Optimize tab
-(instruction files, installed skills, MCP servers) and the Storage tab still describe only
+encrypted**, so share only on a network you trust. The Storage tab and setup inventories
+(instruction files, installed skills, MCP servers) still describe only
 the computer you're looking at. `.peers.json` and `.peers/` are gitignored.
 
 **If it can't connect**, the error says which of these it is:

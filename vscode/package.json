@@ -3,7 +3,7 @@
   "displayName": "AgentTelemetry",
   "icon": "media/app-icon.png",
   "description": "Tokens, estimated API cost and subagent sessions for Claude Code, Codex, Copilot and more. Local by default.",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "publisher": "agenttelemetry-team",
   "license": "MIT",
   "engines": {
@@ -21,7 +21,6 @@
     "cost",
     "usage",
     "analytics",
-    "mcp",
     "codex",
     "claude",
     "copilot",
@@ -95,6 +94,10 @@
       {
         "command": "agentTelemetry.setupPython",
         "title": "AgentTelemetry: Set up Python"
+      },
+      {
+        "command": "agentTelemetry.getDesktopApp",
+        "title": "AgentTelemetry: Get the desktop app"
       },
       {
         "command": "agentTelemetry.settings",

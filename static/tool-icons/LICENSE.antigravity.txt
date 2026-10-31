@@ -1,0 +1,17 @@
+Google Antigravity icon asset
+
+Source SVG:
+https://www.antigravity.google/assets/image/brand/antigravity-icon__one-color.svg
+
+Official press-assets page:
+https://www.antigravity.google/press
+
+Retrieved 2026-10-25. The official press-assets page offers the SVG for download
+but does not state an open-source license or other redistribution grant. This file
+must not be described as CC0, MIT, Apache-2.0, or otherwise open-source licensed.
+
+The icon is included as an unmodified source-identification mark in local
+AgentTelemetry charts and tables. Google and Antigravity names and marks remain
+the property of their respective owners. AgentTelemetry is not affiliated with,
+sponsored by, or endorsed by Google. Reassess this use before using the asset in
+marketing, promotion, or compatibility claims.

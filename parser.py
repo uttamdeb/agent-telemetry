@@ -1,10 +1,14 @@
 """
-parser.py — Incremental usage-log parser for local AI coding tools.
+parser.py — AgentTelemetry Pulsar: the incremental usage-log parser for local AI coding tools.
+
+"AgentTelemetry Pulsar" is this module's user-facing name. It appears only in user text and
+docs: the file and module stay `parser.py` because other modules, the tests and the packaging
+allowlists import it by that name, so never rename it.
 
 Sources: Claude Code, Claude Desktop (agent mode), Codex CLI, GitHub Copilot
-(VS Code / Insiders / Cursor), Cursor native AI, opencode, and Hermes Agent. Each tool stores
-interaction logs locally; this module discovers those files, parses them
-incrementally (append-only .jsonl read from a byte offset; rewritten stores
+(VS Code / Insiders / Cursor), Cursor native AI, Google Antigravity, opencode, Hermes Agent
+and OpenClaw. Each tool stores interaction logs locally; this module discovers those
+files, parses them incrementally (append-only .jsonl read from a byte offset; rewritten stores
 and SQLite databases re-read on change), and produces per-file aggregates the
 server merges into one dataset. Everything is keyed off the user's own home
 dir — nothing is hardcoded to a machine or account, so it works on any
@@ -12,11 +16,13 @@ Mac/Linux install of the same tools.
 
 No third-party dependencies — stdlib only.
 """
-import os, sys, json, glob, re, time, shutil, subprocess, copy, hashlib
+import os, sys, json, glob, re, time, shutil, subprocess, copy, hashlib, contextlib
 if __package__:
     from . import accounts as A
+    from . import antigravity as AG
 else:
     import accounts as A
+    import antigravity as AG
 from datetime import datetime, timezone
 
 HOME = os.path.expanduser("~")
@@ -29,6 +35,20 @@ def _leaf(path):
         return ""
     return os.path.basename(str(path).replace("\\", "/").rstrip("/"))
 
+
+def is_zstd_path(path):
+    """True for a zstd-compressed log (a Codex rollout Codex has compressed)."""
+    return str(path).lower().endswith(".zst")
+
+
+def _codex_leaf(path):
+    """A Codex rollout's file name with the compression suffix removed:
+    rollout-<stamp>-<thread id>.jsonl.zst is the same conversation as the
+    rollout-<stamp>-<thread id>.jsonl it replaced. Uses _leaf, so a path written on
+    Windows deduplicates against one written on macOS or Linux."""
+    leaf = _leaf(path)
+    return leaf[:-4] if leaf.lower().endswith(".jsonl.zst") else leaf
+
 # ---------------------------------------------------------------------------
 # Source locations
 # ---------------------------------------------------------------------------
@@ -39,9 +59,14 @@ CLAUDE_GLOBS = [os.path.join(HOME, ".claude", "projects", "**", "*.jsonl")]
 # source. Append-only: a renamed thread gets a NEW line, so the LAST entry wins.
 CODEX_SESSION_INDEX = os.path.join(HOME, ".codex", "session_index.jsonl")
 
+# Codex replaces an idle thread's rollout-<stamp>-<thread id>.jsonl with a zstd file of
+# the same name plus ".zst" (and the two never coexist for long), so both spellings are
+# discovered in both roots and are ONE conversation (see _codex_leaf).
 CODEX_GLOBS = [
     os.path.join(HOME, ".codex", "sessions", "**", "*.jsonl"),
+    os.path.join(HOME, ".codex", "sessions", "**", "*.jsonl.zst"),
     os.path.join(HOME, ".codex", "archived_sessions", "**", "*.jsonl"),
+    os.path.join(HOME, ".codex", "archived_sessions", "**", "*.jsonl.zst"),
 ]
 # Claude Desktop "local agent mode" runs Claude Code in a sandbox; it writes
 # standard Claude-format transcripts under a nested .claude/projects/ tree
@@ -70,6 +95,9 @@ CLAUDE_DESKTOP_GLOBS = [
 GEMINI_GLOBS = [
     os.path.join(HOME, ".gemini", "tmp", "*", "chats", "*.jsonl"),
 ]
+# Antigravity stores conversation databases under exactly three local roots.
+# The reader owns root validation and rejects symlinked/out-of-root databases.
+ANTIGRAVITY_ROOTS = AG.conversation_roots(HOME)
 # Cursor's native AI: one SQLite key-value store. Bubbles hold messages; token counts
 # are present on only a few and no reliable per-message model is stored.
 # (CURSOR_DBS is derived portably from the editor roots below.)
@@ -235,11 +263,13 @@ PRICING = {
     "GPT-6 Astra": (10, 50, 12.50, 0, 1),
     "GPT-6 Sol": (2, 10, 2.50, 0, 0.20),
     "GPT-6 Luna": (0.10, 0.50, 0.125, 0, 0.01),
-    # GPT-6.1 Sol — same $2/$10 as GPT-6 Sol, but cached input is 5% of input, not 10%
-    # (verified against the model page and the pricing page, 2026-09-30). Sol is the
-    # only 6.1 variant listed. The page now states the 272K long-context threshold; it
-    # is still not modeled (the one 6.1 request seen here has 136K of input).
+    # GPT-6.1 — cached input is 5% of input (GPT-6 is 10%); 30-minute cache write 1.25x
+    # input. Sol verified 2026-09-30; Terra (launched 2026-10-26) verified against
+    # developers.openai.com/api/docs/pricing on 2026-10-30: $1 / $5, cached $0.05,
+    # write $1.25, short context (<=272K). The page's long-context (>272K) and Fast
+    # rows are per request and still not modeled (AGENTS.md "What the logs cannot show").
     "GPT-6.1 Sol": (2, 10, 2.50, 0, 0.10),
+    "GPT-6.1 Terra": (1, 5, 1.25, 0, 0.05),
     # OpenAI GPT-5.4 / 5.5 — verified from OpenAI API pricing docs (2026-07).
     # NOTE: GPT-5.5 has a >272K-input surcharge (2x in / 1.5x out for the session)
     # not modeled here, so heavy-context Codex sessions may cost somewhat more.
@@ -274,12 +304,12 @@ PRICING = {
     # prompts over 200K on Pro (2x input, 1.2-1.5x output), audio input (about 2x), and
     # the Live / TTS / image / embedding / Veo models, which bill audio, image and video
     # tokens at rates one tuple cannot express and no coding agent logs.
-    # Gemini 4 Argon — announced introductory API-equivalent rates, verified
-    # against blog.google/innovation-and-ai/models-and-research/gemini-models/
-    # gemini-4-argon/ (2026-10-02): $2 input / $10 output, cached input 95% off.
-    # Access is limited to trusted testers; no public API id is listed yet. The
-    # later $4/$20 rate has no effective date: only move this into PRICE_HISTORY
-    # when that change takes effect. Cache storage is not modeled.
+    # Gemini 4 Argon — generally available as gemini-4-argon; verified against
+    # ai.google.dev/gemini-api/docs/pricing (2026-10-30): $2 input / $10 output /
+    # $0.10 cached "through November 30, 2026", then $4 / $20 / $0.20 "starting
+    # December 1, 2026". Never pre-encode a future price: ON OR AFTER 2026-12-01 move
+    # this tuple into PRICE_HISTORY as [("2026-11-30", ...)] and put (4, 20, 0, 0, 0.20)
+    # here. Implicit caching only; cache storage is not modeled.
     "Gemini 4 Argon": (2.00, 10.00, 0, 0, 0.10),
     # 3.6 to 3.8 Flash are a promo "through December 31, 2026" and double on 2027-01-01:
     # then move these tuples into PRICE_HISTORY dated 2026-12-31 and put the doubled
@@ -655,9 +685,12 @@ def _claude_effort(obj):
 def _finish_store_records(agg):
     """Retain session attribution, then derive the store's date/model rollup."""
     rows = agg.pop("_session_records", {})
+    dims = agg.pop("_session_dims", {})
     agg.pop("_record_session", None)
+    # The full native id stays on the session: the visible id is only its first
+    # eight characters, which OpenCode's time-ordered ids share within minutes.
     for s in agg["sessions"]:
-        s["records"] = rows.get(s.pop("_sid"), {})
+        s["records"] = rows.get(s.get("_sid"), {})
         weights = {}
         for key, row in s["records"].items():
             model = key.split("\t", 1)[1]
@@ -676,6 +709,11 @@ def _finish_store_records(agg):
             for field, value in row.items():
                 if isinstance(value, (int, float)):
                     total[field] = total.get(field, 0) + value
+    if _retention_kind(agg) == "store":
+        # Private: what each session added to the store's tools and hourly rows.
+        # Never exported or sent to the page; see reconcile().
+        agg["_store_detail"] = {s["_sid"]: dims.get(s["_sid"]) or {"tools": {}, "hourly": {}}
+                                for s in agg["sessions"] if s.get("_sid")}
 
 
 # "Active time" — a gap-capped estimate of how long a real person was actually
@@ -705,11 +743,23 @@ def _active_gap(prev_iso, dt):
     return gap if 0 < gap <= ACTIVE_GAP_CAP else 0.0
 
 
+def _session_dims(agg):
+    """A multi-session store's per-session tools/hourly, or None for one-session logs.
+    Kept so a session the tool later deletes can keep its whole contribution."""
+    sid = agg.get("_record_session")
+    if sid is None:
+        return None
+    return agg.setdefault("_session_dims", {}).setdefault(sid, {"tools": {}, "hourly": {}})
+
+
 def _tool(agg, date, name):
     """Count one tool/function call, keyed by day so the UI can date-filter it."""
     k = f"{date}\t{name}"
     agg["tools"][k] = agg["tools"].get(k, 0) + 1
     agg["totals"]["tools"] += 1
+    dims = _session_dims(agg)
+    if dims is not None:
+        dims["tools"][k] = dims["tools"].get(k, 0) + 1
 
 
 def _bump_time(agg, dt, tokens, msgs):
@@ -717,6 +767,11 @@ def _bump_time(agg, dt, tokens, msgs):
     h = agg["hourly"].setdefault(f"{date}\t{hour}", {"tokens": 0, "msgs": 0})
     h["tokens"] += tokens
     h["msgs"] += msgs
+    dims = _session_dims(agg)
+    if dims is not None:
+        sh = dims["hourly"].setdefault(f"{date}\t{hour}", {"tokens": 0, "msgs": 0})
+        sh["tokens"] += tokens
+        sh["msgs"] += msgs
     iso = dt.isoformat()
     if agg["first_ts"] is None or iso < agg["first_ts"]:
         agg["first_ts"] = iso
@@ -2904,27 +2959,215 @@ def parse_gemini(agg, path):
         agg["totals"]["user"] += 1
 
 
+# ==========================================================================
+# ANTIGRAVITY  (bounded local SQLite conversation databases)
+# ==========================================================================
+def _antigravity_merge_state(previous, current):
+    states = (previous, current)
+    if all(value == "recorded" for value in states):
+        return "recorded"
+    if all(value == "unavailable" for value in states):
+        return "unavailable"
+    return "partial"
+
+
+def parse_antigravity(agg, path):
+    """Read one Antigravity SQLite conversation and fold safe facts into agg."""
+    snapshot = AG.read_conversation(path, max_events=AG.MAX_EVENTS,
+                                    include_private=True)
+    if not isinstance(snapshot, dict) or not isinstance(snapshot.get("conversation_id"), str):
+        raise AG.AntigravityReadError("conversation identity is unavailable")
+
+    conversation_id = snapshot["conversation_id"]
+    usage = snapshot.get("totals") if isinstance(snapshot.get("totals"), dict) else {}
+    summary = {
+        "usage_status": snapshot.get("usage_status", "unavailable"),
+        "usage_availability": dict(snapshot.get("usage_availability") or {}),
+        "model_status": snapshot.get("model_status", "unavailable"),
+        "detail_status": snapshot.get("detail_status", "unavailable"),
+        "record_availability": {},
+        "response_out": 0,
+        "undated_usage": {key: 0 for key in ("in", "out", "cr", "cc", "reason", "response_out", "req")},
+        "unknown_model_usage": {key: 0 for key in ("in", "out", "cr", "cc", "reason", "response_out")},
+        "subagent_requests": max(0, int(snapshot.get("subagent_requests", 0) or 0)),
+    }
+    agg["source"] = "antigravity"
+    agg["_session_id"] = conversation_id
+    agg["conversation_id"] = conversation_id
+    agg["cwd"] = snapshot.get("cwd")
+    agg["project"] = snapshot.get("project") or "(unknown)"
+    agg["branch"] = snapshot.get("branch")
+    agg["title"] = snapshot.get("title")
+    agg["subagent"] = snapshot.get("subagent") is True
+    agg["parent_id"] = snapshot.get("parent_id")
+    agg["root_id"] = snapshot.get("root_id")
+    agg["nesting_depth"] = snapshot.get("nesting_depth")
+    agg["subagent_type"] = snapshot.get("subagent_type")
+    agg["subagent_role"] = snapshot.get("subagent_role")
+    agg["context"] = copy.deepcopy(snapshot.get("context"))
+    agg["activity_dates"] = list(snapshot.get("activity_dates") or [])
+    agg["compactions"] = {
+        item["id"]: dict(item) for item in snapshot.get("compactions", [])
+        if isinstance(item, dict) and isinstance(item.get("id"), str)
+    }
+    agg["antigravity"] = summary
+    _reasoning_effort_init(agg)
+
+    totals = agg["totals"]
+    rows = snapshot.get("records") if isinstance(snapshot.get("records"), list) else []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        model = _canonicalize(row.get("model") if isinstance(row.get("model"), str) else "Unknown")
+        if not model:
+            model = "Unknown"
+        effort = row.get("effort") if row.get("effort") in ("low", "medium", "high", "xhigh", "max") else None
+        numeric = {key: max(0, int(row.get(key, 0) or 0))
+                   for key in ("in", "out", "cr", "cc", "reason", "response_out")}
+        req = max(0, int(row.get("req", 1) or 0))
+        availability = row.get("usage_availability") if isinstance(row.get("usage_availability"), dict) else {}
+        timestamp = row.get("timestamp")
+        dt = _from_iso(timestamp) if isinstance(timestamp, str) else None
+        date = _buckets(dt)[0] if dt else None
+        if date:
+            record = _rec(agg, date, model)
+            for key in ("in", "out", "cr", "cc", "reason"):
+                record[key] += numeric[key]
+                totals[key] += numeric[key]
+            record["req"] += req
+            totals["req"] += req
+            record_key = f"{date}\t{model}"
+            bucket_state = summary["record_availability"].get(record_key)
+            if bucket_state is None:
+                summary["record_availability"][record_key] = {
+                    field: availability.get(field, "unavailable")
+                    for field in ("input_output", "cache_read", "cache_write", "reasoning", "response_output")
+                }
+            else:
+                for field in bucket_state:
+                    bucket_state[field] = _antigravity_merge_state(
+                        bucket_state[field], availability.get(field, "unavailable"))
+            _bump_time(agg, dt, numeric["in"] + numeric["out"] + numeric["cr"] + numeric["cc"], 0)
+            record["active"] += _active_gap(agg.get("_active_last"), dt)
+            agg["_active_last"] = dt.isoformat()
+            _reasoning_effort_observe(agg, dt, model, effort,
+                                      "antigravity_effort_responses", identity=row.get("key"))
+        else:
+            for key in ("in", "out", "cr", "cc", "reason", "response_out"):
+                summary["undated_usage"][key] += numeric[key]
+                if key in totals:
+                    totals[key] += numeric[key]
+            summary["undated_usage"]["req"] += req
+            totals["req"] += req
+        summary["response_out"] += numeric["response_out"]
+        if model == "Unknown":
+            for key in summary["unknown_model_usage"]:
+                summary["unknown_model_usage"][key] += numeric[key]
+        if date and model != "(user)":
+            context = row.get("context") if isinstance(row.get("context"), dict) else {}
+            estimate = context.get("estimated_tokens_used")
+            if isinstance(estimate, int) and not isinstance(estimate, bool) and estimate >= 0:
+                label = ("0-50k" if estimate < 50_000 else "50-150k" if estimate < 150_000
+                         else "150-400k" if estimate < 400_000 else "400k+")
+                ctx = agg["ctx"].setdefault(f"{date}\t{label}", {"tok": 0, "n": 0})
+                ctx["tok"] += estimate
+                ctx["n"] += req
+
+    # Full safe activity buckets are produced during the bounded source scan,
+    # independently of the capped timeline event list.
+    activity = snapshot.get("activity_buckets") if isinstance(snapshot.get("activity_buckets"), dict) else {}
+    for key, count in (activity.get("assistant") or {}).items():
+        if not isinstance(key, str) or "\t" not in key or not isinstance(count, int):
+            continue
+        date, model_raw = key.split("\t", 1)
+        model = _canonicalize(model_raw)
+        record = _rec(agg, date, model)
+        record["asst"] += count
+        totals["asst"] += count
+    for date, count in (activity.get("user") or {}).items():
+        if not isinstance(date, str) or not isinstance(count, int):
+            continue
+        record = _rec(agg, date, "(user)")
+        record["user"] += count
+        totals["user"] += count
+    for key, count in (activity.get("tools") or {}).items():
+        if not isinstance(key, str) or key.count("\t") < 2 or not isinstance(count, int):
+            continue
+        date, model_raw, tool = key.split("\t", 2)
+        model = _canonicalize(model_raw)
+        record = _rec(agg, date, model)
+        record["tools"] += count
+        tool_key = f"{date}\t{tool}"
+        agg["tools"][tool_key] = agg["tools"].get(tool_key, 0) + count
+        totals["tools"] += count
+    for hour_key, value in (activity.get("hourly") or {}).items():
+        if (not isinstance(hour_key, str) or not isinstance(value, dict)
+                or not isinstance(value.get("msgs"), int)):
+            continue
+        hour = agg["hourly"].setdefault(hour_key, {"tokens": 0, "msgs": 0})
+        hour["msgs"] += value["msgs"]
+
+    totals["asst"] = sum((activity.get("assistant") or {}).values())
+    totals["user"] = sum((activity.get("user") or {}).values())
+    totals["tools"] = sum((activity.get("tools") or {}).values())
+    source_totals = snapshot.get("totals") if isinstance(snapshot.get("totals"), dict) else {}
+    # Requests and usage sums include dated and undated rows. Reassign from the
+    # reader's deduplicated snapshot to avoid message/event caps affecting totals.
+    for key in ("in", "out", "cr", "cc", "reason", "req"):
+        if isinstance(source_totals.get(key), int) and not isinstance(source_totals.get(key), bool):
+            totals[key] = source_totals[key]
+    if snapshot.get("first_activity"):
+        agg["first_ts"] = snapshot["first_activity"]
+    if snapshot.get("last_activity"):
+        agg["last_ts"] = snapshot["last_activity"]
+
+    session_fields = {
+        "conversation_id": conversation_id,
+        "_sid": conversation_id,
+        "id": conversation_id[:8],
+        "in": usage.get("in", 0),
+        "out": usage.get("out", 0),
+        "cr": usage.get("cr", 0),
+        "cc": usage.get("cc", 0),
+        "reason": usage.get("reason", 0),
+        "req": usage.get("req", 0),
+        "asst": snapshot.get("assistant_messages", 0),
+        "user": snapshot.get("user_messages", 0),
+        "tools": snapshot.get("tool_calls", 0),
+        "response_out": summary["response_out"],
+        "parent_id": snapshot.get("parent_id"),
+        "root_id": snapshot.get("root_id"),
+        "subagent": snapshot.get("subagent") is True,
+        "subagent_type": snapshot.get("subagent_type"),
+        "subagent_role": snapshot.get("subagent_role"),
+        "nesting_depth": snapshot.get("nesting_depth"),
+        "context": copy.deepcopy(snapshot.get("context")),
+        "usage_status": summary["usage_status"],
+        "usage_availability": dict(summary["usage_availability"]),
+        "model_status": summary["model_status"],
+        "detail_status": summary["detail_status"],
+        "record_availability": copy.deepcopy(summary["record_availability"]),
+        "user_messages": snapshot.get("user_messages", 0),
+        "assistant_messages": snapshot.get("assistant_messages", 0),
+        "tool_calls": snapshot.get("tool_calls", 0),
+        "subagent_requests": summary["subagent_requests"],
+        "activity_dates": list(snapshot.get("activity_dates") or []),
+    }
+    # _finalize_session creates the row after this parser returns. Retain the
+    # source-only values privately so the update route can add them to that row.
+    agg["_antigravity_session"] = session_fields
+
+
 # ===========================================================================
 # CURSOR  (native AI chat bubbles in a SQLite key-value store)
 # ===========================================================================
-# Home-relative source dirs on any OS: /Users/x/... (macOS), /home/x/... (Linux)
-# and C:\Users\x\... (Windows). Either separator, either drive — a Cursor DB can
-# be read on a different machine than the one that wrote it.
-_CURSOR_PATH_RE = re.compile(
-    r'(?:/Users/|/home/|[A-Za-z]:[\\/]{1,2}Users[\\/]{1,2})[^/\\"]+[\\/]{1,2}'
-    r'(?:Documents[\\/]{1,2}GitHub|Documents|Desktop|repos?|code|dev|projects|src|work)'
-    r'[\\/]{1,2}([^/\\"\s]+)', re.I)
-
-
 def _normalize_cursor_model(raw):
-    """Cursor names models its own way ("claude-4.6-opus-high-thinking",
-    "gpt-5-nano", "composer-1"). Map them onto the display names every other
-    source already uses so one model reads the same everywhere."""
-    if not raw:
-        return "Cursor (default)"
-    first = str(raw).split(",")[0].strip()          # multi-model sessions list them
-    if not first or first == "default":
-        return "Cursor (default)"
+    """Normalize a concrete Cursor model identifier for display."""
+    if not isinstance(raw, str) or not raw.strip():
+        return "Unknown"
+    first = raw.split(",")[0].strip()          # multi-model sessions list them
+    if not first or first.lower() == "default":
+        return "Unknown"
     base = re.sub(r"-(?:high-)?(?:thinking|reasoning|max|fast)$", "", first.lower())
     m = re.match(r"claude-(\d+(?:\.\d+)?)-(opus|sonnet|haiku)$", base)
     if m:
@@ -2940,26 +3183,48 @@ def _cursor_ai_lines(con):
     """Cursor's own AI-code accounting: lines it suggested vs. lines you kept,
     per day, split by tab-completion and composer. No other tool records this."""
     out = {}
+    import sqlite3
+    max_rows = 100_000
     try:
+        count = con.execute(
+            "SELECT COUNT(*) FROM ItemTable WHERE key LIKE 'aiCodeTracking.dailyStats%'"
+        ).fetchone()[0]
+        if count > max_rows:
+            raise ValueError("Cursor code-tracking summary exceeds bounded row budget")
         rows = con.execute(
-            "SELECT key, value FROM ItemTable WHERE key LIKE 'aiCodeTracking.dailyStats%'"
-        ).fetchall()
-    except Exception:
-        return out
-    for _k, v in rows:
+            "SELECT key, CASE WHEN length(value) <= 2097152 THEN value ELSE NULL END, "
+            "(length(value) > 2097152) FROM ItemTable "
+            "WHERE key LIKE 'aiCodeTracking.dailyStats%' LIMIT ?", (max_rows,)
+        )
+    except sqlite3.OperationalError as exc:
+        if "no such table" in str(exc).lower():
+            return out
+        raise
+    for _k, v, oversized in rows:
+        if oversized:
+            raise ValueError("Cursor code-tracking summary is oversized")
+        if v is None:
+            continue
         try:
             o = json.loads(v)
-        except Exception:
+        except (json.JSONDecodeError, TypeError, UnicodeDecodeError):
+            continue
+        if not isinstance(o, dict):
             continue
         d = o.get("date")
-        if not d:
+        if not isinstance(d, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", d) or _from_iso(d) is None:
             continue
-        out[d] = {
-            "tab_suggested": int(o.get("tabSuggestedLines", 0) or 0),
-            "tab_accepted": int(o.get("tabAcceptedLines", 0) or 0),
-            "composer_suggested": int(o.get("composerSuggestedLines", 0) or 0),
-            "composer_accepted": int(o.get("composerAcceptedLines", 0) or 0),
-        }
+        fields = {}
+        for source, target in (("tabSuggestedLines", "tab_suggested"),
+                               ("tabAcceptedLines", "tab_accepted"),
+                               ("composerSuggestedLines", "composer_suggested"),
+                               ("composerAcceptedLines", "composer_accepted")):
+            value = o.get(source)
+            if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 10**15:
+                fields[target] = value
+        if fields:
+            out[d] = {name: fields.get(name, 0) for name in (
+                "tab_suggested", "tab_accepted", "composer_suggested", "composer_accepted")}
     return out
 
 
@@ -2992,189 +3257,400 @@ def _open_ro_sqlite(db_path):
 
 def parse_cursor(agg, db_path):
     from contextlib import closing
+    if __package__:
+        from . import cursor_data as CD
+    else:
+        import cursor_data as CD
     with closing(_open_ro_sqlite(db_path)) as con:
-        _parse_cursor_store(agg, con)
+        con.execute("PRAGMA query_only=ON")
+        con.execute("BEGIN")  # one consistent snapshot across metadata/bubble queries
+        snapshot = CD.read_store(db_path, max_scan_rows=CD.MAX_STORE_ROWS,
+                                 strict=True, _connection=con)
+        ai_lines = _cursor_ai_lines(con)
+    snapshot, history = _cursor_retain_history(snapshot, agg.get("_cursor_history"), CD)
+    agg["_cursor_history"] = history
+    agg["cursor_schema"] = CD.CURSOR_SCHEMA
+    _parse_cursor_store(agg, snapshot, ai_lines, CD)
 
 
-def _parse_cursor_store(agg, con):
-    import sqlite3
+
+def _cursor_retain_history(snapshot, previous, CD):
+    """Keep numeric/message metadata when Cursor tombstones source rows.
+
+    This private state contains the reader's allowlisted summaries only. Hash
+    bubble/request/tool identities before persistence; no source content or raw
+    join IDs is kept. Current rows replace their old summaries, never add twins.
+    """
+    previous = previous if isinstance(previous, dict) and previous.get("version") == 1 else {}
+    bubbles = copy.deepcopy(previous.get("bubbles", {}))
+    current_ids = set()
+
+    def digest(kind, value):
+        return hashlib.sha256(("cursor-history-v1\0" + kind + "\0" + value).encode()).hexdigest()
+
+    for cid, rows in snapshot.get("bubbles", {}).items():
+        bucket = bubbles.setdefault(cid, {})
+        for row in rows:
+            safe = copy.deepcopy(row)
+            bubble_id = digest("bubble:" + cid, safe["bubble_id"])
+            safe["bubble_id"] = bubble_id
+            for field in ("request_id", "tool_call_id", "model_call_id"):
+                if safe.get(field):
+                    safe[field] = digest(field, safe[field])
+            for tool in safe.get("extra_tools", []):
+                if tool.get("tool_call_id"):
+                    tool["tool_call_id"] = digest("tool_call_id", tool["tool_call_id"])
+            older = bucket.get(bubble_id, {})
+            # A later zero placeholder is not evidence that a known receipt was
+            # free. Keep known counters until a real replacement receipt exists.
+            if (not (safe.get("input_tokens") or safe.get("output_tokens"))
+                    and (older.get("input_tokens") or older.get("output_tokens"))):
+                for field in ("input_tokens", "output_tokens", "input_present", "output_present"):
+                    safe[field] = older.get(field)
+            for field in ("created_at", "model"):
+                if not safe.get(field) and older.get(field):
+                    safe[field] = older[field]
+            bucket[bubble_id] = safe
+            current_ids.add((cid, bubble_id))
+    if sum(len(rows) for rows in bubbles.values()) > CD.MAX_STORE_ROWS:
+        raise CD.CursorReadError("Cursor retained history exceeds the safe row limit; previous ledger retained")
+    merged = dict(snapshot)
+    for field in ("composers", "workspace", "parents"):
+        merged[field] = {**copy.deepcopy(previous.get(field, {})), **snapshot.get(field, {})}
+    merged["bubbles"] = {cid: list(rows.values()) for cid, rows in bubbles.items()}
+    retained = {cid for cid, rows in bubbles.items()
+                if any((cid, key) not in current_ids for key in rows)}
+    merged["retained_sessions"] = retained
+    history = {"version": 1, "bubbles": bubbles,
+               **{field: copy.deepcopy(merged[field]) for field in ("composers", "workspace", "parents")}}
+    return merged, history
+
+
+def _cursor_status(total, recorded, complete=None):
+    if not total or not recorded:
+        return "unavailable"
+    if complete is None:
+        complete = recorded
+    return "recorded" if recorded == total and complete == recorded else "partial"
+
+
+def _cursor_combine_status(values):
+    states = [value for value in values if value in ("recorded", "partial", "unavailable")]
+    if not states:
+        return "unavailable"
+    return states[0] if all(value == states[0] for value in states) else "partial"
+
+
+def _cursor_availability(usage_status):
+    return {
+        "input_output": usage_status,
+        "cache_read": "unavailable",
+        "cache_write": "unavailable",
+        "reasoning": "unavailable",
+        "response_output": "unavailable",
+    }
+
+
+def _parse_cursor_store(agg, snapshot, ai_lines, CD):
     agg["source"] = "cursor"
     agg["editor"] = "Cursor"
     agg["project"] = "Cursor"
-    cur = con.cursor()
-
-    def _loads(v):
-        try:
-            return json.loads(v) if v else None
-        except Exception:
-            return None
-
-    # ---- session metadata -------------------------------------------------
-    # composerData holds most sessions; newer Cursor builds migrate the header
-    # into its own table, so read both and let composerData win on conflicts.
-    comp = {}
-    try:
-        for cid, created, updated, archived, val in cur.execute(
-                "SELECT composerId, createdAt, lastUpdatedAt, isArchived, value "
-                "FROM composerHeaders").fetchall():
-            o = _loads(val) or {}
-            comp[cid] = {"created": created, "updated": updated or created,
-                         "name": o.get("name") or o.get("subtitle"),
-                         "model": None, "maxmode": False,
-                         "mode": o.get("unifiedMode"),
-                         "added": int(o.get("totalLinesAdded") or 0),
-                         "removed": int(o.get("totalLinesRemoved") or 0),
-                         "archived": bool(archived or o.get("isArchived")),
-                         "subs": int(o.get("numSubComposers") or 0)}
-    except sqlite3.OperationalError as e:
-        if not str(e).startswith("no such table:"):
-            con.close()
-            raise
-    try:
-        rows = cur.execute("SELECT value FROM cursorDiskKV "
-                           "WHERE key LIKE 'composerData:%'").fetchall()
-    except sqlite3.OperationalError as e:
-        con.close()
-        if str(e).startswith("no such table:"):
-            return                              # no native chats on this install
-        raise
-    for (v,) in rows:
-        o = _loads(v)
-        if not o:
-            continue
-        cid = o.get("composerId")
-        created = o.get("createdAt") or o.get("lastUpdatedAt")
-        if not cid or not created:
-            continue
-        mc = o.get("modelConfig") if isinstance(o.get("modelConfig"), dict) else {}
-        c = comp.setdefault(cid, {})
-        c.update({
-            "created": created,
-            "updated": o.get("lastUpdatedAt") or created,
-            "name": o.get("name") or c.get("name"),
-            "model": mc.get("modelName"),
-            "maxmode": bool(mc.get("maxMode")),
-            "mode": o.get("unifiedMode") or c.get("mode"),
-            "added": int(o.get("totalLinesAdded") or 0),
-            "removed": int(o.get("totalLinesRemoved") or 0),
-            "archived": bool(o.get("isArchived")),
-            "subs": len(o.get("subComposerIds") or []) or c.get("subs", 0),
-        })
-
-    sess = {}
-    # Per-session last-event timestamp for active-time gaps. A local dict, not
-    # agg-level: this file holds MANY unrelated sessions and is always fully
-    # reparsed on change (see update_file), so nothing needs to persist across
-    # calls — it just must not bridge a gap across two different sessions.
+    composers = snapshot.get("composers", {})
+    bubbles = snapshot.get("bubbles", {})
+    workspace = snapshot.get("workspace", {})
+    session_data = {}
     active_last = {}
-    path_re = _CURSOR_PATH_RE
+    quality_by_session = {}
+    tool_seen = {}
+    response_models_by_session = {}
+    global_first = None
+    global_last = None
+    summary_usage_states = []
+    summary_model_states = []
 
-    def _top(d):
-        return max(d, key=d.get) if d else None
+    def top(counter):
+        return max(counter, key=lambda key: (counter[key], key)) if counter else None
 
-    # ---- messages ---------------------------------------------------------
-    try:
-        rows = cur.execute("SELECT key, value FROM cursorDiskKV "
-                           "WHERE key LIKE 'bubbleId:%'")
-        for k, v in rows:
-            kp = k.split(":")
-            cid = kp[1] if len(kp) >= 3 else None
-            c = comp.get(cid)
-            if not c:
+    def new_session():
+        return {
+            "in": 0, "out": 0, "asst": 0, "user": 0, "tools": 0,
+            "think": 0, "projects": {}, "days": {}, "active": 0.0,
+            "start": None, "end": None, "assistant_total": 0,
+            "usage_evidence": 0, "usage_complete": 0, "undated_usage": 0,
+            "undated_counts": {"in": 0, "out": 0, "asst": 0},
+            "response_models": {}, "requested_models": {}, "user_total": 0,
+        }
+
+    for cid in composers:
+        session_data[cid] = new_session()
+
+    # Sort by UTC before gap-capped active-time accounting. Source key order is
+    # lexical and can be wrong when offsets differ or bubbles interleave.
+    for cid, rows in bubbles.items():
+        session = session_data.setdefault(cid, new_session())
+        sorted_rows = sorted(rows, key=lambda row: (
+            CD._event_time({"timestamp": row.get("created_at")}), row.get("bubble_id") or ""))
+        for bubble in sorted_rows:
+            typ = bubble.get("type")
+            if typ not in (1, 2):
                 continue
-            o = _loads(v)
-            if not o:
-                continue
-            typ = o.get("type")            # 1 = user, 2 = AI
-            tc = o.get("tokenCount") or {}
-            it = int(tc.get("inputTokens", 0) or 0)
-            ot = int(tc.get("outputTokens", 0) or 0)
-            # Messages carry their own ISO timestamp; only fall back to the
-            # session's creation time when one is genuinely missing, otherwise
-            # a months-long session lands entirely on the day it started.
-            dt = _from_iso(o["createdAt"]) if isinstance(o.get("createdAt"), str) else None
-            if dt is None:
-                dt = _from_ms(c["created"])
-            if not dt:
-                continue
-            date = _buckets(dt)[0]
-            model = _normalize_cursor_model(c.get("model"))
-            agg["_record_session"] = cid
-            r = _rec(agg, date, model)
-            r["in"] += it
-            r["out"] += ot
-            T = agg["totals"]
-            T["in"] += it
-            T["out"] += ot
-            s = sess.setdefault(cid, {"in": 0, "out": 0, "asst": 0, "user": 0, "tools": 0,
-                                      "think": 0, "proj": {}, "days": {}, "active": 0.0,
-                                      "start": dt.isoformat(), "end": dt.isoformat()})
-            dd = s["days"].setdefault(date, {"in": 0, "out": 0, "cr": 0, "cc": 0,
-                                             "asst": 0, "user": 0, "tools": 0, "active": 0.0})
-            dd["in"] += it; dd["out"] += ot
-            gap = _active_gap(active_last.get(cid), dt)
-            active_last[cid] = dt.isoformat()
-            r["active"] += gap; s["active"] += gap; dd["active"] += gap
-            iso = dt.isoformat()
-            if iso < s["start"]:
-                s["start"] = iso
-            if iso > s["end"]:
-                s["end"] = iso
-            s["in"] += it
-            s["out"] += ot
+            dt = _from_iso(bubble.get("created_at")) if bubble.get("created_at") else None
+            model_name = _normalize_cursor_model(bubble.get("model")) if typ == 2 else None
+            requested_model = _normalize_cursor_model(bubble.get("requested_model")) if typ == 1 else None
+            token_in, token_out = bubble.get("input_tokens"), bubble.get("output_tokens")
+            positive_usage = bool(typ == 2 and ((token_in or 0) > 0 or (token_out or 0) > 0))
+
             if typ == 2:
-                r["asst"] += 1; T["asst"] += 1; s["asst"] += 1; dd["asst"] += 1
-            elif typ == 1:
-                r["user"] += 1; T["user"] += 1; s["user"] += 1; dd["user"] += 1
-            s["think"] += int(o.get("thinkingDurationMs") or 0)
-            # tool calls — Cursor persists each as toolFormerData on the bubble
-            tf = o.get("toolFormerData")
-            if isinstance(tf, dict):
-                name = tf.get("name") or tf.get("tool")
-                if name:
-                    _tool(agg, date, name)
-                    r["tools"] += 1
-                    s["tools"] += 1; dd["tools"] += 1
-            # infer project from paths in the bubble's context fields
-            for fld in ("attachedFolders", "attachedFoldersNew", "relevantFiles",
-                        "recentlyViewedFiles", "gitDiffs", "context"):
-                fv = o.get(fld)
-                if fv:
-                    for m in path_re.finditer(json.dumps(fv)):
-                        s["proj"][m.group(1)] = s["proj"].get(m.group(1), 0) + 1
-            _bump_time(agg, dt, it + ot, 1 if typ == 2 else 0)
-        agg["state"]["ai_lines"] = _cursor_ai_lines(con)
-    finally:
-        con.close()
+                session["assistant_total"] += 1
+                if model_name and model_name != "Unknown":
+                    session["response_models"][model_name] = session["response_models"].get(model_name, 0) + 1
+            else:
+                session["user_total"] += 1
+                if requested_model and requested_model != "Unknown":
+                    session["requested_models"][requested_model] = session["requested_models"].get(requested_model, 0) + 1
+            if positive_usage:
+                session["usage_evidence"] += 1
+                if bubble.get("input_present") and bubble.get("output_present"):
+                    session["usage_complete"] += 1
 
-    # dominant inferred project across sessions drives the Projects-chart bucket
-    tally = {}
-    for s in sess.values():
-        p = _top(s["proj"])
-        if p:
-            tally[p] = tally.get(p, 0) + 1
-    agg["project"] = _top(tally) or "Cursor"
+            tool_specs = []
+            if typ == 2:
+                if bubble.get("tool"):
+                    tool_specs.append((bubble["tool"], bubble.get("tool_call_id")))
+                for extra in bubble.get("extra_tools", []):
+                    tool_specs.append((extra.get("tool"), extra.get("tool_call_id")))
+            accepted_tools = []
+            seen = tool_seen.setdefault(cid, set())
+            for index, (tool_name, tool_id) in enumerate(tool_specs):
+                identity = ("id", tool_id) if tool_id else (
+                    "bubble", bubble.get("bubble_id"), index, tool_name)
+                if not tool_name or identity in seen:
+                    continue
+                seen.add(identity)
+                accepted_tools.append(tool_name)
 
-    out = []
-    for cid, s in sess.items():
-        c = comp.get(cid, {})
-        mode = {1: "chat", 2: "agent"}.get(c.get("mode"), c.get("mode"))
-        out.append({
-            "_sid": cid, "id": (cid or "")[:8], "source": "cursor", "ide": IDE_FIXED["cursor"], "editor": "Cursor",
-            "title": c.get("name"),   # Cursor stores the current name
-            "project": _top(s["proj"]) or "Cursor",
-            "model": _normalize_cursor_model(c.get("model")),
-            "start": s["start"], "end": s["end"],
-            "in": s["in"], "out": s["out"], "cr": 0, "cc": 0, "cc5": 0, "cc1": 0,
-            "asst": s["asst"], "user": s["user"], "req": 0, "prem": 0.0,
-            "tools": s["tools"], "side": 0, "days": s["days"], "active": round(s["active"], 1),
-            "mode": ("max " + mode) if (mode and c.get("maxmode")) else mode,
-            "lines_add": c.get("added", 0), "lines_del": c.get("removed", 0),
-            "think_ms": s["think"], "subagents": c.get("subs", 0),
-            "archived_session": bool(c.get("archived")),
+            for hint in bubble.get("project_hints", []):
+                if isinstance(hint, str) and hint:
+                    session["projects"][hint] = session["projects"].get(hint, 0) + 1
+            if bubble.get("thinking_ms") is not None:
+                session["think"] += bubble["thinking_ms"]
+
+            # A date is required for dated ledger attribution. Keep source model
+            # coverage, but do not invent a date when the bubble lacks one.
+            if dt is None:
+                if positive_usage:
+                    session["undated_usage"] += 1
+                    session["undated_counts"]["in"] += token_in or 0
+                    session["undated_counts"]["out"] += token_out or 0
+                    session["undated_counts"]["asst"] += 1
+                continue
+
+            date = _buckets(dt)[0]
+            iso = dt.isoformat()
+            event_time = CD._event_time({"timestamp": iso})
+            if global_first is None or event_time < global_first[0]:
+                global_first = (event_time, iso)
+            if global_last is None or event_time > global_last[0]:
+                global_last = (event_time, iso)
+            if session["start"] is None or event_time < CD._event_time({"timestamp": session["start"]}):
+                session["start"] = iso
+            if session["end"] is None or event_time > CD._event_time({"timestamp": session["end"]}):
+                session["end"] = iso
+            session["tools"] += len(accepted_tools)
+            day = session["days"].setdefault(date, {
+                "in": 0, "out": 0, "cr": 0, "cc": 0, "asst": 0, "user": 0,
+                "tools": 0, "active": 0.0,
+            })
+            gap = _active_gap(active_last.get(cid), dt)
+            active_last[cid] = iso
+            session["active"] += gap
+            day["active"] += gap
+
+            row = None
+            if typ == 2:
+                row_model = model_name or "Unknown"
+                agg["_record_session"] = cid
+                row = _rec(agg, date, row_model)
+                row["asst"] += 1
+                day["asst"] += 1
+                if positive_usage:
+                    in_value = token_in if bubble.get("input_present") else 0
+                    out_value = token_out if bubble.get("output_present") else 0
+                    row["in"] += in_value
+                    row["out"] += out_value
+                    day["in"] += in_value
+                    day["out"] += out_value
+                    session["in"] += in_value
+                    session["out"] += out_value
+                    agg["totals"]["in"] += in_value
+                    agg["totals"]["out"] += out_value
+                key = f"{date}\t{row_model}"
+                stats = quality_by_session.setdefault((cid, key), {
+                    "total": 0, "evidence": 0, "complete": 0,
+                })
+                stats["total"] += 1
+                if positive_usage:
+                    stats["evidence"] += 1
+                    if bubble.get("input_present") and bubble.get("output_present"):
+                        stats["complete"] += 1
+                session["asst"] += 1
+                agg["totals"]["asst"] += 1
+            else:
+                agg["_record_session"] = cid
+                row = _rec(agg, date, "(user)")
+                row["user"] += 1
+                day["user"] += 1
+                session["user"] += 1
+                agg["totals"]["user"] += 1
+
+            if typ == 2:
+                for tool_name in accepted_tools:
+                    _tool(agg, date, tool_name)
+                    if row is not None:
+                        row["tools"] += 1
+                    day["tools"] += 1
+            token_sum = ((token_in or 0) + (token_out or 0)) if positive_usage else 0
+            _bump_time(agg, dt, token_sum, 1 if typ == 2 else 0)
+            if row is not None:
+                row["active"] += gap
+
+    for cid in composers:
+        session_data.setdefault(cid, new_session())
+
+    # Prefer explicit workspaceStorage association; publish only its leaf. The
+    # full cwd is retained in a private aggregate map for local matching.
+    project_counts = {}
+    private_cwds = {}
+    for cid, session in session_data.items():
+        meta = composers.get(cid, {})
+        for hint in meta.get("project_hints", []):
+            if isinstance(hint, str) and hint:
+                session["projects"][hint] = session["projects"].get(hint, 0) + 1
+        cwd = workspace.get(cid)
+        project = _leaf(cwd) if cwd else None
+        project = project or top(session["projects"]) or "Cursor"
+        session["project"] = project
+        project_counts[project] = project_counts.get(project, 0) + 1
+        if cwd:
+            private_cwds[cid] = cwd
+    agg["_cursor_cwds"] = private_cwds
+    agg["state"]["ai_lines"] = ai_lines
+    agg["project"] = top(project_counts) or "Cursor"
+
+    sessions = []
+    for cid, session in session_data.items():
+        meta = composers.get(cid, {})
+        if session["start"] is None:
+            session["start"] = meta.get("created") or meta.get("updated")
+        if session["end"] is None:
+            session["end"] = meta.get("updated") or meta.get("created")
+        usage_status = _cursor_status(
+            session["assistant_total"], session["usage_evidence"],
+            session["usage_complete"] if not session["undated_usage"] else -1)
+        if session["undated_usage"] and usage_status == "recorded":
+            usage_status = "partial"
+        response_model_status = _cursor_status(
+            session["assistant_total"], sum(session["response_models"].values()))
+        requested_model_status = _cursor_status(
+            session["user_total"], sum(session["requested_models"].values()))
+        if session["assistant_total"]:
+            summary_usage_states.append(usage_status)
+            summary_model_states.append(response_model_status)
+        mode = {1: "chat", 2: "agent"}.get(meta.get("mode"), meta.get("mode"))
+        parent_id = snapshot.get("parents", {}).get(cid)
+        is_subagent = meta.get("subagent") is True or bool(parent_id)
+        current_model = _normalize_cursor_model(meta.get("current_model")) if meta.get("current_model") else None
+        if current_model == "Unknown":
+            current_model = None
+
+        records = agg.get("_session_records", {}).get(cid, {})
+        row_quality = {}
+        for key, row in records.items():
+            if key.endswith("\t(user)"):
+                continue
+            stats = quality_by_session.get((cid, key), {"total": 0, "evidence": 0, "complete": 0})
+            status = _cursor_status(stats["total"], stats["evidence"], stats["complete"])
+            availability = _cursor_availability(status)
+            row["usage_status"] = status
+            row["usage_availability"] = availability
+            row_quality[key] = availability
+        response_models = sorted(session["response_models"],
+                                 key=lambda name: (-session["response_models"][name], name))
+        if session["assistant_total"] > sum(session["response_models"].values()):
+            response_models.append("Unknown")
+        requested_models = sorted(session["requested_models"],
+                                  key=lambda name: (-session["requested_models"][name], name))
+        response_models_by_session[cid] = response_models
+        sessions.append({
+            "_sid": cid, "_cursor_sid": cid, "id": cid[:8], "source": "cursor",
+            "ide": IDE_FIXED["cursor"], "editor": "Cursor", "title": meta.get("title"),
+            "project": session["project"], "model": top(session["response_models"]) or "Unknown",
+            "models": response_models[:6], "nmodels": len(response_models),
+            "current_model": current_model,
+            "current_context_tokens": meta.get("context_tokens"),
+            "current_context_percent": meta.get("context_percent"),
+            "current_context_limit": meta.get("context_limit"),
+            "current_context_asof": meta.get("context_asof"),
+            "requested_models": requested_models[:6],
+            "requested_model_status": requested_model_status,
+            "response_model_status": response_model_status, "model_status": response_model_status,
+            "start": session["start"], "end": session["end"],
+            "in": session["in"], "out": session["out"], "cr": 0, "cc": 0,
+            "cc5": 0, "cc1": 0, "reason": 0, "response_out": 0,
+            "asst": session["asst"], "user": session["user"], "req": 0, "prem": 0.0,
+            "tools": session["tools"], "side": 0, "days": session["days"],
+            "active": round(session["active"], 1),
+            "mode": ("max " + mode) if mode and meta.get("max_mode") else mode,
+            "lines_add": meta.get("lines_add", 0), "lines_del": meta.get("lines_del", 0),
+            "think_ms": session["think"], "subagents": meta.get("subagents", 0),
+            "subagent": is_subagent,
+            "subagent_type": meta.get("subagent_type") if is_subagent else None,
+            "parent_id": parent_id,
+            "archived_session": bool(meta.get("archived")),
+            "retained_history": cid in snapshot.get("retained_sessions", set()),
+            "undated_usage": dict(session["undated_counts"]),
+            "usage_status": usage_status, "usage_availability": _cursor_availability(usage_status),
+            "detail_status": "partial" if snapshot.get("detail_partial") else "recorded",
+            "record_availability": row_quality,
         })
-    agg["sessions"] = out
+    agg["sessions"] = sessions
     _finish_store_records(agg)
+
+    # _finish_store_records consumes _sid while building per-session records.
+    # Restore Cursor's full native composerId for names and timeline lookup.
+    for session in agg["sessions"]:
+        session["_sid"] = session.pop("_cursor_sid", None) or session.get("_sid") or session.get("id")
+        session["id"] = session["_sid"][:8]
+        session["models"] = response_models_by_session.get(session["_sid"], session.get("models", []))[:6]
+        session["nmodels"] = len(response_models_by_session.get(session["_sid"], session.get("models", [])))
+        if not session.get("model") or session.get("model") == "Unknown":
+            known = [model for model in session.get("models", []) if model != "Unknown"]
+            if known:
+                session["model"] = known[0]
+
+    global_states = {}
+    for session in agg["sessions"]:
+        for key, fields in (session.get("record_availability") or {}).items():
+            global_states.setdefault(key, []).append(fields.get("input_output", "unavailable"))
+    global_quality = {}
+    for key, states in global_states.items():
+        status = _cursor_combine_status(states)
+        availability = _cursor_availability(status)
+        global_quality[key] = availability
+        if key in agg["records"]:
+            agg["records"][key]["usage_status"] = status
+            agg["records"][key]["usage_availability"] = availability
+    detail_status = "partial" if snapshot.get("detail_partial") else "recorded"
+    summary_usage = _cursor_combine_status(summary_usage_states)
+    agg["cursor"] = {
+        "usage_status": summary_usage,
+        "usage_availability": _cursor_availability(summary_usage),
+        "model_status": _cursor_combine_status(summary_model_states),
+        "detail_status": detail_status,
+        "record_availability": global_quality,
+    }
+    agg["first_ts"] = global_first[1] if global_first else None
+    agg["last_ts"] = global_last[1] if global_last else None
 
 
 # ===========================================================================
@@ -3432,8 +3908,11 @@ def parse_opencode_db(agg, db_path):
             dt = _from_ms_or_s(ts)
             if not dt:
                 continue
-            date = _buckets(dt)[0]
+            date, hour, _dow = _buckets(dt)
             agg["_record_session"] = sid
+            # One summary per counted message, by id: a message OpenCode deletes
+            # later (undo) keeps exactly what it added. See reconcile().
+            dims = _session_dims(agg)
 
             if role == "user":
                 r = _rec(agg, date, "(user)")
@@ -3445,8 +3924,10 @@ def parse_opencode_db(agg, db_path):
                 # NEXT assistant reply's gap is measured from this prompt, so
                 # "time waiting for/reading the reply" correctly lands on the
                 # session once that branch runs.
-                r["active"] += _active_gap(active_last.get(sid), dt)
+                gap = _active_gap(active_last.get(sid), dt)
+                r["active"] += gap
                 active_last[sid] = dt.isoformat()
+                dims.setdefault("msgs", {})[mid] = ["u", date, hour, "(user)", 0, 0, 0, 0, 0, 0.0, [], gap]
                 # weak title from first user prompt of the session
                 if meta and not meta.get("_weak_title_set"):
                     text = o.get("text", "") if is_v2 else ""
@@ -3525,6 +4006,8 @@ def parse_opencode_db(agg, db_path):
             s["tools"] += ntools
             s["active"] += gap
             s["cost"] += cost
+            dims.setdefault("msgs", {})[mid] = ["a", date, hour, model, inp, out, reason, cr, cw,
+                                                cost, list(names), gap]
 
         # ---- build per-session summaries ----------------------------------
         out = []
@@ -3742,14 +4225,43 @@ def _parse_hermes_store(agg, con):
 
 
 # ===========================================================================
-# OPENCLAW — per-agent SQLite (current) and JSONL transcripts (older / archived).
-# Transcript events are the same JSON either way: a `session` header, then
-# `message` entries whose assistant messages carry a normalized `usage`
-# {input, output, cacheRead, cacheWrite, cacheWrite1h?, reasoning?, cost.total} —
-# input EXCLUDES cache reads and writes (OpenClaw's model layer subtracts them from
-# the provider's prompt count), and reasoning is a subset of output, like ours.
+# zstd — ONE decoder policy for everything a tool stores compressed: OpenClaw's
+# large transcript events (_zstd_decode_many) and Codex's idle rollouts
+# (zstd_stream / _zstd_lines). Python 3.14's compression.zstd when present, else
+# the `zstd` command. With neither, nothing is guessed: the caller counts what it
+# could not read and every ledger entry already held stays exactly as it was.
 # ===========================================================================
-_OPENCLAW_DB = os.path.join("agent", "openclaw-agent.sqlite")
+class ZstdUnavailable(RuntimeError):
+    """No zstd decoder here: not Python 3.14+, and no `zstd` command on PATH."""
+
+
+class ZstdReadError(RuntimeError):
+    """A compressed file the decoder refused: damaged, cut short or not zstd. The
+    message is fixed text; it never carries a path or any decoded content."""
+
+
+_ZSTD_DAMAGED = "compressed log is damaged or incomplete"
+_ZSTD_TOO_LONG = "compressed log holds a record too large to read"
+_ZSTD_CHUNK = 1 << 20           # decoded bytes pulled per read
+_ZSTD_MAX_LINE = 256 << 20      # the longest rollout record seen is ~20 MB
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)   # no console flash from pythonw
+
+
+def _zstd_backend():
+    """("module", compression.zstd) on Python 3.14+, else ("command", the `zstd`
+    executable), else None. Everything that decodes asks here, so there is exactly
+    one answer to "can this machine read compressed logs"."""
+    try:
+        from compression import zstd as _z          # Python 3.14+
+        return "module", _z
+    except ImportError:
+        pass
+    exe = shutil.which("zstd")
+    return ("command", exe) if exe else None
+
+
+def zstd_available():
+    return _zstd_backend() is not None
 
 
 def _zstd_decode_many(blobs):
@@ -3758,20 +4270,19 @@ def _zstd_decode_many(blobs):
     left out (and counted by the caller), never guessed."""
     if not blobs:
         return {}
-    try:
-        from compression import zstd as _z          # Python 3.14+
+    backend = _zstd_backend()
+    if backend is None:
+        return {}
+    kind, impl = backend
+    if kind == "module":
         out = {}
         for k, b in blobs.items():
             try:
-                out[k] = _z.decompress(b).decode("utf-8", "replace")
+                out[k] = impl.decompress(b).decode("utf-8", "replace")
             except Exception as e:
                 sys.stderr.write(f"[openclaw] zstd row {k}: {e}\n")
         return out
-    except ImportError:
-        pass
-    exe = shutil.which("zstd")
-    if not exe:
-        return {}
+    exe = impl
     import tempfile
     out = {}
     with tempfile.TemporaryDirectory(prefix="agenttelemetry-zstd-") as tmp:
@@ -3785,7 +4296,7 @@ def _zstd_decode_many(blobs):
         for j in range(0, len(keys), 400):          # keep the command line bounded
             chunk = keys[j:j + 400]
             r = subprocess.run([exe, "-d", "-q", "-f", *[names[k] for k in chunk]],
-                               capture_output=True, text=True)
+                               capture_output=True, text=True, creationflags=_NO_WINDOW)
             if r.returncode != 0:
                 sys.stderr.write(f"[openclaw] zstd: {r.stderr.strip()[:200]}\n")
             for k in chunk:
@@ -3795,6 +4306,121 @@ def _zstd_decode_many(blobs):
                 except OSError:
                     pass
     return out
+
+
+class _ZstdReader:
+    """The decoded bytes of one compressed file as a binary reader: read(n) and
+    readline(limit). A decoder complaint becomes ZstdReadError; with the command, so
+    does a non-zero exit, noticed when the stream ends."""
+
+    def __init__(self, handle, errors=(), proc=None):
+        self._handle, self._errors, self._proc = handle, tuple(errors), proc
+        self._finished = False
+
+    def _pull(self, name, size):
+        try:
+            data = getattr(self._handle, name)(size)
+        except self._errors:
+            raise ZstdReadError(_ZSTD_DAMAGED) from None
+        if not data:
+            self._finish()
+        return data
+
+    def read(self, size=-1):
+        return self._pull("read", size)
+
+    def readline(self, limit=-1):
+        return self._pull("readline", limit)
+
+    def _finish(self):
+        # The command reports a damaged or cut-short file only through its exit status.
+        if self._proc is not None and not self._finished:
+            self._finished = True
+            if self._proc.wait() != 0:
+                raise ZstdReadError(_ZSTD_DAMAGED)
+
+    def close(self):
+        proc = self._proc
+        if proc is None:
+            return
+        self._finished = True          # stopped on purpose: a signal exit is not damage
+        try:
+            if proc.poll() is None:
+                proc.terminate()       # our own short-lived decoder child, nothing else
+        finally:
+            try:
+                self._handle.close()
+            finally:
+                try:
+                    proc.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
+
+
+@contextlib.contextmanager
+def zstd_stream(path):
+    """The decoded bytes of a compressed file, incrementally: a log of hundreds of
+    MB never sits in memory. Raises ZstdUnavailable when no decoder exists,
+    ZstdReadError when the file is damaged, OSError when it cannot be opened."""
+    backend = _zstd_backend()
+    if backend is None:
+        raise ZstdUnavailable("no zstd decoder: install the zstd command or use Python 3.14+")
+    kind, impl = backend
+    if kind == "module":
+        handle = impl.open(path, "rb")
+        try:
+            yield _ZstdReader(handle, (impl.ZstdError, EOFError))
+        finally:
+            handle.close()
+        return
+    proc = subprocess.Popen([impl, "-d", "-c", "-q", "--", str(path)],
+                            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                            stderr=subprocess.DEVNULL, bufsize=_ZSTD_CHUNK,
+                            creationflags=_NO_WINDOW)
+    reader = _ZstdReader(proc.stdout, (), proc)
+    try:
+        yield reader
+    finally:
+        reader.close()
+
+
+def _zstd_lines(path):
+    """The decoded lines of a compressed JSONL file, one at a time (memory follows
+    the longest record, not the file). Split on newlines only, as JSONL is: a raw
+    U+2028 inside a JSON string is not a line break. Same errors as zstd_stream."""
+    with zstd_stream(path) as stream:
+        parts, held = [], 0
+        while True:
+            chunk = stream.read(_ZSTD_CHUNK)
+            if not chunk:
+                break
+            pieces = chunk.split(b"\n")
+            if len(pieces) == 1:                    # still inside one long record
+                parts.append(chunk)
+                held += len(chunk)
+                if held > _ZSTD_MAX_LINE:
+                    raise ZstdReadError(_ZSTD_TOO_LONG)
+                continue
+            if parts:
+                pieces[0] = b"".join(parts + [pieces[0]])
+            tail = pieces.pop()
+            parts, held = ([tail], len(tail)) if tail else ([], 0)
+            for piece in pieces:
+                yield piece.rstrip(b"\r").decode("utf-8", "replace")
+        if parts:                                   # a last record with no newline
+            yield b"".join(parts).rstrip(b"\r").decode("utf-8", "replace")
+
+
+# ===========================================================================
+# OPENCLAW — per-agent SQLite (current) and JSONL transcripts (older / archived).
+# Transcript events are the same JSON either way: a `session` header, then
+# `message` entries whose assistant messages carry a normalized `usage`
+# {input, output, cacheRead, cacheWrite, cacheWrite1h?, reasoning?, cost.total} —
+# input EXCLUDES cache reads and writes (OpenClaw's model layer subtracts them from
+# the provider's prompt count), and reasoning is a subset of output, like ours.
+# ===========================================================================
+_OPENCLAW_DB = os.path.join("agent", "openclaw-agent.sqlite")
 
 
 def _openclaw_ts(entry):
@@ -3894,7 +4520,11 @@ def parse_openclaw(agg, agent_dir):
     if undecoded:
         sys.stderr.write(f"[openclaw] {agent_dir}: {undecoded} compressed transcript event(s) "
                          "not read — install zstd (or use Python 3.14+) to include them\n")
-    seen = set()          # a fork copies its parent's messages: count each response once
+    # A fork copies its parent's messages: count each response once. A session the
+    # store no longer holds keeps its responses in the ledger (reconcile), so a
+    # fork must not start counting them as its own once the parent is deleted.
+    prior = agg.pop("_prior_keys", None) or {}
+    seen = {k for sid, keys in prior.items() if sid not in events for k in keys}
     out, tally = [], {}
     T = agg["totals"]
     for sid, evs in events.items():
@@ -3923,11 +4553,15 @@ def parse_openclaw(agg, agent_dir):
             role = msg.get("role")
             if role == "assistant":
                 u = msg.get("usage") if isinstance(msg.get("usage"), dict) else {}
-                key = (msg.get("timestamp") or e.get("timestamp"), msg.get("model") or cur_model,
-                       u.get("input"), u.get("output"), u.get("cacheRead"), u.get("cacheWrite"))
+                key = hashlib.sha256(json.dumps(
+                    [msg.get("timestamp") or e.get("timestamp"), msg.get("model") or cur_model,
+                     u.get("input"), u.get("output"), u.get("cacheRead"), u.get("cacheWrite")],
+                    default=str).encode()).hexdigest()[:16]
                 if key in seen and (u.get("input") or u.get("output")):
                     continue               # the same response, copied into a fork
                 seen.add(key)
+                if u.get("input") or u.get("output"):
+                    _session_dims(agg).setdefault("keys", []).append(key)
             elif role != "user":
                 continue
             start = start or dt; end = dt
@@ -4078,6 +4712,8 @@ def discover():
     # NOTE: Gemini CLI is intentionally NOT discovered — its local chat logs persist
     # only a re-written session-context preamble (no prompts/responses/tokens/model),
     # so there is no usable usage data to report. See GEMINI_GLOBS / parse_gemini.
+    for path, editor in AG.discover_conversations(ANTIGRAVITY_ROOTS):
+        out.append(("antigravity", path, editor))
     for db in CURSOR_DBS:
         if os.path.exists(db):
             out.append(("cursor", db, "Cursor"))
@@ -4134,6 +4770,533 @@ def discover():
     return out
 
 
+# ===========================================================================
+# Usage a tool deleted from a log that is still on disk
+#
+# The ledger keeps a log that disappears (dashboard.py marks it archived). It
+# could not see the other way usage vanished: the log stays, the tool removes
+# part of what it held, and the next full reparse rebuilt the aggregate without
+# it. OpenCode, Hermes and OpenClaw keep every session in one store, so deleting
+# a session there (or OpenCode's undo, which deletes the reverted messages)
+# dropped its tokens and cost from every total. A Claude or Copilot log that got
+# shorter (Copilot rewrites its chat log without requests removed in the chat)
+# did the same.
+#
+# reconcile() runs when update_file returns a NEW aggregate for a path the ledger
+# already had. What the source no longer holds lives in agg["_retained"], beside
+# what it does hold, and is added back after every reparse. Kept usage is found
+# by IDENTITY wherever the source has one, never by comparing totals alone:
+# usage also moves between rows without being deleted (a session's main model
+# changes, a timezone change re-buckets local dates and hours, an OpenClaw fork
+# takes over its parent's copied responses), and the same refresh can bring a
+# deletion and a same-sized new turn (OpenCode's undo, then a retry).
+#   * a store session that is gone keeps its last-known contribution whole and
+#     shows as deleted; if the source has it again, the source's copy replaces it
+#   * an OpenCode message gone from a session still present keeps the usage it
+#     was counted with, by message id (_store_detail holds one summary each)
+#   * a Claude/Copilot log that got shorter keeps what each dimension's totals
+#     lost, capped so usage that only moved row is not kept; the records it had
+#     counted stay in the parser's seen-set, so restored ones are not recounted
+# Message and log shortfalls are measured only when the SOURCE changed and both
+# parses ran under the same ledger version: a parser fix that lowers counts ships
+# with a CACHE_VERSION bump, and retention must not undo it. Hermes and OpenClaw
+# keep whole deleted sessions only. Codex logs are only ever deleted whole (the
+# archive keeps them) and have no record identity to make a shortened-then-
+# restored log safe. Cursor keeps its own row history (_cursor_retain_history);
+# Antigravity, Copilot SDK and Copilot .json hold one conversation per path.
+# ===========================================================================
+_RETAIN_DIMS = ("records", "tools", "skills", "ctx", "hourly", "reads", "activity",
+                "used_ext", "totals", "reasoning_effort")
+_RETAIN_SESSION_FIELDS = ("in", "out", "cr", "cc", "cc5", "cc1", "reason", "asst", "user",
+                          "req", "prem", "tools", "cost", "active", "ws")
+# A key added to these dims needs the full shape its readers index directly.
+_RETAIN_BLANK = {
+    "records": {"in": 0, "out": 0, "cr": 0, "cc": 0, "cc5": 0, "cc1": 0, "reason": 0,
+                "asst": 0, "user": 0, "req": 0, "prem": 0.0, "tools": 0, "cost": 0.0,
+                "active": 0.0},
+    "hourly": {"tokens": 0, "msgs": 0},
+    "skills": {"tok": 0, "asst": 0, "in": 0, "out": 0, "cr": 0, "cc": 0},
+    "ctx": {"tok": 0, "n": 0},
+    "reasoning_effort": {"levels": {}, "unrecorded": 0},
+    # activity rows are read with .get(), and an "e"/"r" field marks an editing
+    # or retried turn, so they get no zero-filled template.
+}
+_RETAIN_EPS = 1e-9
+# The record identities each log's parser skips as already counted.
+_LOG_SEEN = {"claude": "seen_uuids", "claude-desktop": "seen_uuids", "copilot": "seen_req"}
+
+
+def _retention_kind(agg):
+    """"store" (many sessions in one database), "log" (an append-only log with
+    record identity that can get shorter) or None: not handled here."""
+    source, path = agg.get("source"), str(agg.get("path") or "")
+    if source in ("hermes", "openclaw") or (source == "opencode" and path.endswith(".db")):
+        return "store"
+    if source in ("claude", "claude-desktop") or (
+            source == "copilot" and path.endswith(".jsonl") and _leaf(path) != "events.jsonl"):
+        return "log"
+    return None
+
+
+def _is_count(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _shortfall(before, now):
+    """What `before` held that `now` no longer does: max(0, before - now) for each
+    count, through dicts and numeric lists. None when nothing is missing."""
+    if _is_count(before):
+        gap = before - (now if _is_count(now) else 0)
+        return gap if gap > _RETAIN_EPS else None
+    if isinstance(before, dict):
+        now = now if isinstance(now, dict) else {}
+        out = {}
+        for key, value in before.items():
+            gap = _shortfall(value, now.get(key))
+            if gap is not None:
+                out[key] = gap
+        return out or None
+    if isinstance(before, list) and before and all(_is_count(v) for v in before):
+        now = now if isinstance(now, list) else []
+        out = [_shortfall(v, now[i] if i < len(now) else 0) or 0 for i, v in enumerate(before)]
+        return out if any(out) else None
+    return None
+
+
+def _without(value, kept):
+    """`value` less what was already kept: what the source itself held."""
+    return (_shortfall(value, kept) or {}) if kept else value
+
+
+def _flat(value, path=()):
+    """{path: count} for every count in one row (dicts and numeric lists)."""
+    out = {}
+    if _is_count(value):
+        out[path] = value
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            out.update(_flat(item, path + (key,)))
+    elif isinstance(value, list) and all(_is_count(v) for v in value):
+        for i, item in enumerate(value):
+            out[path + (i,)] = item
+    return out
+
+
+def _unflat(paths, template):
+    """Rebuild a row from {path: count}, in the shape of `template`."""
+    if () in paths:
+        return paths[()]
+    if isinstance(template, list):
+        out = [0] * len(template)
+        for path, value in paths.items():
+            out[path[0]] = value
+        return out
+    grouped = {}
+    for path, value in paths.items():
+        grouped.setdefault(path[0], {})[path[1:]] = value
+    template = template if isinstance(template, dict) else {}
+    return {key: _unflat(sub, template.get(key)) for key, sub in grouped.items()}
+
+
+def _capped_gap(before, now):
+    """Rows `before` held that `now` lacks, never more per field than the whole
+    dimension lost: usage that only moved to another row is not a deletion."""
+    before = before if isinstance(before, dict) else {}
+    now = now if isinstance(now, dict) else {}
+    old = {key: _flat(row) for key, row in before.items()}
+    new = {key: _flat(row) for key, row in now.items()}
+    lost = {}
+    for rows, sign in ((old, 1), (new, -1)):
+        for row in rows.values():
+            for path, value in row.items():
+                lost[path] = lost.get(path, 0) + sign * value
+    gap = {}
+    for key in sorted(old, reverse=True):          # newest date first
+        for path, value in old[key].items():
+            take = min(value - new.get(key, {}).get(path, 0), lost.get(path, 0))
+            if take > _RETAIN_EPS:
+                lost[path] -= take
+                gap.setdefault(key, {})[path] = take
+    return {key: _unflat(paths, before[key]) for key, paths in gap.items()} or None
+
+
+def _add_counts(target, delta, blank=None):
+    """Add every count in `delta` into `target`. A top-level key `target` lacks is
+    created from `blank`, so a reader indexing a record field never fails."""
+    for key, value in delta.items():
+        if _is_count(value):
+            current = target.get(key)
+            target[key] = (current if _is_count(current) else 0) + value
+        elif isinstance(value, dict):
+            if not isinstance(target.get(key), dict):
+                target[key] = copy.deepcopy(blank) if blank is not None else {}
+            _add_counts(target[key], value)
+        elif isinstance(value, list):
+            current = target.get(key) if isinstance(target.get(key), list) else []
+            current = current + [0] * (len(value) - len(current))
+            target[key] = [c + (value[i] if i < len(value) else 0) for i, c in enumerate(current)]
+
+
+def _dim(agg, dim):
+    value = (agg.get("reasoning_effort") or {}).get("days") if dim == "reasoning_effort" else agg.get(dim)
+    return value if isinstance(value, dict) else {}
+
+
+def _add_dim(agg, dim, delta):
+    if dim == "reasoning_effort":
+        if not isinstance(agg.get("reasoning_effort"), dict):
+            return
+        target = agg["reasoning_effort"].setdefault("days", {})
+    else:
+        target = agg.setdefault(dim, {})
+    _add_counts(target, delta, _RETAIN_BLANK.get(dim))
+
+
+def _session_counts(session):
+    return {f: session[f] for f in _RETAIN_SESSION_FIELDS if _is_count(session.get(f))}
+
+
+def _widen_span(agg, start, end):
+    for field, value, pick in (("first_ts", start, min), ("last_ts", end, max)):
+        values = [v for v in (agg.get(field), value) if isinstance(v, str) and v]
+        if values:
+            agg[field] = pick(values)
+
+
+def _may_measure(prev, fresh, kind, version):
+    """Only a change in the source itself, parsed by the same ledger version, is
+    evidence that usage was deleted rather than counted differently."""
+    if prev.get("_parsed_under", version) != version:
+        return False
+    if kind == "log":
+        return (fresh.get("size") or 0) < (prev.get("size") or 0)
+    return prev.get("_sig") != fresh.get("_sig")
+
+
+def _seen_ids(agg, field):
+    """The record identities a log's parser has counted, in order."""
+    value = (agg.get("state") or {}).get(field)
+    if field == "seen_uuids":
+        value = value if isinstance(value, str) else ""
+        return [value[i:i + 12] for i in range(0, len(value), 12)]
+    return list(value) if isinstance(value, list) else []
+
+
+def _set_seen(agg, field, ids):
+    ids = list(dict.fromkeys(ids))
+    agg.setdefault("state", {})[field] = "".join(ids) if field == "seen_uuids" else ids
+
+
+def _merge_seen(fresh, prev):
+    """Records the previous parse counted stay counted: if a shortened log gets
+    them back, the parser skips them, since the kept usage already holds them."""
+    field = _LOG_SEEN.get(fresh.get("source"))
+    if field:
+        _set_seen(fresh, field, _seen_ids(fresh, field) + _seen_ids(prev, field))
+
+
+def _seed_kept_seen(fresh, ids):
+    """A full reparse also skips the records whose usage is kept: a log that got
+    them back (a synced copy restored, say) must not count them twice."""
+    field = _LOG_SEEN.get(fresh.get("source"))
+    if field and isinstance(ids, list) and ids:
+        _set_seen(fresh, field, [str(x) for x in ids])
+
+
+def _reconcile_log(prev, fresh, measure):
+    """An append-only log: keep what each dimension's totals lost when it got shorter."""
+    kept = copy.deepcopy(prev.get("_retained") or {})
+    fresh_events = fresh.get("compactions") if isinstance(fresh.get("compactions"), dict) else {}
+    field = _LOG_SEEN.get(fresh.get("source"))
+    if measure and field:
+        # The records this parse lost, whose usage is kept below.
+        have = set(_seen_ids(fresh, field))
+        gone = [x for x in _seen_ids(prev, field) if x not in have]
+        if gone:
+            kept["seen"] = list(dict.fromkeys(list(kept.get("seen") or []) + gone))
+    _merge_seen(fresh, prev)
+    if measure:
+        old = kept.get("dims") or {}
+        dims = {}
+        for dim in _RETAIN_DIMS:
+            held = _without(_dim(prev, dim), old.get(dim))
+            gap = (_shortfall(held, _dim(fresh, dim)) if dim == "totals"
+                   else _capped_gap(held, _dim(fresh, dim)))
+            merged = copy.deepcopy(old.get(dim) or {})
+            if gap:
+                _add_counts(merged, gap, _RETAIN_BLANK.get(dim))
+            if merged:
+                dims[dim] = merged
+        kept["dims"] = dims
+        prev_events = prev.get("compactions") if isinstance(prev.get("compactions"), dict) else {}
+        kept["compactions"] = {cid: copy.deepcopy(e) for cid, e in prev_events.items()
+                               if cid not in fresh_events}
+        if dims:
+            for field, pick in (("first_ts", min), ("last_ts", max)):
+                values = [v for v in (prev.get(field), kept.get(field)) if isinstance(v, str) and v]
+                if values:
+                    kept[field] = pick(values)
+    else:
+        kept["compactions"] = {cid: e for cid, e in (kept.get("compactions") or {}).items()
+                               if cid not in fresh_events}
+    kept = {k: v for k, v in kept.items() if v}
+    if not (kept.get("dims") or kept.get("compactions")):
+        return
+    fresh["_retained"] = kept
+    for dim, delta in (kept.get("dims") or {}).items():
+        _add_dim(fresh, dim, delta)
+    if isinstance(fresh.get("compactions"), dict):
+        for cid, event in (kept.get("compactions") or {}).items():
+            fresh["compactions"].setdefault(cid, copy.deepcopy(event))
+    _widen_span(fresh, kept.get("first_ts"), kept.get("last_ts"))
+    if any("\tClaude Haiku 5.5" in key for key in (kept.get("dims") or {}).get("records", {})):
+        # Kept usage was priced when it was parsed and cannot be backfilled; an
+        # absent marker would reparse this log on every refresh.
+        fresh.setdefault("haiku_pricing", 1)
+    _finalize_session(fresh, fresh["source"], fresh["path"])
+
+
+def _store_matches(prev_sessions, fresh_by_sid):
+    """[(previous session, identity, fresh sid or None)]. Full native ids where the
+    ledger has them; an entry written before full ids were kept matches on the
+    eight-character id only when that is unambiguous (else also on its start).
+    Anything ambiguous is left out: neither kept nor compared."""
+    out, legacy, fresh_short, claimed = [], {}, {}, set()
+    for sid in fresh_by_sid:
+        fresh_short.setdefault(sid[:8], []).append(sid)
+    for s in prev_sessions:
+        if s.get("_sid"):
+            out.append((s, s["_sid"], s["_sid"] if s["_sid"] in fresh_by_sid else None))
+        elif s.get("id"):
+            legacy.setdefault(s["id"], []).append(s)
+    for short, group in legacy.items():
+        candidates = fresh_short.get(short, [])
+        starts = [s.get("start") for s in group]
+        unmatched = []
+        for s in group:
+            if len(group) == 1 and len(candidates) == 1:
+                match = list(candidates)
+            elif starts.count(s.get("start")) > 1:
+                continue                     # same short id and start: cannot tell apart
+            else:
+                match = [sid for sid in candidates if fresh_by_sid[sid].get("start") == s.get("start")]
+            if len(match) == 1 and match[0] not in claimed:
+                claimed.add(match[0])
+                out.append((s, match[0], match[0]))
+            elif not match:
+                unmatched.append(s)
+        # Gone only if every remaining session with this short id is accounted
+        # for: one left over might be this session with a changed start.
+        if all(sid in claimed for sid in candidates):
+            out.extend((s, f"short:{short}@{s.get('start')}", None) for s in unmatched
+                       if starts.count(s.get("start")) == 1)
+    return out
+
+
+def _store_returned(identity, fresh_by_sid):
+    """The fresh sid of a kept session the store holds again, or None. One kept
+    before full ids were stored matches by short id and start together."""
+    if identity in fresh_by_sid:
+        return identity
+    if identity.startswith("short:"):
+        short, _, start = identity[6:].partition("@")
+        found = [sid for sid, s in fresh_by_sid.items()
+                 if sid[:8] == short and str(s.get("start")) == start]
+        if len(found) == 1:
+            return found[0]
+    return None
+
+
+def _store_response_keys(agg):
+    """{session id: counted response keys} of a previous OpenClaw parse, kept
+    sessions included, so a fork cannot recount a deleted parent's responses."""
+    keys = {sid: d.get("keys") or [] for sid, d in (agg.get("_store_detail") or {}).items()}
+    for entry in ((agg.get("_retained") or {}).get("sessions") or {}).values():
+        sid = (entry.get("session") or {}).get("_sid")
+        if sid and entry.get("keys"):
+            keys.setdefault(sid, entry["keys"])
+    return keys
+
+
+def _message_usage(sid, mid, m):
+    """What one stored OpenCode message added, exactly as parse_opencode_db counts it:
+    [role, date, hour, model, in, out, reasoning, cache read, cache write, cost,
+     tool names, active seconds]."""
+    role, date, hour, model, inp, out, reason, cr, cw, cost, tools, gap = m
+    key = date + "\t" + model
+    if role == "u":       # a prompt's gap counts on its record, not on the session
+        return {"records": {key: {"user": 1, "active": gap}}, "tools": {}, "hourly": {},
+                "session": {"user": 1}, "totals": {"user": 1}, "ids": []}
+    names = {}
+    for name in tools:
+        names[date + "\t" + name] = names.get(date + "\t" + name, 0) + 1
+    usage = {"in": inp, "out": out, "reason": reason, "cr": cr, "cc": cw, "cc5": cw,
+             "asst": 1, "cost": cost, "tools": len(tools)}
+    return {"records": {key: dict(usage, active=gap)}, "tools": names,
+            "hourly": {f"{date}\t{hour}": {"tokens": inp + out + cr + cw, "msgs": 1}},
+            "session": dict(usage, active=gap), "totals": usage, "ids": [[sid, mid]]}
+
+
+def _reconcile_store(prev, fresh, measure):
+    """Many sessions in one database: keep a deleted session whole, and (OpenCode)
+    each message deleted from a session that is still there."""
+    kept = copy.deepcopy(prev.get("_retained") or {})
+    whole, deleted, new_deleted = kept.get("sessions") or {}, kept.get("messages") or {}, {}
+    fresh_by = {s["_sid"]: s for s in fresh.get("sessions", []) if s.get("_sid")}
+    before_detail = prev.get("_store_detail") or {}
+    now_detail = fresh.get("_store_detail") or {}
+    prev_ids = [x for x in prev.get("opencode_ids") or [] if isinstance(x, list) and len(x) == 2]
+    live = [s for s in prev.get("sessions", []) if not s.get("retained")]
+    for s, identity, sid in _store_matches(live, fresh_by):
+        source_sid = s.get("_sid")
+        detail = (before_detail.get(source_sid) or {}) if source_sid else {}
+        gone = deleted.get(identity) or {}       # its messages deleted earlier
+        if sid is None:
+            session = copy.deepcopy(s)
+            session.update(retained=True, archived=True)
+            session.pop("retained_usage", None)
+            entry = {"session": session, "tools": copy.deepcopy(detail.get("tools") or {}),
+                     "hourly": copy.deepcopy(detail.get("hourly") or {})}
+            for mid, m in gone.items():
+                part = _message_usage(source_sid, mid, m)
+                _add_counts(entry["tools"], part["tools"])
+                _add_counts(entry["hourly"], part["hourly"], _RETAIN_BLANK["hourly"])
+            if source_sid:
+                entry["ids"] = [x for x in prev_ids if x[0] == source_sid]
+                if detail.get("keys"):
+                    entry["keys"] = list(detail["keys"])
+                if detail.get("msgs") is not None:
+                    entry["msgs"] = {**detail["msgs"], **gone}
+            whole[identity] = entry
+            continue
+        now = now_detail.get(sid) or {}
+        now_msgs = now.get("msgs") or {}
+        still = {mid: m for mid, m in gone.items() if mid not in now_msgs}
+        # A message counted last time and missing now was deleted, also across
+        # OpenCode's V1/V2 copies (a deleted or emptied V2 session falls back to
+        # its V1 rows): the migration keeps message ids, and V1 has no forks, so
+        # a migrated session never loses fork-copied rows.
+        if measure and isinstance(detail.get("msgs"), dict) and isinstance(now.get("msgs"), dict):
+            still.update({mid: m for mid, m in detail["msgs"].items() if mid not in now_msgs})
+        if still:
+            new_deleted[sid] = still
+    for identity, entry in list(whole.items()):
+        sid = _store_returned(identity, fresh_by)
+        if sid is None:
+            continue
+        del whole[identity]
+        now = now_detail.get(sid) or {}
+        if isinstance(entry.get("msgs"), dict):
+            # Emptied then used again, or restored: keep exactly what is not back.
+            back = {mid: m for mid, m in entry["msgs"].items() if mid not in (now.get("msgs") or {})}
+            if back:
+                new_deleted.setdefault(sid, {}).update(back)
+        elif entry.get("keys") and not set(entry["keys"]) & set(now.get("keys") or []):
+            whole[identity] = entry    # new work under a reused id; the old stays kept
+    if not (whole or new_deleted):
+        return
+    fresh["_retained"] = {k: v for k, v in (("sessions", whole), ("messages", new_deleted)) if v}
+    totals = fresh.setdefault("totals", {})
+    known_ids = {tuple(x) for x in fresh.get("opencode_ids") or []}
+
+    def add(session, records, tools, hourly, session_usage, total_usage, ids):
+        if session is not None:
+            _add_counts(session.setdefault("records", {}), records, _RETAIN_BLANK["records"])
+            _add_counts(session, session_usage)
+        _add_counts(fresh.setdefault("records", {}), records, _RETAIN_BLANK["records"])
+        _add_counts(fresh.setdefault("tools", {}), tools)
+        _add_counts(fresh.setdefault("hourly", {}), hourly, _RETAIN_BLANK["hourly"])
+        _add_counts(totals, {k: v for k, v in total_usage.items() if k in totals or k == "cost"})
+        if "opencode_ids" in fresh:
+            for x in ids:
+                if tuple(x) not in known_ids:
+                    known_ids.add(tuple(x))
+                    fresh["opencode_ids"].append(list(x))
+
+    for entry in whole.values():
+        session = copy.deepcopy(entry["session"])
+        fresh["sessions"].append(session)
+        add(None, session.get("records") or {}, entry.get("tools") or {}, entry.get("hourly") or {},
+            {}, _session_counts(session), entry.get("ids") or [])
+        _widen_span(fresh, session.get("start"), session.get("end"))
+    for sid, messages in new_deleted.items():
+        session = fresh_by[sid]
+        for mid, m in messages.items():
+            part = _message_usage(sid, mid, m)
+            add(session, part["records"], part["tools"], part["hourly"], part["session"],
+                part["totals"], part["ids"])
+        session["retained_usage"] = True
+
+
+def reconcile(prev, fresh, version):
+    """Add back the usage `prev` counted that the source no longer holds (see the
+    section comment). `version` is the ledger's CACHE_VERSION; every new
+    aggregate is stamped with it."""
+    if not isinstance(fresh, dict) or fresh is prev:
+        return fresh
+    kind = _retention_kind(fresh)
+    if isinstance(prev, dict) and kind and _retention_kind(prev) == kind:
+        measure = _may_measure(prev, fresh, kind, version)
+        if kind == "store":
+            _reconcile_store(prev, fresh, measure)
+        else:
+            _reconcile_log(prev, fresh, measure)
+    fresh["_parsed_under"] = version
+    return fresh
+
+
+def _codex_stale(agg):
+    """True when an available Codex log's entry predates metadata the parser now
+    records, so it must be read again in full. The plain-log branch of update_file
+    holds the same conditions inline (alongside Claude's); keep the two in step."""
+    return (agg.get("parent_metadata_version") != 1
+            or agg.get("reasoning_effort_version") != _REASONING_EFFORT_VERSION
+            or agg.get("state", {}).get("compaction_timing", {}).get("version")
+            != _CODEX_COMPACTION_TIMING_VERSION
+            or agg.get("account_metadata_version") != A.METADATA_VERSION
+            or "compactions" not in agg)
+
+
+# Compressed logs the decoder refused, by path -> (size, mtime_ns). A compressed log
+# is immutable, so a damaged one fails identically every time: remember that and do
+# not decode hundreds of MB again each refresh until the file itself changes.
+_ZSTD_BAD = {}
+
+
+def _update_codex_compressed(agg, path, st):
+    """A Codex rollout Codex has compressed (<rollout>.jsonl.zst). Always read in
+    full and keyed by the file's signature, never from a byte offset: a compressed
+    file is written once and replaced whole if it ever changes. The new entry is
+    built on the side and handed back only after every frame decoded, so a failure
+    leaves the previous ledger entry (the rollout's archived plain copy, or an
+    earlier read of this file) exactly as it was."""
+    size, mtime = st.st_size, st.st_mtime
+    if (agg and agg.get("size") == size and agg.get("mtime") == mtime
+            and not _codex_stale(agg)):
+        return agg                                   # already read, and nothing new to record
+    if size == 0:
+        return agg                                   # still being written: nothing to read yet
+    signature = (size, st.st_mtime_ns)
+    if _ZSTD_BAD.get(path) == signature:
+        raise ZstdReadError(_ZSTD_DAMAGED)
+    if not zstd_available():
+        raise ZstdUnavailable("no zstd decoder: install the zstd command or use Python 3.14+")
+    fresh = _blank_agg("codex", path)
+    lines = _zstd_lines(path)
+    try:
+        parse_codex(fresh, lines)
+    except ZstdReadError:
+        _ZSTD_BAD[path] = signature
+        raise
+    finally:
+        lines.close()
+    _ZSTD_BAD.pop(path, None)
+    fresh["offset"] = size                           # every byte of the file was consumed
+    fresh["size"], fresh["mtime"] = size, mtime      # on-disk (compressed) size, as Storage shows
+    _finalize_session(fresh, "codex", path)
+    return fresh
+
+
 def update_file(agg, source, path, editor_hint, proj_map):
     """(Re)parse a single file incrementally. Returns the updated agg."""
     try:
@@ -4141,6 +5304,10 @@ def update_file(agg, source, path, editor_hint, proj_map):
     except OSError:
         return agg
     size, mtime = st.st_size, st.st_mtime
+    kept_seen = (agg.get("_retained") or {}).get("seen") if isinstance(agg, dict) else None
+
+    if source == "codex" and is_zstd_path(path):
+        return _update_codex_compressed(agg, path, st)
 
     if source == "copilot" and _leaf(path) == "events.jsonl":
         return _update_copilot_sdk(agg, path)
@@ -4171,39 +5338,93 @@ def update_file(agg, source, path, editor_hint, proj_map):
                 fs = os.stat(f); sig.append([os.path.basename(f), fs.st_size, fs.st_mtime]); total += fs.st_size
             except OSError:
                 pass
-        if agg and agg.get("_sig") == sig:
+        # _store_detail: per-session tools/hourly, recorded once for older entries
+        # so a session deleted later keeps all of its usage (see reconcile).
+        if agg and agg.get("_sig") == sig and "_store_detail" in agg:
             return agg
         fresh = _blank_agg(source, path)
         fresh["editor"] = editor_hint
         fresh["size"] = total
+        if agg:
+            fresh["_prior_keys"] = _store_response_keys(agg)
         parse_openclaw(fresh, path)
         fresh["_sig"] = sig
         fresh["mtime"] = max((x[2] for x in sig), default=mtime)
         return fresh
 
-    if source in ("gemini", "cursor", "hermes"):
+    if source == "cursor":
+        if __package__:
+            from . import cursor_data as CD
+        else:
+            import cursor_data as CD
+        wal = path + "-wal"
+        try:
+            wst = os.stat(wal)
+        except OSError:
+            wst = None
+        workspace_sig = CD.workspace_signature(path)
+        sig = [size, st.st_mtime_ns, wst.st_size if wst else 0,
+               wst.st_mtime_ns if wst else 0, workspace_sig]
+        if agg and agg.get("_sig") == sig and agg.get("cursor_schema") == CD.CURSOR_SCHEMA:
+            return agg
+        fresh = _blank_agg(source, path)
+        fresh["editor"] = editor_hint
+        if agg and isinstance(agg.get("_cursor_history"), dict):
+            fresh["_cursor_history"] = agg["_cursor_history"]
+        parse_cursor(fresh, path)
+        fresh["_sig"] = sig
+        fresh["cursor_schema"] = CD.CURSOR_SCHEMA
+        fresh["size"] = size + (wst.st_size if wst else 0)
+        fresh["mtime"] = max(mtime, wst.st_mtime if wst else 0)
+        return fresh
+
+    if source in ("gemini", "hermes"):
         # A live SQLite writer can append to the WAL without touching the main
         # database. Include it, or Cursor/Hermes stay stale until a checkpoint.
-        wal = path + "-wal" if source in ("cursor", "hermes") else None
+        wal = path + "-wal" if source == "hermes" else None
         try:
             wst = os.stat(wal) if wal else None
         except FileNotFoundError:
             wst = None
         sig = [size, mtime, wst.st_size if wst else 0, wst.st_mtime_ns if wst else 0]
-        if agg and agg.get("_sig") == sig:
+        if agg and agg.get("_sig") == sig and (source != "hermes" or "_store_detail" in agg):
             return agg
         fresh = _blank_agg(source, path)
         fresh["editor"] = editor_hint
         if source == "gemini":
             parse_gemini(fresh, path)
             _finalize_session(fresh, source, path)
-        elif source == "cursor":
-            parse_cursor(fresh, path)   # sets its own per-composer sessions
         else:
             parse_hermes(fresh, path)   # sets its own per-session sessions
         fresh["_sig"] = sig
         fresh["size"] = size + (wst.st_size if wst else 0)
         fresh["mtime"] = max(mtime, wst.st_mtime if wst else 0)
+        return fresh
+
+    if source == "antigravity":
+        # Include the WAL in the signature: active Antigravity writes may never
+        # touch the main database until a checkpoint. Full reparse is staged in
+        # a fresh aggregate so any required-schema/protobuf failure leaves the
+        # previous aggregate and signature untouched for retry.
+        wal = path + "-wal"
+        try:
+            wst = os.stat(wal)
+        except OSError:
+            wst = None
+        sig = [size, st.st_mtime_ns, wst.st_size if wst else 0,
+               wst.st_mtime_ns if wst else 0]
+        if agg and agg.get("_sig") == sig and agg.get("antigravity_schema") == 1:
+            return agg
+        fresh = _blank_agg(source, path)
+        fresh["editor"] = editor_hint
+        parse_antigravity(fresh, path)
+        fresh["size"] = size + (wst.st_size if wst else 0)
+        fresh["mtime"] = max(mtime, wst.st_mtime if wst else 0)
+        fresh["_sig"] = sig
+        fresh["antigravity_schema"] = 1
+        _finalize_session(fresh, source, path)
+        if fresh.get("sessions"):
+            fresh["sessions"][0].update(fresh.pop("_antigravity_session", {}))
         return fresh
 
     if source == "opencode":
@@ -4215,7 +5436,7 @@ def update_file(agg, source, path, editor_hint, proj_map):
             wal_size = os.path.getsize(wal) if os.path.exists(wal) else 0
             wal_mtime = os.path.getmtime(wal) if os.path.exists(wal) else 0
             sig = [size, mtime, wal_size, wal_mtime]
-            if agg and agg.get("_sig") == sig and "opencode_schema" in agg:
+            if agg and agg.get("_sig") == sig and "opencode_schema" in agg and "_store_detail" in agg:
                 return agg
             fresh = _blank_agg(source, path)
             fresh["editor"] = editor_hint
@@ -4269,6 +5490,7 @@ def update_file(agg, source, path, editor_hint, proj_map):
             or (source in ("claude", "codex") and agg.get("account_metadata_version") != A.METADATA_VERSION)
             or (source in ("claude", "claude-desktop", "codex") and "compactions" not in agg)):
         agg = _blank_agg(source, path)  # new/truncated log or missing metadata → reparse
+        _seed_kept_seen(agg, kept_seen)
     offset = agg["offset"]
     if size == offset and agg.get("mtime") == mtime:
         return agg  # unchanged
@@ -4394,6 +5616,8 @@ def _ide_of(source, agg, editor_hint=None):
     new host shows up as itself instead of silently becoming 'VS Code'."""
     if source in IDE_FIXED:
         return IDE_FIXED[source]
+    if source == "antigravity":
+        return agg.get("editor") or editor_hint or "Antigravity IDE"
     if source == "copilot":
         # the editor whose storage this file came out of
         return agg.get("editor") or editor_hint or "VS Code"
@@ -4472,7 +5696,11 @@ def _finalize_session(agg, source, path):
     ranked = [m for m, _ in sorted(mt.items(), key=lambda kv: -kv[1])]
     dom = agg["state"].get("dom_model") or (ranked[0] if ranked else "Unknown")
     models = [dom] + [m for m in ranked if m != dom]   # dominant first
-    base = os.path.splitext(os.path.basename(path))[0]
+    # a compressed rollout keeps the id of the plain one it replaced
+    name = os.path.basename(path)
+    if source == "codex" and is_zstd_path(name):
+        name = name[:-4]
+    base = os.path.splitext(name)[0]
     m = re.match(r"rollout-\d{4}-\d{2}-\d{2}T[\d-]+-([0-9a-f]{8})", base)
     if m:
         base = m.group(1)
@@ -4504,6 +5732,9 @@ def _finalize_session(agg, source, path):
         "active": round(active_total, 1),
         "bytes": agg.get("size", 0), "archived": bool(agg.get("archived")),
     }]
+    if agg.get("_retained"):
+        # Usage the tool deleted from this log is kept (reconcile); the drawer says so.
+        agg["sessions"][0]["retained_usage"] = True
     if "reasoning_effort" in agg:
         # Only bounded level/count/date/model metadata is public; correlation
         # state remains private and never appears in a session payload.

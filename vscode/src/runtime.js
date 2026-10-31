@@ -94,7 +94,7 @@ async function findPython(configured, roots, cwd, options = {}) {
     if (options.stillAllowed && !options.stillAllowed()) throw new ServiceError('Starting Python requires a trusted active editor.', 'TRUST');
     if (supported) return real;
   }
-  throw new ServiceError('Python 3.9 or newer was not found. Install Python locally or choose an existing trusted executable in AgentTelemetry settings.', 'NO_PYTHON');
+  throw new ServiceError('Python 3.9 or newer was not found. Install Python locally, choose an existing trusted executable in AgentTelemetry settings, or install the AgentTelemetry desktop app, which includes its own Python.', 'NO_PYTHON');
 }
 async function acquireStartLock(base) {
   await fs.promises.mkdir(base, {recursive: true, mode: 0o700});
@@ -120,7 +120,7 @@ function launchArguments(backend) {
 }
 function bundledVersion(backend) {
   try { const info = JSON.parse(fs.readFileSync(path.join(backend, 'BUILD-INFO.json'), 'utf8')); if (typeof info.version === 'string' && /^[0-9A-Za-z.+_-]{1,64}$/.test(info.version)) return info.version; } catch (_) {}
-  return '2.1.0';
+  return '2.2.0';
 }
 function startupFailure(logFile) {
   return new ServiceError('AgentTelemetry exited before it could start. Check the private startup log at ' + logFile + ' and retry after fixing the Python setup.', 'BACKEND_START');

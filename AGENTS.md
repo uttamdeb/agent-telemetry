@@ -3,21 +3,11 @@
 **AgentTelemetry** — a local, **stdlib-only** dashboard that reads the logs your AI coding tools already write
 to this machine and shows tokens, estimated cost, and breakdowns by model / day / tool /
 project / hour. Inventory, telemetry and the ledger stay on this machine by default. Separate
-user actions can share selected exports with paired devices, return requested analytics to an
-enabled local MCP client (which may forward tool results to a model provider), contact a provider
+user actions can share selected exports with paired devices, contact a provider
 for a confirmed account lookup, or fetch upstream release metadata after a clicked update check
 or release-notes load.
 An explicitly started saved server command can access the network with the user's permissions.
 Nothing to install.
-
-## Local MCP access
-
-The optional stdio MCP bridge requires a running dashboard and is off until enabled in Settings.
-It exposes eight read-only tools; project/device display names and connected-device data have
-separate opt-in scopes. Results go to the configured local client, whose provider may receive
-tool results. The bridge never starts the dashboard, refreshes accounts, reads the ledger
-directly or edits MCP client configuration. See [docs/mcp.md](docs/mcp.md) for tool contracts,
-protocol versions, privacy limits and examples.
 
 ```bash
 python3 dashboard.py            # http://127.0.0.1:7878
@@ -121,7 +111,13 @@ CI runs backend/frontend checks on Linux, macOS and Windows and native checks on
 Release downloads use `.github/workflows/release-downloads.yml`, dispatched against an
 existing tag. It builds architecture-specific macOS DMGs and a Windows x64 EXE. The EXE
 uses Inno Setup only at build time and bundles hash-pinned CPython with the unchanged
-release-tag backend/UI allowlist. `windows/installer/register_install.py` registers app
+release-tag backend/UI allowlist. The runtime is CPython 3.15.2 (`PYTHON_VERSION` in
+`windows/installer/build.py`; the macOS app pins the same version in `package-app.sh`, and CI runs the
+unit tests on 3.15 too). Its `python315._pth` (named for the version, or it is ignored) lists the app
+folder BEFORE `python315.zip`: a
+`._pth` stops Python adding the script's folder, and with the stdlib first `import antigravity` found
+the stdlib's xkcd module (it opens a browser), so the backend could not start. Keep it first, and keep
+`antigravity` the only top-level module named like a stdlib one (`test_release_packaging.py`). `windows/installer/register_install.py` registers app
 controls, preserves an existing owned login opt-in, and guards installation/uninstall
 against a live or closing client; it never deletes the ledger or preferences. Run
 `tests/run_windows_installer.py` on Windows to verify install, packaged Win32 UI, upgrade,
@@ -136,7 +132,9 @@ accurately. Keep the existing public tag intact when adding packaging metadata/a
 | File | Role |
 |---|---|
 | `dashboard.py` | stdlib `http.server`. Serves `/`, `/static/*`, `/chart.js`, `/manifest.json`, `/sw.js`, `/api/{data,storage,refresh,settings,cache,update,release-notes,devices}`. Owns the cache, the aggregate merge, `_cost()` and the device sharing listener. |
-| `parser.py` | `discover()` lists log files; `update_file()` routes each to a `parse_*`. Holds `PRICING` and the model-name normalizers. |
+| `parser.py` | **AgentTelemetry Pulsar**, the log-ingestion engine (the module stays `parser.py`). `discover()` lists log files; `update_file()` routes each to a `parse_*`. Holds `PRICING` and the model-name normalizers. |
+| `cursor_data.py` | Bounded read-only Cursor metadata and conversation-event projection; no raw content retained. |
+| `antigravity.py` | Read-only Antigravity SQLite conversation snapshot and bounded safe event reader; parser integration routes the same records to every client. |
 | `static/core.js` | `SRC`/`ORDER`, state `S`, formatting, date ranges, filtering. |
 | `static/tool-icons/` | Bundled tool/provider SVG marks, pinned sources and licenses. |
 | `session_names.py` | Warning previews, private title backups and verified original-tool renames. |
@@ -144,14 +142,11 @@ accurately. Keep the existing public tag intact when adding packaging metadata/a
 | `release_notes.py` | Private cached GitHub release metadata and one-time first-open acknowledgement state; network access is explicit. |
 | `static/charts.js` | Chart.js theming, `mk()`/`hbar()`/`areaDS()`, calendar + heatmap SVG. |
 | `static/views.js` | The eight views, controls, events, boot. |
-| `mcp_server.py` | Local stdio MCP bridge; read-only, authenticated loopback queries. |
-| `mcp_backend.py`, `telemetry_query.py`, `telemetry_insights.py` | Authenticated MCP dispatch and shared analytics. |
-| `mcp_access.py`, `mcp_protocol.py`, `mcp_tools.py` | Local consent/credentials, protocol compatibility and tool contracts. |
 | `native_activity.py` | Pure, bounded projection for native clients' recent local-session list. |
 | `index.html` | Shell only: sidebar (device name, tabs, live/refresh/theme/settings), page header (period, range, metric, filters), card markup, an SVG icon sprite. |
 
 Eight tabs in the sidebar: Overview · Cost · Models · Tools · Projects · Sessions ·
-**Optimize** · Storage. Tab lives in `location.hash`. **Every filter lives in the query
+Local servers · Storage. Tab lives in `location.hash`. **Every filter lives in the query
 string too**, so a reload, bookmark or pasted link opens the same view: `filtersFromURL()`
 reads it at boot and `filtersToURL()` writes it after every `renderAll()`, both in `core.js`.
 The params are `?range=` (a preset, or `custom` with `&from=&to=` as YYYY-MM-DD),
@@ -166,8 +161,8 @@ sidechain tokens are whole-session evidence, not parent-child links; sidechain
 tokens are already included in the parent's total. See docs/subagent-sessions.md.
 Copilot SDK's inline child breakdowns are presented separately in payload
 `session_children`. Combine them only in the Sessions list, after the same shared
-filters/date scope. Never add them to `slice().sessions`, analytics records, Optimize,
-MCP totals or project counts: their usage is already included in the parent.
+filters/date scope. Never add them to `slice().sessions`, analytics records or project
+counts: their usage is already included in the parent.
 Keep full parent/agent identities, explicit parent links, unavailable usage labels
 and recorded activity dates; do not infer activity on idle days or rename these children.
 Only what differs from the default is written, params that aren't the filters' own are left
@@ -201,6 +196,17 @@ Aggregates are keyed `records["date\tmodel"]`, `tools["date\tname"]`,
 In the payload every usage row (records, sessions, activity, tools, hourly, ctx, skills,
 reads) also carries a `device` id; see "Your devices".
 
+**Optional extensions.** `core.js` exposes a feature-neutral registry: `EXT`,
+`registerView({id, title, label, icon, after, html, render(d), badge(d)})` and
+`registerSettingsPanel({html, begin, current, close, load})`. A plain `<script src>`
+placed between `core.js` and `views.js` may call them; nothing in this repository does,
+so both lists are empty and every loop over them is a no-op. `registerView` builds the
+`#tabs` button and `#v-<id>` section, ignores an id that already exists, and `views.js`
+merges registered titles into `VIEW_TITLES` (an unregistered `#hash` falls back to
+Overview), dispatches `render(d)` inside `renderAll()`'s error guard and refreshes badges.
+`tests/test_extensions_frontend.js` covers it. Extensions use the shared globals
+(`RAW`, `slice()`, `fmt*`, `passSrc()`…) at call time, so renaming one is a contract change.
+
 ## Rules
 
 1. **Stdlib only, offline.** No runtime dependencies. Vendor any JS (Chart.js already is).
@@ -232,6 +238,9 @@ reads) also carries a `device` id; see "Your devices".
     carry the full tool name/provider as an accessible label and tooltip.
     OpenCode's display name is `OpenCode`; its source id, paths and asset names
     remain `opencode` for compatibility with existing ledgers and saved filters.
+11. **"AgentTelemetry Pulsar" is `parser.py`'s user-facing name, nothing more.** The brand
+    appears only in user text and docs. Never rename the module or file: `dashboard.py`, the
+    tests, the packaging allowlists and downstream builds import `parser` by name.
 
 ## The IDE dimension
 
@@ -303,6 +312,23 @@ so that file stops being a cache and becomes the sole record. Two consequences:
   when the source size/mtime is unchanged. In v56, only available Claude logs with
   Haiku 5.5 usage missing `haiku_pricing` need a pricing backfill; other sources stay
   incremental. Peers with versions 52/53/54/55 remain readable.
+- Cache **62** adds Antigravity while retaining every compatible v61 entry,
+  including archives; peers with versions 52–61 remain readable. New
+  conversations are discovered incrementally and do not need a rebuild. Its
+  reverse-engineered SQLite reader preserves field-level recorded/partial/
+  unavailable states, deduplicates generation/step rows only through their
+  explicit packed-step mapping, and does not treat intent-only checkpoints as
+  compactions. Standalone legacy `.pb` files remain unsupported. See
+  docs/antigravity.md.
+- Cache **64** adds discovery of Codex's zstd-compressed rollouts (`*.jsonl.zst`) and
+  retains every v53–63 entry, live and archived; peers with versions 52–63 remain
+  readable. No aggregate changes shape. It is bumped because a device that predates
+  it counts a conversation's archived `.jsonl` entry and its live `.jsonl.zst` entry
+  as two conversations, so an older receiver must refuse a newer export ("update
+  both") rather than double count. The compressed entries appear beside the existing
+  ones on the next normal restart: never rebuild, and keep the archived plain entries,
+  which are the only record of a rollout whose compressed copy cannot be decoded here.
+  See "Codex compresses idle rollouts" under Per-source quirks.
 - **`--rebuild` destroys archived sessions too**, not just the Settings buttons — it
   skips the cache entirely and re-parses from disk, and an archived session has no
   disk to parse. Back up `.usage_cache.json` before running it on a machine whose
@@ -312,11 +338,59 @@ so that file stops being a cache and becomes the sole record. Two consequences:
   clears the cache without the same warning.
 - **One conversation can hold two ledger entries**, and each used to count in full:
   Codex's archive feature moves a rollout into `archived_sessions/` (the old path stays,
-  archived, beside the new live one), and a Copilot chat can exist as both `<uuid>.json`
+  archived, beside the new live one); Codex also replaces an idle rollout with
+  `<rollout>.jsonl.zst` (the plain path goes missing and is archived beside the new live
+  compressed one, and the reverse when a thread is decompressed to resume); and a
+  Copilot chat can exist as both `<uuid>.json`
   and `<uuid>.jsonl` across its storage-format migration, or in both VS Code's and
   Cursor's storage after Cursor imported VS Code's. `build_payload` keeps one per
   conversation **per device** (`_one_per_conversation`: fullest including cache writes,
-  then live, then newest). Use `_leaf()` on paths so Windows copies deduplicate on a Mac too.
+  then live, then newest). Use `_leaf()` on paths so Windows copies deduplicate on a Mac
+  too; Codex's key is `_codex_leaf()`, the file name without a `.zst` suffix.
+  A path found on disk is never archived: `_refresh_locked` clears the mark, which is
+  otherwise only ever set when a path goes missing, so a log that came back (a rollout
+  Codex decompressed) stayed archived and lost its timeline, rename and live views.
+- **Usage a tool deletes from a log that still exists is kept too** (`parser.reconcile`,
+  called from both `update_file` call sites in `dashboard.py`). Archiving only covers a
+  path that disappears. OpenCode's database, Hermes and OpenClaw hold many sessions in
+  one store, and a deleted session (or OpenCode's undo, which deletes the reverted
+  messages) silently dropped out of every total on the next full reparse; so did a
+  Claude/Copilot log that got shorter (Copilot compacts its chat log without requests
+  removed in the chat). Kept usage lives in private `agg["_retained"]` and is re-added
+  after every reparse. **It is found by identity, never by comparing totals alone**:
+  usage also moves between rows without being deleted (Hermes' main model changes, a
+  timezone change re-buckets local dates, an OpenClaw fork takes over its parent's
+  copied responses), and one refresh can bring a deletion and a same-sized retry.
+  A store session that is gone keeps its whole last-known contribution and is flagged
+  `retained` + `archived` (no rename, no timeline, never "live"); if it comes back,
+  the source's copy replaces it. OpenCode messages deleted from a session still there
+  are kept by message id from per-message summaries in private `_store_detail`
+  (`retained_usage` flag, drawer note); a session emptied and used again keeps its old
+  messages. Ids hold across OpenCode's V1/V2 copies (the migration keeps them and V1
+  has no forks), so a V2 session that falls back to its V1 rows keeps what was written
+  since. A shortened Claude/Copilot log keeps what each dimension's totals lost,
+  capped so moved usage is never kept; the ids of the records it lost (`_retained.seen`)
+  seed every later parse's seen-set, a full reparse included, so restored lines are
+  not recounted. A kept row the source lacks takes the full shape its parser indexes
+  (`_RETAIN_BLANK`); a partial one made the next append fail. Message and log shortfalls are
+  measured only when the SOURCE changed and both parses carry the same `_parsed_under`
+  (CACHE_VERSION): **a parser fix that lowers counts must bump `CACHE_VERSION`**, or
+  retention will keep the old figures. Hermes and OpenClaw keep whole deleted sessions
+  only; Codex is only ever deleted whole (archived) and has no record identity for a
+  shortened-then-restored log; Copilot `.json`, Antigravity and Copilot SDK are one
+  conversation per path; Cursor keeps its own row history.
+  Store sessions now keep their full native `_sid` (the visible id is only eight
+  characters; OpenCode's repeat within minutes), which also makes OpenCode renames
+  resolve. Entries written earlier match on the short id only when unambiguous (else
+  also on `start`); ambiguous ones are neither kept nor compared. `_store_detail` also
+  holds each store session's tools/hourly and OpenClaw's counted response keys, so a
+  fork never recounts a deleted parent's responses; a store entry without it reparses
+  once, even on an unchanged signature. `_retained`, `_store_detail` and
+  `_parsed_under` are never exported to peers; the merged usage is. No cache-version
+  bump. Like archived sessions, kept usage cannot be re-derived: `--rebuild` and the
+  warned Rebuild / Delete cache actions drop it, as does `load_cache()`'s fallback for an
+  unlisted version (it keeps archived entries only), so list each migrated version as
+  compatible. See `tests/test_retention.py`.
 - A failed full reparse leaves the previous ledger entry and signature intact; the
   next refresh retries it. Parser failures propagate to `_refresh_locked`, which reports
   the source, path and exception on stderr even for background refreshes.
@@ -335,13 +409,6 @@ labels and explicitly relocated local roots at presentation time. Use
 `native.set_project_preferences()` to validate/save them. Never rewrite transcripts,
 ledger entries or peer exports for a folder rename; no cache bump/rebuild is needed.
 See `docs/project-relocations.md` for migration and compatibility-link guidance.
-
-`static/insights.js` compares the same `filteredRecords()` as Overview/Cost with
-`prevRange()`. Within each independent project/model/tool/token-type grouping,
-current minus previous must reconcile to the hero delta. Keep decreases, departed
-categories, zero baselines and offsetting changes. These are accounting contributions,
-not causal findings; no account quota is involved. All time has no prior comparison.
-Current and previous drilldowns preserve other filters and use the correct date range.
 
 `ledger_backups.py` keeps private byte-preserving snapshots in `.usage-backups/`
 beside `CACHE_PATH`. Serialize create/preview/restore with `_refresh_lock`. Routine
@@ -471,13 +538,16 @@ existing guarded `GET /api/local-servers` for the separate local server list.
   2027-01-01 — move it into `PRICE_HISTORY` then. `_canonicalize` gives every source one
   spelling ("Gemini 3.1 Pro"); `price_of` also tries it, so a row cached under an older
   spelling still prices.
-- **Gemini 4 Argon uses announced introductory API-equivalent rates** of $2/$10 per
-  1M input/output tokens and $0.10 cached input, verified against Google's
-  [launch post](https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-4-argon/)
-  on 2026-10-02. Access is limited to trusted testers; no public API model ID is listed.
+- **Gemini 4 Argon is $2/$10 per 1M input/output tokens and $0.10 cached input through
+  2026-11-30**, then $4/$20 and $0.20 from 2026-12-01, verified against Google's
+  [pricing page](https://ai.google.dev/gemini-api/docs/pricing) on 2026-10-30 (generally
+  available as `gemini-4-argon`; first seen in the
+  [launch post](https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-4-argon/)).
   `_canonicalize` recognizes Argon display/raw spellings without treating audio/image/Live
-  variants as the text model. The later $4/$20 price has no effective date — move the
-  intro tuple into `PRICE_HISTORY` only when it takes effect. Cache storage is not modeled.
+  variants as the text model. On or after 2026-12-01 move the current tuple into
+  `PRICE_HISTORY` dated 2026-11-30 and put the new rates in `PRICING` — never before.
+  Cache storage is not modeled. There is no "Gemini 4 Carbon" on Google's pricing page
+  (checked 2026-10-30); add nothing until Google publishes it.
 - **Claude's advisor iterations** (`usage.iterations[].type == "advisor_message"`) are not
   priced separately — none exist in any log seen, so their shape can't be verified. Every
   iteration here is a plain `message`, already covered by the response's own `usage`.
@@ -492,8 +562,7 @@ existing guarded `GET /api/local-servers` for the separate local server list.
   never additional usage. The existing eight-response dedup window also bounds
   `state.haiku_context`; a streamed threshold correction reprices the request's earlier
   date/turn/skill contributions without changing counts. Old archives/peers and other
-  tools lacking this metadata use the short-prompt rate. Optimize model substitutions
-  use the higher published tier conservatively when the target request size is unknown.
+  tools lacking this metadata use the short-prompt rate.
 
 - **Claude compactions are durable session events, not inferred model usage.**
   `agg.compactions` maps boundary UUID → timestamp, local date, manual/auto/unknown
@@ -610,6 +679,37 @@ existing guarded `GET /api/local-servers` for the separate local server list.
   prompts/messages silently zero out. `parse_codex` handles both; if Codex ships a
   third shape, check `event_msg` payload types in a fresh rollout file before
   assuming the existing branches still apply.
+- **Codex compresses idle rollouts.** In `sessions/**` and `archived_sessions/**` an idle
+  thread's `rollout-<stamp>-<thread id>.jsonl` becomes the same name plus `.zst` (one
+  zstd frame, no checksum: 180 files, 961 MiB packed / 1.8 GiB of text, the largest
+  380 MiB, here). Both spellings are discovered (`CODEX_GLOBS`) and are ONE
+  conversation. A compressed file is immutable, so `update_file()` hands it to
+  `_update_codex_compressed()`: always read in full, keyed by size/mtime, never from a
+  byte offset, streamed (`zstd_stream` / `_zstd_lines`, memory follows the longest
+  record: the 380 MiB log peaks near 300 MiB where the plain path needed 1.3 GiB) and
+  committed only after every frame decoded, so a failure leaves the previous entry
+  (usually the rollout's archived plain one) as it was. `entry["size"]` is the bytes on
+  disk, as Storage lists them. The same `_codex_stale()` markers force a full re-read.
+  **Decoding has one seam, `_zstd_backend()`**: Python 3.14's `compression.zstd`, else the
+  `zstd` command, else nothing (OpenClaw's `_zstd_decode_many` uses it too). The bundled
+  macOS and Windows runtimes are CPython 3.15.2, which has `compression.zstd`, so the
+  installed apps decode with no `zstd` command; a source checkout on Python 3.13 or older
+  still needs the command. Without either, `update_file()` raises
+  `ZstdUnavailable`; `_refresh_locked` counts it (`_meta` / payload
+  `codex_compressed_unread`, one stderr line with no path whenever the count changes, the
+  sidebar note, the Settings hint) and creates NO entry and NO log error: nothing in the
+  ledger is dropped or zeroed, and the archived plain entries keep counting. A damaged
+  or truncated file raises `ZstdReadError` through the normal parse-failure path
+  (stderr, diagnostics "could not be parsed"), is not decoded again until its size or
+  mtime changes (`_ZSTD_BAD`), and never commits a partial read. A zero-byte `.zst`
+  (still being written) is skipped and never replaces an entry. Lines split on `\n`
+  ONLY: the plain path's `str.splitlines()` also splits on U+2028/U+2029/U+0085, which
+  Codex writes unescaped, and drops those records (one rollout here lost a prompt that
+  way), so do not "fix" the compressed reader to match it. The session timeline reads
+  the same stream, bounded at 64 MiB of decoded text; without a decoder it reports the
+  log unavailable. Cleanup commands and "reclaimable" include `*.jsonl.zst` only where a
+  decoder exists: never offer an unread log for deletion. Session ids, titles, IDE and
+  subagent detection need no special case: `session_meta` is read the same way.
 - **Codex usage comes from `token_usage_record` once a rollout has one.** Builds from
   2026-09 log one per model response (with a `response_id`), written before its
   `token_count` twin. `token_count` alone misses a compaction request (it logs zeros
@@ -653,11 +753,24 @@ existing guarded `GET /api/local-servers` for the separate local server list.
   `SubAgentActivity` "started" markers into `subagents` (a count, the same field
   Cursor uses) — read that, not `side` (which Codex never sets: its subagents are
   wholly separate sessions, not sidechain records mixed into the parent's stream).
-- **Cursor** (`state.vscdb`): sessions in `cursorDiskKV` under `composerData:*` (newer
-  builds also `composerHeaders`); messages are `bubbleId:*`. Each bubble has its **own**
-  `createdAt` — use it, not the session's, or a months-long session lands on day one.
-  `ItemTable` holds `aiCodeTracking.dailyStats.*` (AI lines suggested vs accepted). Only
-  ~2% of bubbles carry tokens; that's Cursor, not a parsing gap.
+- **Cursor** (`state.vscdb`): `cursor_data.py` reads bounded, read-only snapshots of
+  `composerHeaders`, `composerData:*` and `bubbleId:*`. Explicit workspace mappings
+  come from sibling `workspaceStorage` metadata; cwd remains private. Preserve full
+  composer IDs, per-message dates, safe tool labels/status, explicit parent links and
+  recorded usage only. Current model/context settings are separate from historical
+  response/model/token attribution. Zero token placeholders mean unavailable, not
+  free usage. `agentKv` enrichment requires unambiguous request/tool-call IDs; no
+  arbitrary row-order inheritance, text-length estimates, context-meter billing or
+  DB-mtime activity dates. Unknown binary detail stays unavailable. Timeline output
+  is whitelisted, bounded and resolved from the full ledger identity/discovered DB.
+  Private hashed bubble summaries preserve telemetry after source tombstones;
+  restored rows replace their original contribution. Undated receipts remain
+  whole-session supplements outside dated totals. Cache 63 retains v53–62 ledgers
+  and v52–62 peers; do not rebuild.
+  Cursor peer exports use explicit safe allowlists and opaque store keys, never
+  workspace paths, raw events, request joins, blobs or source content. See
+  docs/cursor.md and docs/cursor-codeburn-comparison.md. Metadata-only activity
+  remains visible separately from Overview's token/cost shares.
 - **Copilot** logs real `promptTokens`/`completionTokens` on finished requests in current
   VS Code builds; older chats have none, so their tokens are estimated from message text
   (chars/4). It also logs a premium-request multiplier in `result.details` ("… • 1x") —
@@ -731,6 +844,23 @@ existing guarded `GET /api/local-servers` for the separate local server list.
   session actually used — sessions can switch model mid-way, like Codex. `messages.tool_calls`
   is an OpenAI-shaped JSON array, read only for per-day tool and turn counts; message
   `content` is never read.
+- **Antigravity** reads only direct `*.db` files under the exact App, IDE and CLI
+  `~/.gemini/antigravity/conversations`, `~/.gemini/antigravity-ide/conversations`,
+  and `~/.gemini/antigravity-cli/conversations` roots. One database is one conversation;
+  duplicate copies under those roots share a full UUID and are deduplicated per device by
+  the fullest ledger entry. Duplicate usage statistics in the companion table are not
+  added. `generation_idx` and `step_idx` are different identities and link only through
+  the explicit packed step-index mapping. Unknown-model usage counts once as `Unknown`
+  without invented pricing; reasoning remains a subset of output. The bounded reader
+  returns whitelisted timestamps, event kinds, model/tool labels, safe statuses, and
+  numeric usage, never prompts, arguments, raw blobs, or account data. Timeline detail
+  resolves only the full ledger identity and a rediscovered source path. A recorded
+  `subagent: true` plus an explicit immediate `parent_id` is required for a parent link;
+  `root_id` alone is not enough. `intent_only` checkpoints remain checkpoint events,
+  never compactions. Standalone legacy `.pb` files are unsupported and unknown schemas
+  report a parse error. No hooks are installed and no provider is contacted. The public
+  [hooks docs](https://www.antigravity.google/docs/hooks) describe a separate
+  `transcriptPath` under `brain/`; it is outside this parser. See docs/antigravity.md.
 - **SQLite stores**: always open via `_open_ro_sqlite()`. Neither flag is safe alone —
   `mode=ro` reads the `-wal` (so a *running* tool's newest sessions are visible) but must
   create a `-shm`, which fails on read-only media; `immutable=1` needs no `-shm` but ignores
@@ -755,8 +885,7 @@ A new `claude-<tier>-<n>-<m>` id normalises by itself, so only the price row is 
 nothing warns: the model just costs $0 (Sonnet 5.5 did, for its first day). Diff the vendor's
 whole table against `PRICING`, and look for all-zero rows in the payload's `prices`.
 
-**A vendor changed a price** → the new tuple goes in `PRICING` (always today's rate — the
-Optimize tab re-prices savings from it) and the old one moves into `PRICE_HISTORY` with
+**A vendor changed a price** → the new tuple goes in `PRICING` (always today's rate) and the old one moves into `PRICE_HISTORY` with
 the last date it applied. `price_of(model, date)` picks by each record's date, so a cut
 never re-prices history. Record a change only once it has taken effect — never pre-encode
 an announced future price: Sonnet 5's scheduled $3/$15 increase was encoded ahead of time,
@@ -778,32 +907,14 @@ Sweep every tab at `?range=today` too: a line chart needs **two** points to draw
 so single-day ranges render as empty axes unless the dataset uses `pointRadius: soloPoint(data)`.
 Add `--screenshot=out.png --window-size=1560,2000` to eyeball it.
 
-## The Optimize tab
+## Setup inventory in the payload
 
-Findings are computed client-side in `static/views.js` by the functions in
-`OPT_FINDERS`, ranked by estimated saving. A finder returns `null` when it does not
-apply — **never render a finding that isn't backed by the user's own numbers**, and
-every one must carry the figure it came from plus something concrete to do.
-
-**Never hardcode a model name, price or tool list into a finding.** Savings are
-re-priced from `RAW.prices` (the real per-1M rates for the models that user actually
-ran) and candidate swaps come from `cheaperPeer()`, which only ever suggests a model
-they already use from the same maker. A finder that named specific models would go
-stale and would be wrong for anyone whose mix differs.
-
-A finding's left stripe carries **tool identity**, painted from the same
-`--t-<source>` token as every chart and badge — orange is still Claude Code, green
-still Codex. It is only painted when exactly one tool is in scope; a finding spanning
-several has no single owner and stays neutral. It must never encode severity again:
-`--accent` is byte-identical to `--t-opencode` and `--warn` collides with
-`--t-claude-desktop`, so a severity stripe silently painted findings in the colour of
-a tool they had nothing to do with.
-
-Each finding sets `tools: [...]`. `scopeLabel()` renders a "<tool> only" chip when a
-finding does not span every source present in the range — the MCP, Skills and
-`/compact` advice is Claude Code's, and a Codex or Cursor user must not read it as
-advice about their own setup. No chip is shown when it applies to everything, since
-then the label is noise.
+This repository ships no recommendation view. The parser and `build_payload` still produce
+the setup inventories below (`ctx`, `reads`, `installed`, `context_files`, `skills`,
+`mcp_servers`, `mcp_inventory`, `codex_effort`) because they are ledger-backed and part of
+the payload shape; an optional extension (see "Optional extensions" under Layout) may judge
+them. Keep their shape stable, and never remove a field without considering archived entries
+and `CACHE_VERSION`.
 
 **MCP attribution differs by tool.** Claude Code names MCP tools
 `mcp__<server>__<tool>`; Codex keeps the bare tool name and puts the server in a
@@ -813,8 +924,8 @@ Codex server looks unused. Configured servers come from `~/.claude.json` and the
 `[mcp_servers.*]` blocks of `~/.codex/config.toml` (parsed by regex, not tomllib,
 which is 3.11+).
 
-**Setup checks** (payload fields in brackets): instruction files over 8 KB, priced as the
-bytes actually sent × the requests that carried them at the cache-read rate
+**Setup inventories** (payload fields in brackets): instruction files over 8 KB, with the
+bytes actually sent and the requests that carried them
 (`context_files`, sizes only, never contents). `_context_files` follows each agent's own
 loading rules, which differ:
 - **Claude Code** reads ~/.claude/CLAUDE.md, then `CLAUDE.md`, `CLAUDE.local.md` and
@@ -829,7 +940,7 @@ loading rules, which differ:
   and stops at `project_doc_max_bytes` (32 KiB) in total, so `sent` can be less than
   `bytes`. Walking up past the git root counted files Codex never reads.
 
-The other setup checks: sessions that open heavier than the user's own leanest 10% (`open_ctx` on each
+The other inventories: sessions that open heavier than the user's own leanest 10% (`open_ctx` on each
 session: the first request's full input); re-reads of unchanged files and reads inside
 build / dependency folders, with the tokens they returned (`reads`, Claude Code — note it
 already answers an unchanged re-read with a short stub, so this rarely fires); installed
@@ -837,12 +948,12 @@ skills and subagents unused over ≥ 14 days (`installed`, description lengths o
 servers used for ≤ 10% of the tools they offer, or used in one project while loaded in
 several (`mcp_inventory.loaded/calls`, per project). Inventory calls retain their
 source and distinct tool names before the top-tools table folds its long tail into
-"(other)"; setup findings must use that complete inventory for zero-call claims.
+"(other)"; a zero-call claim must use that complete inventory.
 
-It leans on three signals the other tabs don't use: `attributionSkill` (which Skill
+The payload carries three signals most tabs don't use: `attributionSkill` (which Skill
 drove a request — this is how "/dataviz cost you $20" is possible), a per-request
 context-size histogram (`agg["ctx"]`, bucketed 0-50k / 50-150k / 150-400k / 400k+),
-and the MCP servers configured in `~/.claude.json` (`_mcp_servers()`) compared against
+and the MCP servers configured in `~/.claude.json` (`_mcp_servers()`), comparable with
 `mcp__<server>__*` tool calls. Server names are matched loosely — the same server
 appears as `claude-in-chrome` and `Claude_in_Chrome` across versions, and
 `google-workspace` shows up in tool names as `workspace`.
@@ -882,8 +993,8 @@ costed per row by `_cost()`.
   builds, lints or runs the project (`_cmd_kinds` → "check"; a lookup like `rg`/`cat`/`git
   log` never is). Each check marks every file edited so far; editing a marked file counts
   one and re-arms it. `oneshot` = an editing turn with none. `retry_cost` is the whole turn's cost, not the
-  redo alone — the Optimize finder compares it with `edit_cost` (all editing turns) to get
-  an excess from the user's own averages rather than a guessed fraction.
+  redo alone, so a consumer compares it with `edit_cost` (all editing turns) to get an
+  excess from the user's own averages rather than a guessed fraction.
 - **Codex edits come from `patch_apply_end` / `item_completed:FileChange`**, the one place
   every build records each file a patch touched — Codex Desktop applies patches from inside
   its `exec` JS tool, which never shows as `apply_patch`. Once a rollout shows either event,
@@ -983,8 +1094,8 @@ local network. Both switches are off until the user turns them on, and each asks
   `agg["_device"]`, keys everything by device the way it already does by IDE, and prices
   them with THIS machine's `PRICING`. Setup data (MCP inventory and calls, installed-skill
   use, instruction-file cwds, OpenClaw's undecoded count) is skipped for remote copies.
-  On the client, the Optimize setup finders are wrapped in `onThisDevice()`, which judges
-  only this machine's usage against this machine's files and adds a "<device> only" chip.
+  A consumer of that setup data must judge only this machine's usage against this machine's
+  files: another device has its own files, which never leave it.
 - The client's `passDev()` filter and the "on all devices" phrase (`#qDev`) appear only
   when `RAW.devices` has more than one entry. A single-device install looks exactly as
   it did before.
@@ -1013,9 +1124,7 @@ local network. Both switches are off until the user turns them on, and each asks
 The sidebar footer shows the running version from this checkout's git metadata
 (`VERSION` in `dashboard.py`: `git describe --tags`, commit, branch). Checking for updates
 contacts the upstream only after the user clicks; there are no periodic update requests.
-This is separate from opt-in device sharing and confirmed account lookups. The local MCP
-bridge returns selected tool results to its configured client when asked; that client may
-forward them to its model provider (see [docs/mcp.md](docs/mcp.md)). `POST /api/update` (through
+This is separate from opt-in device sharing and confirmed account lookups. `POST /api/update` (through
 `_csrf_ok()`): `check` fetches the upstream and reports how far behind; `apply`
 fast-forwards only — it refuses local edits to tracked files and commits the upstream
 doesn't have — then saves the cache and re-execs the process (`_restart`), and the page
@@ -1041,6 +1150,10 @@ render bug from the headless sweep.
   Results and errors go inline (`.stg-msg`), never in a popup. While a dialog is open it
   owns the keyboard, and Esc closes it alone, not the drawer behind it.
 
+- **A link from another site opens the page, nothing else.** `_origin_ok()` refuses a cross-site
+  `Sec-Fetch-Site` on every GET, except a top-level page load of `/` or `/index.html`
+  (`_link_to_page`: `navigate` + `document`), so the Pro portal's "Open local dashboard" works.
+  Frames, scripts, fetches and every `/api/*` read stay refused; the Host check always applies.
 - **A link is untrusted input.** Whatever `filtersFromURL()` reads may have been written by
   another page, and this app has write endpoints behind only a same-origin check, so script
   injected through a crafted `?projects=` would get past it. Dates, tool ids, `range`,

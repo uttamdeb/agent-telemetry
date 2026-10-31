@@ -162,7 +162,7 @@ html.motion-ready .demo-panel.motion-arriving {
   animation: panel-arrive .55s cubic-bezier(.22,1,.36,1) both;
 }
 
-html.motion-ready .demo-panel.motion-arriving :is(.demo-metric, .session-row, .device-card, .model-view-row, .tool-view-card, .project-view-card, .optimize-view-row) {
+html.motion-ready .demo-panel.motion-arriving :is(.demo-metric, .session-row, .device-card, .model-view-row, .tool-view-card, .project-view-card) {
   animation: panel-row-arrive .6s cubic-bezier(.22,1,.36,1) both;
   animation-delay: calc(var(--row-index, 0) * 55ms);
 }

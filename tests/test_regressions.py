@@ -49,6 +49,18 @@ class RegressionTests(unittest.TestCase):
             agg["_device"] = device
         return agg
 
+    def test_gpt_6_1_terra_is_named_and_priced_from_every_source(self):
+        # Verified against developers.openai.com/api/docs/pricing (2026-10-30): $1 / $5, cached $0.05,
+        # 30-minute cache write $1.25, short context. It priced at $0 before, though every source named it.
+        for raw in ("gpt-6.1-terra", "openai/gpt-6.1-terra", "GPT-6.1 Terra", "gpt-6.1-terra-2026-10-26"):
+            with self.subTest(raw=raw):
+                self.assertEqual(P._canonicalize(raw), "GPT-6.1 Terra")
+                self.assertEqual(P.price_of(raw, "2026-10-30"), (1, 5, 1.25, 0, 0.05))
+        self.assertEqual(P.normalize_codex("gpt-6.1-terra"), "GPT-6.1 Terra")
+        self.assertEqual(P.normalize_copilot("gpt-6.1-terra", ""), "GPT-6.1 Terra")
+        self.assertEqual(P._normalize_opencode("gpt-6.1-terra", "openai"), "GPT-6.1 Terra")
+        self.assertEqual(P.price_of("GPT-6.1 Sol", "2026-10-30"), (2, 10, 2.50, 0, 0.10), "Sol unchanged")
+
     def test_argon_names_prices_and_modality_exclusions(self):
         aliases = ["Gemini 4 Argon", "Google: Gemini 4 Argon", "gemini-4-argon",
                    "gemini-4-argon-preview", "gemini_4_argon", "google/gemini-4-argon",

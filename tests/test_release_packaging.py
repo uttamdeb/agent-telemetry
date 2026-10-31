@@ -105,12 +105,16 @@ class PackagingTests(unittest.TestCase):
             with zipfile.ZipFile(archive, "w") as zipped:
                 zipped.writestr("pythonw.exe", b"runtime fixture")
                 zipped.writestr("python.exe", b"runtime fixture")
-                zipped.writestr("python313._pth", "untrusted search path")
+                zipped.writestr("python315._pth", "untrusted search path")
             checksum = hashlib.sha256(archive.read_bytes()).hexdigest()
             with patch.object(BUILD, "PYTHON_SHA256", checksum), patch.object(BUILD.subprocess, "check_output", return_value="release-fixture\n"):
                 BUILD.stage(ROOT, root / "payload", archive, "2.0.0")
             payload = root / "payload"
-            self.assertEqual((payload / "runtime" / "python313._pth").read_text(), "python313.zip\n.\n..\n")
+            # The bundled runtime is 3.15 (compression.zstd); it reads only python315._pth, app folder first.
+            self.assertEqual(BUILD.PYTHON_TAG, "python315")
+            self.assertEqual((payload / "runtime" / "python315._pth").read_text(), "..\npython315.zip\n.\n")
+            self.assertEqual(sorted(p.name for p in (payload / "runtime").glob("*._pth")), ["python315._pth"])
+            self.assertEqual(json.loads((payload / "BUILD-INFO.json").read_text())["python"], "3.15.2")
             self.assertEqual(json.loads((payload / "BUILD-INFO.json").read_text())["commit"], "release-fixture")
             self.assertTrue((payload / "windows" / "register_install.py").is_file())
             self.assertEqual((payload / "session_names.py").read_bytes(), (ROOT / "session_names.py").read_bytes())
@@ -118,7 +122,7 @@ class PackagingTests(unittest.TestCase):
             self.assertEqual((payload / "release_notes.py").read_bytes(), (ROOT / "release_notes.py").read_bytes())
             self.assertEqual((payload / "static" / "release-notes.js").read_bytes(),
                              (ROOT / "static" / "release-notes.js").read_bytes())
-            for name in ("ledger_backups.py", "session_timeline.py", "native_activity.py", "diagnostics.py", "editor_snapshot.py"):
+            for name in ("cursor_data.py", "ledger_backups.py", "session_timeline.py", "native_activity.py", "diagnostics.py", "editor_snapshot.py"):
                 self.assertEqual((payload / name).read_bytes(), (ROOT / name).read_bytes())
             self.assertEqual((payload / "local_servers.py").read_bytes(), (ROOT / "local_servers.py").read_bytes())
             self.assertEqual((payload / "local_servers_windows.py").read_bytes(), (ROOT / "local_servers_windows.py").read_bytes())
@@ -130,6 +134,31 @@ class PackagingTests(unittest.TestCase):
                 or p.name.startswith((".local_servers.", ".release-notes-"))
                 for p in payload.rglob("*")
             ))
+
+    @unittest.skipUnless(hasattr(sys, "stdlib_module_names"), "needs Python 3.10+")
+    def test_only_antigravity_shadows_a_standard_library_module(self):
+        # The bundled runtime puts the app before the stdlib, so a module named like a stdlib one replaces it
+        # for the whole app. Antigravity is the one deliberate case (and why the app must come first).
+        names = {Path(name).stem for name in install.BACKEND_FILES if name.endswith(".py") and "/" not in name}
+        self.assertIn("dashboard", names)
+        self.assertEqual((names | {"windows"}) & set(sys.stdlib_module_names), {"antigravity"})
+
+    def test_release_and_beta_tags_are_accepted_nothing_else(self):
+        for tag in ("v2.2.0", "v2.2.0-beta.1", "v10.0.12-beta.30"):
+            self.assertTrue(BUILD.RELEASE_TAG_RE.fullmatch(tag), tag)
+        for tag in ("2.2.0", "v2.2", "v2.2.0-rc.1", "v2.2.0-beta", "v2.2.0-beta.1x", "v2.2.0+build", "beta"):
+            self.assertIsNone(BUILD.RELEASE_TAG_RE.fullmatch(tag), tag)
+
+    def test_the_installer_is_signed_only_when_a_signtool_command_is_configured(self):
+        self.assertEqual(BUILD.signing_arguments(None), [])
+        self.assertEqual(BUILD.signing_arguments(""), [])
+        command = "signtool.exe sign /fd sha256 /sha1 0123 $f"
+        self.assertEqual(BUILD.signing_arguments(command), ["/DSignToolName=atsign", "/Satsign=" + command])
+        for bad in ("signtool.exe sign /fd sha256", "echo $f", "signtool sign $f\nmore"):
+            with self.assertRaises(ValueError):
+                BUILD.signing_arguments(bad)
+        iss = (ROOT / "windows" / "installer" / "AgentTelemetry.iss").read_text()
+        self.assertIn("#ifdef SignToolName\nSignTool={#SignToolName}\nSignedUninstaller=yes\n#endif", iss)
 
     def test_runtime_checksum_failure_never_extracts_archive(self):
         with tempfile.TemporaryDirectory() as directory:

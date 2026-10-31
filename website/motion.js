@@ -197,7 +197,7 @@
     );
     if (!panel || panel.hidden) return;
 
-    panel.querySelectorAll(".demo-metric, .session-row, .device-card, .model-view-row, .tool-view-card, .project-view-card, .optimize-view-row").forEach((row, index) => {
+    panel.querySelectorAll(".demo-metric, .session-row, .device-card, .model-view-row, .tool-view-card, .project-view-card").forEach((row, index) => {
       row.style.setProperty("--row-index", String(Math.min(index, 7)));
     });
 

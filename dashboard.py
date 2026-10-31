@@ -2,7 +2,8 @@
 """
 dashboard.py — Live local usage analytics for your AI coding tools.
 
-Covers Claude Code, Claude Desktop, Codex, GitHub Copilot, Cursor, opencode and Hermes Agent.
+Covers Claude Code, Claude Desktop, Codex, GitHub Copilot, Cursor, Antigravity, OpenCode,
+Hermes Agent and OpenClaw.
 Parses your local interaction logs (no data leaves the machine unless you turn on device
 sharing in Settings), aggregates usage by day / model / tool / project / hour, and serves
 an interactive dashboard.
@@ -14,12 +15,13 @@ an interactive dashboard.
 Stdlib only. First run parses everything (one large Codex log makes that take a
 moment); results are cached, and subsequent refreshes are incremental & instant.
 """
-import os, re, sys, json, time, glob, threading, argparse, shutil, mimetypes, platform, subprocess, copy
-import gzip, hmac, io, ipaddress, secrets, socket, uuid, signal, urllib.parse, urllib.request, urllib.error
+import os, re, sys, json, time, glob, threading, argparse, shutil, mimetypes, platform, subprocess, copy, hashlib, math
+import gzip, hmac, io, ipaddress, secrets, socket, uuid, signal, urllib.parse, urllib.request, urllib.error, unicodedata
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 if __package__:
     from . import parser as P
+    from . import antigravity as AG
     from . import native as N
     from . import session_names as SN
     from . import accounts as A
@@ -30,11 +32,10 @@ if __package__:
     from . import editor_snapshot as ES
     from . import release_notes as RN
     from .local_servers import LocalServerInventory
-    from . import mcp_access as MA
-    from . import mcp_backend as MCP
 else:
     # Source checkouts and native app payloads retain their top-level scripts.
     import parser as P
+    import antigravity as AG
     import native as N
     import session_names as SN
     import accounts as A
@@ -45,13 +46,11 @@ else:
     import editor_snapshot as ES
     import release_notes as RN
     from local_servers import LocalServerInventory
-    import mcp_access as MA
-    import mcp_backend as MCP
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = HERE
 CACHE_PATH = os.path.join(DATA_DIR, ".usage_cache.json")
-CACHE_VERSION = 61
+CACHE_VERSION = 64
 
 
 def _configure_data_dir(path):
@@ -65,9 +64,11 @@ def _configure_data_dir(path):
 
 
 def _peer_cache_ok(version):
-    # v1.7.0 mirrors lack optional attribution/precision fields, but the reader
-    # still supports their rows just as it supports archived local entries.
-    return type(version) is int and version in (52, 53, 54, 55, 56, 57, 58, 59, 60, CACHE_VERSION)
+    # Mirrors from every supported ledger generation remain readable. Newer
+    # Cursor/Antigravity optional metadata does not invalidate retained history.
+    # A v63 device simply has not read compressed Codex rollouts yet; its archived
+    # plain entries are the same conversations and deduplicate here.
+    return type(version) is int and version in (52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, CACHE_VERSION)
 
 # ---------------------------------------------------------------------------
 # In-memory store of per-file aggregates, refreshed on a background interval.
@@ -330,13 +331,14 @@ def load_cache():
     if data.get("version") == CACHE_VERSION:
         _state["files"] = files
         return
-    if data.get("version") in (53, 54, 55, 56, 57, 58, 59, 60):
-        # Only optional compaction/pricing/account/SDK/effort metadata changed. Keep every entry
-        # until its replacement parses successfully; update_file backfills Claude
-        # and Codex logs lacking metadata, and Claude Haiku 5.5 pricing detail.
+    if data.get("version") in (53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63):
+        # Keep all compatible entries through v64. Cursor backfills available
+        # stores transactionally via its parser marker; archives cannot be re-read.
+        # v64 only adds discovery of compressed Codex rollouts: new entries beside the
+        # plain ones (now archived), deduplicated per conversation. Nothing is dropped.
         _state["files"] = files
         _dirty["v"] = True
-        sys.stderr.write("[cache] backfilling optional metadata; existing ledger retained\n")
+        sys.stderr.write("[cache] retaining compatible entries during migration; existing ledger retained\n")
         return
     # Version changed, so the shape may have. Live logs are simply re-parsed from
     # disk — but ARCHIVED entries CANNOT be: their source files are gone. Dropping
@@ -394,9 +396,16 @@ def _refresh_locked(verbose=False):
     files = _state["files"]
     seen = set()
     changed = False
+    unread = 0        # compressed Codex logs this scan needed a zstd decoder for and had none
     for i, (source, path, editor) in enumerate(found):
         seen.add(path)
         prev = files.get(path)
+        if prev and prev.get("archived"):
+            # "archived" is only ever set when a path goes missing, so a log that is
+            # back on disk (Codex decompressing a rollout it had compressed) would
+            # stay archived: out of live views, though its usage still counts.
+            del prev["archived"]
+            changed = _dirty["v"] = True
         # Claude, Codex and Copilot logs are appended to and parsed in place: the
         # same dict comes back, grown. So compare where the parse stopped, not just
         # identity, which missed every appended turn: a connected device's pulls
@@ -406,12 +415,22 @@ def _refresh_locked(verbose=False):
             updated = P.update_file(prev, source, path, editor, proj_map)
             if updated is None:                # disappeared between discover and stat
                 continue
+            # A full reparse rebuilds from what the log holds now; keep what the
+            # tool deleted from it (a session, a request) the same way as a log
+            # that disappeared. See parser.reconcile.
+            updated = P.reconcile(prev, updated, CACHE_VERSION)
             if updated is not prev:
                 changed = _dirty["v"] = True
             elif mark != _parse_mark(updated):
                 changed = _grew["v"] = True
             files[path] = updated
             DG.record_success(source, path)
+        except P.ZstdUnavailable:
+            # Not this log's fault: the machine has no zstd decoder. Whatever the
+            # ledger already holds for it (an earlier read, or the archived plain
+            # copy of the rollout) stays untouched and counted. One note per scan
+            # below, not a line per log.
+            unread += 1
         except Exception as e:
             # A failed full reparse must not replace the last valid ledger entry
             # with an empty aggregate or advance its signature. Retry next time.
@@ -433,8 +452,12 @@ def _refresh_locked(verbose=False):
         sys.stderr.write(f"\n[ledger] retaining {len(gone)} pruned-from-disk session(s)\n")
     if verbose:
         sys.stderr.write("\n")
+    if unread and unread != _meta.get("codex_compressed_unread"):
+        # fixed text, no paths; repeated only when the count changes, not every refresh
+        sys.stderr.write(f"[codex] {unread} compressed rollout log(s) not read: "
+                         "install zstd or use Python 3.14+\n")
     _meta.update(last_refresh=time.time(), last_duration=time.time() - t0,
-                 files=len(files), building=False)
+                 files=len(files), building=False, codex_compressed_unread=unread)
     DG.finish_scan()
     _meta["parse_errors"] = DG.get_scan_report()["errors"]
     if changed:
@@ -552,6 +575,14 @@ def backup_action(body):
 def build_diagnostics():
     with _refresh_lock:
         report = DG.get_scan_report()
+        unread = int(_meta.get("codex_compressed_unread") or 0)
+        if unread:
+            # Not an error and not counted as one: those logs are waiting for a decoder.
+            note = (f"{unread} compressed log{'' if unread == 1 else 's'} not read: install the "
+                    "zstd command or use Python 3.14+, then Refresh.")
+            for row in report["sources"]:
+                if row["source"] == "codex":
+                    row["hint"] = f"{row['hint']} {note}" if row.get("hint") else note
         present = {row["source"] for row in report["sources"]}
         for source in sorted({a.get("source") for a in _state["files"].values() if a.get("source")} - present):
             report["sources"].append({"source": source, "status": "retained_only", "discovered": 0,
@@ -574,6 +605,14 @@ def build_diagnostics():
                         if aggregate["source"] not in ("opencode", "openclaw") or not row.get("cost"):
                             missing.add(model)
         report["missing_prices"] = sorted(missing)[:100]
+        legacy_pb_count = AG.legacy_pb_inventory()
+        if legacy_pb_count:
+            report["unsupported_formats"] = [{
+                "source": "antigravity", "format": "legacy_pb", "count": legacy_pb_count,
+                "hint": "Standalone Antigravity legacy .pb conversations are unsupported; file contents were not read.",
+            }]
+        else:
+            report["unsupported_formats"] = []
         return report
 
 
@@ -581,7 +620,7 @@ def build_session_timeline(device, source, session_id, date_from=None, date_to=N
     """Resolve a full native id from this ledger, never a caller-supplied filename."""
     if view not in ("all", "activity", "requests", "tools", "compactions"):
         raise ValueError("Unknown timeline event view.")
-    if source not in ("claude", "codex", "claude-desktop", "copilot") or not isinstance(session_id, str) or not 0 < len(session_id) <= 512:
+    if source not in ("claude", "codex", "claude-desktop", "copilot", "antigravity", "cursor") or not isinstance(session_id, str) or not 0 < len(session_id) <= 512:
         raise ValueError("Select a supported session with its full native identity.")
     if device != _local_id():
         return {"available": False, "events": [], "truncated": False, "detail": "Source events are available on the original device."}
@@ -592,7 +631,7 @@ def build_session_timeline(device, source, session_id, date_from=None, date_to=N
                 continue
             if source == "copilot" and not isinstance(aggregate.get("copilot_sdk"), dict):
                 continue
-            if any(SN.identity(aggregate, s) == session_id for s in aggregate.get("sessions", [])):
+            if any(_session_identity(aggregate, s) == session_id for s in aggregate.get("sessions", [])):
                 selected.append(aggregate.get("path", ""))
         if not selected:
             return {"available": False, "events": [], "truncated": False, "detail": "The source log is unavailable; retained daily detail is unchanged."}
@@ -673,10 +712,12 @@ _UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 def _conversation_key(path, agg):
     """Cache entries that hold the SAME conversation. Codex's archive feature
     moves a rollout into archived_sessions/: the old path stays in the ledger as
-    archived while the new one parses live. A Copilot chat can sit under two
-    paths too: <uuid>.json and <uuid>.jsonl across its storage-format migration,
-    or the same chat in Cursor's storage after Cursor imported VS Code's. Every
-    copy used to be counted in full. Copies are deduplicated within a device:
+    archived while the new one parses live. Codex also replaces an idle rollout
+    with <rollout>.jsonl.zst, so the plain entry (archived once its file is gone)
+    and the compressed one are one conversation too. A Copilot chat can sit under
+    two paths too: <uuid>.json and <uuid>.jsonl across its storage-format
+    migration, or the same chat in Cursor's storage after Cursor imported VS Code's.
+    Every copy used to be counted in full. Copies are deduplicated within a device:
     an imported conversation must not hide another device's usage."""
     src = agg.get("source")
     device = agg.get("_device")              # None is this machine's own ledger
@@ -686,11 +727,36 @@ def _conversation_key(path, agg):
         # Never resolve another device's paths against this machine's filesystem.
         return (device, "claude", os.path.realpath(path))
     if src == "codex":
-        return (device, "codex", P._leaf(path))
+        return (device, "codex", P._codex_leaf(path))
     if src == "copilot":
         m = _UUID.search(P._leaf(path)) or _UUID.search(path)
         return (device, "copilot", m.group(0)) if m else None
+    if src == "antigravity":
+        # One SQLite database represents one Antigravity conversation. App, IDE,
+        # and CLI copies can share the same conversation UUID under distinct roots.
+        # Use only a full UUID; unknown filenames must remain separately counted.
+        identity = agg.get("conversation_id")
+        if not isinstance(identity, str) or not identity:
+            identity = P._leaf(path)
+        leaf = identity.replace("\\", "/").rsplit("/", 1)[-1]
+        if leaf.lower().endswith(".db"):
+            leaf = leaf[:-3]
+        if _UUID.fullmatch(leaf):
+            return (device, "antigravity", leaf.lower())
     return None
+
+
+def _session_identity(aggregate, session):
+    """Return a source-native id without falling back to Cursor's short display id."""
+    if aggregate.get("source") == "cursor":
+        for field in ("native_id", "_sid"):
+            value = session.get(field)
+            if (isinstance(value, str) and 0 < len(value) <= 512
+                    and not any(ord(char) < 32 or ord(char) == 127 for char in value)
+                    and "/" not in value and "\\" not in value):
+                return value
+        return ""
+    return SN.identity(aggregate, session)
 
 
 def _one_per_conversation(items):
@@ -784,7 +850,10 @@ def set_session_name(body):
         for candidate in _state["files"].values():
             if candidate["source"] != source: continue
             if (source, os.path.realpath(candidate.get("path", ""))) not in discovered: continue
-            session = next((s for s in candidate.get("sessions", []) if SN.identity(candidate, s) == session_id), None)
+            # A session the tool deleted is kept for its usage only; there is no
+            # source record left to rename.
+            session = next((s for s in candidate.get("sessions", [])
+                            if not s.get("retained") and SN.identity(candidate, s) == session_id), None)
             if session is not None and os.path.isfile(candidate.get("path", "")):
                 matches.append((candidate, session))
         if not matches:
@@ -812,6 +881,7 @@ def set_session_name(body):
             updated = P.update_file(aggregate, source, path, aggregate.get("editor"), {})
             if source == "codex":
                 P._finalize_session(updated, source, path)
+            updated = P.reconcile(aggregate, updated, CACHE_VERSION)
             for key, value in list(_state["files"].items()):
                 if value is aggregate: _state["files"][key] = updated
             _dirty["v"] = True
@@ -940,6 +1010,139 @@ def _record_buckets(agg):
         return [(s.get("project") or agg.get("project") or "(unknown)", s["records"])
                 for s in sessions]
     return [(agg.get("project") or "(unknown)", agg.get("records", {}))]
+
+
+_AG_USAGE_FIELDS = frozenset(("input_output", "cache_read", "cache_write", "reasoning", "response_output"))
+_AG_USAGE_STATES = frozenset(("recorded", "partial", "unavailable"))
+
+
+def _ag_availability(value):
+    if not isinstance(value, dict):
+        return {}
+    return {field: state for field, state in value.items()
+            if field in _AG_USAGE_FIELDS and isinstance(state, str) and state in _AG_USAGE_STATES}
+
+
+def _ag_record_availability(value):
+    if not isinstance(value, dict):
+        return {}
+    result = {}
+    for key, fields in list(value.items())[:20_000]:
+        if not isinstance(key, str) or "\t" not in key:
+            continue
+        day, model = key.split("\t", 1)
+        if (not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day) or P._from_iso(day) is None
+                or not model or len(model) > 160 or "\t" in model):
+            continue
+        safe = _ag_availability(fields)
+        if safe:
+            result[key] = safe
+    return result
+
+
+def _ag_combine_status(values):
+    states = [value for value in values if isinstance(value, str) and value in _AG_USAGE_STATES]
+    if not states:
+        return None
+    return states[0] if all(state == states[0] for state in states) else "partial"
+
+
+def _ag_export_session(session):
+    if not isinstance(session, dict):
+        return None
+    out = {key: session[key] for key in _ANTIGRAVITY_SESSION_EXPORT_KEYS if key in session}
+    if "usage_availability" in out:
+        safe_availability = _ag_availability(out["usage_availability"])
+        if safe_availability:
+            out["usage_availability"] = safe_availability
+        else:
+            out.pop("usage_availability", None)
+    if "record_availability" in out:
+        safe_record_availability = _ag_record_availability(out["record_availability"])
+        if safe_record_availability:
+            out["record_availability"] = safe_record_availability
+        else:
+            out.pop("record_availability", None)
+    for field in ("usage_status", "model_status", "detail_status"):
+        if field in out and (not isinstance(out[field], str) or out[field] not in _AG_USAGE_STATES):
+            out.pop(field, None)
+    for field in ("in", "out", "cr", "cc", "reason", "response_out", "req", "asst", "user", "tools",
+                  "user_messages", "assistant_messages", "tool_calls", "subagent_requests"):
+        value = out.get(field)
+        if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= 10**15:
+            out.pop(field, None)
+    active = out.get("active")
+    if (not isinstance(active, (int, float)) or isinstance(active, bool)
+            or not 0 <= active <= 10**15):
+        out.pop("active", None)
+    if (not isinstance(out.get("effort"), str)
+            or out.get("effort") not in ("low", "medium", "high", "xhigh", "max")):
+        out.pop("effort", None)
+    reasoning = out.get("reasoning_effort")
+    if isinstance(reasoning, dict):
+        safe_days = {}
+        days = reasoning.get("days") if isinstance(reasoning.get("days"), dict) else {}
+        for key, row in list(days.items())[:20_000]:
+            if (not isinstance(key, str) or "\t" not in key or not isinstance(row, dict)):
+                continue
+            day, model = key.split("\t", 1)
+            if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day) or P._from_iso(day) is None or not model or len(model) > 160:
+                continue
+            levels = row.get("levels") if isinstance(row.get("levels"), dict) else {}
+            safe_levels = {level: count for level, count in levels.items()
+                           if level in ("low", "medium", "high", "xhigh", "max")
+                           and isinstance(count, int) and not isinstance(count, bool) and 0 <= count <= 10**9}
+            unrecorded = row.get("unrecorded")
+            safe_unrecorded = unrecorded if isinstance(unrecorded, int) and not isinstance(unrecorded, bool) and 0 <= unrecorded <= 10**9 else 0
+            if safe_levels or safe_unrecorded:
+                safe_days[key] = {"levels": safe_levels, "unrecorded": safe_unrecorded}
+        out["reasoning_effort"] = {"version": 1, "days": safe_days}
+    elif "reasoning_effort" in out:
+        out.pop("reasoning_effort", None)
+    if "efforts" in out:
+        efforts = out.get("efforts")
+        if isinstance(efforts, list):
+            out["efforts"] = [level for level in efforts[:6]
+                               if isinstance(level, str)
+                               and level in ("low", "medium", "high", "xhigh", "max", "unrecorded")]
+        else:
+            out.pop("efforts", None)
+    return out
+
+
+def _ag_export_summary(value):
+    if not isinstance(value, dict):
+        return {}
+    out = {}
+    for field in ("usage_status", "model_status", "detail_status"):
+        if isinstance(value.get(field), str) and value.get(field) in _AG_USAGE_STATES:
+            out[field] = value[field]
+    availability = _ag_availability(value.get("usage_availability"))
+    if availability:
+        out["usage_availability"] = availability
+    record_availability = _ag_record_availability(value.get("record_availability"))
+    if record_availability:
+        out["record_availability"] = record_availability
+    for field in ("subagent_requests", "response_out"):
+        number = value.get(field)
+        if isinstance(number, int) and not isinstance(number, bool) and 0 <= number <= 10**15:
+            out[field] = number
+    counter_fields = {
+        "undated_usage": ("in", "out", "cr", "cc", "reason", "response_out", "req"),
+        "unknown_model_usage": ("in", "out", "cr", "cc", "reason", "response_out"),
+    }
+    for field, allowed in counter_fields.items():
+        counters = value.get(field)
+        if not isinstance(counters, dict):
+            continue
+        safe = {}
+        for name in allowed:
+            number = counters.get(name)
+            if isinstance(number, int) and not isinstance(number, bool) and 0 <= number <= 10**15:
+                safe[name] = number
+        if safe:
+            out[field] = safe
+    return out
 
 
 def _priced_days(bucket, source, logged):
@@ -1106,6 +1309,7 @@ def _build_payload_locked():
     except ValueError as error:
         display_names, display_name_error = {}, str(error)
     records = {}      # (date, source, model, project, ide, device) -> aggregates
+    record_quality = {}  # Antigravity's per-date/model availability survives payload aggregation
     tools = {}        # (date, source, name, device) -> count
     projects = {}     # (project, source) -> {tokens, msgs, sessions, cost}
     hourly = {}       # (date, hour, source, device) -> {tokens, msgs}
@@ -1138,6 +1342,10 @@ def _build_payload_locked():
 
     for agg in files:
         source = agg["source"]
+        ag_summary = agg.get("antigravity") if source == "antigravity" and isinstance(agg.get("antigravity"), dict) else {}
+        ag_record_availability = _ag_record_availability(ag_summary.get("record_availability")) if source == "antigravity" else {}
+        ag_usage_availability = _ag_availability(ag_summary.get("usage_availability")) if source == "antigravity" else {}
+        ag_usage_status = ag_summary.get("usage_status") if source == "antigravity" else None
         # A connected device's copy is usage only. Its setup (instruction files, MCP
         # config, installed skills) lives on ITS disk, so the Optimize setup checks,
         # which read this machine's, skip it.
@@ -1164,6 +1372,26 @@ def _build_payload_locked():
                 rk = (date, source, model, row_project, ide, device)
                 slot = records.setdefault(rk, _zero())
                 _sum_usage(slot, priced)
+                if source == "antigravity":
+                    availability = ag_record_availability.get(key) or ag_usage_availability
+                    record_status = (_ag_combine_status(list(availability.values()))
+                                     if key in ag_record_availability else ag_usage_status)
+                    quality = record_quality.setdefault(rk, {"status": [], "fields": {}})
+                    if isinstance(record_status, str) and record_status in _AG_USAGE_STATES:
+                        quality["status"].append(record_status)
+                    for field, status in availability.items():
+                        quality["fields"].setdefault(field, []).append(status)
+                elif source == "cursor":
+                    # Cursor's one SQLite store can contain many independent
+                    # composer sessions. Preserve only quality recorded on this
+                    # dated model row; there is no meaningful store-wide status.
+                    record_status = r.get("usage_status")
+                    availability = _ag_availability(r.get("usage_availability"))
+                    quality = record_quality.setdefault(rk, {"status": [], "fields": {}})
+                    if isinstance(record_status, str) and record_status in _AG_USAGE_STATES:
+                        quality["status"].append(record_status)
+                    for field, status in availability.items():
+                        quality["fields"].setdefault(field, []).append(status)
                 if "exact" in r:
                     exact = slot.setdefault("exact", _zero())
                     _sum_usage(exact, _priced_usage(source, model, date, r["exact"], False))
@@ -1275,6 +1503,86 @@ def _build_payload_locked():
         # daily totals into each session to fill that gap.
         for session in agg.get("sessions", []):
             s2 = dict(session)
+            s2["source"] = source
+            if source == "antigravity":
+                # Workspace identity remains local for editor-scope matching only.
+                s2.pop("cwd", None)
+                for field in ("usage_status", "model_status", "detail_status"):
+                    value = s2.get(field, ag_summary.get(field))
+                    if isinstance(value, str) and value in _AG_USAGE_STATES:
+                        s2[field] = value
+                    else:
+                        s2.pop(field, None)
+                availability = _ag_availability(s2.get("usage_availability") or ag_usage_availability)
+                if availability:
+                    s2["usage_availability"] = availability
+                else:
+                    s2.pop("usage_availability", None)
+                record_availability = _ag_record_availability(
+                    s2.get("record_availability") or ag_summary.get("record_availability"))
+                if record_availability:
+                    s2["record_availability"] = record_availability
+                else:
+                    s2.pop("record_availability", None)
+                s2.pop("subagents_started", None)
+                count = s2.get("subagent_requests", ag_summary.get("subagent_requests"))
+                if isinstance(count, int) and not isinstance(count, bool) and 0 <= count <= 10**15:
+                    s2["subagent_requests"] = count
+                else:
+                    s2.pop("subagent_requests", None)
+            elif source == "cursor":
+                for field in ("usage_status", "model_status", "detail_status",
+                              "requested_model_status", "response_model_status"):
+                    status = s2.get(field)
+                    if not isinstance(status, str) or status not in _AG_USAGE_STATES:
+                        s2.pop(field, None)
+                for field in ("current_model",):
+                    value = _cursor_export_text(s2.get(field), 160)
+                    if value:
+                        s2[field] = value
+                    else:
+                        s2.pop(field, None)
+                requested_models = s2.get("requested_models")
+                if isinstance(requested_models, list):
+                    s2["requested_models"] = list(dict.fromkeys(
+                        value for raw in requested_models[:6]
+                        if (value := _cursor_export_text(raw, 160))))
+                else:
+                    s2.pop("requested_models", None)
+                context_tokens = _cursor_export_number(s2.get("current_context_tokens"))
+                if context_tokens is None:
+                    s2.pop("current_context_tokens", None)
+                else:
+                    s2["current_context_tokens"] = int(context_tokens)
+                context_limit = _cursor_export_number(s2.get("current_context_limit"))
+                if context_limit is None:
+                    s2.pop("current_context_limit", None)
+                else:
+                    s2["current_context_limit"] = int(context_limit)
+                context_percent = s2.get("current_context_percent")
+                safe_context_percent = _cursor_export_number(context_percent)
+                if safe_context_percent is None or safe_context_percent > 100:
+                    s2.pop("current_context_percent", None)
+                else:
+                    s2["current_context_percent"] = safe_context_percent
+                context_asof = s2.get("current_context_asof")
+                if not isinstance(context_asof, str) or len(context_asof) > 80 or P._from_iso(context_asof) is None:
+                    s2.pop("current_context_asof", None)
+                availability = _ag_availability(s2.get("usage_availability"))
+                if availability:
+                    s2["usage_availability"] = availability
+                else:
+                    s2.pop("usage_availability", None)
+                record_availability = _ag_record_availability(s2.get("record_availability"))
+                if record_availability:
+                    s2["record_availability"] = record_availability
+                else:
+                    s2.pop("record_availability", None)
+                undated_usage = _cursor_export_undated_usage(s2.get("undated_usage"))
+                if undated_usage:
+                    s2["undated_usage"] = undated_usage
+                else:
+                    s2.pop("undated_usage", None)
             bucket = session.get("records")
             if bucket is None and len(agg.get("sessions", [])) == 1:
                 bucket = agg.get("records", {})
@@ -1294,8 +1602,10 @@ def _build_payload_locked():
                         days[date] = _priced_usage(source, session["model"], date, r, has_logged_cost)
                 s2["detail_limited"] = True
             s2["days"] = _day_vectors(days) if days or bucket is not None else None
-            s2["archived"] = bool(agg.get("archived"))
-            s2["subagent"] = bool(session.get("subagent"))
+            # A session deleted inside its tool is kept like a pruned log.
+            s2["archived"] = bool(agg.get("archived") or session.get("retained"))
+            s2["subagent"] = (session.get("subagent") is True if source == "antigravity"
+                               else bool(session.get("subagent")))
             s2["device"] = device
             if source == "claude" and not s2["subagent"]:
                 parent = _claude_parent_key(agg.get("path"))
@@ -1312,7 +1622,7 @@ def _build_payload_locked():
             if not remote and source in ("codex", "claude"):
                 s2["account_metadata"] = A.session_metadata(agg)
             available, reason = SN.availability(source, agg.get("path", ""), remote)
-            s2["rename_id"] = SN.identity(agg, session)
+            s2["rename_id"] = _session_identity(agg, session)
             if not s2["rename_id"]:
                 available, reason = False, "The full native session identity is unavailable."
             if source == "claude" and session.get("subagent"):
@@ -1326,6 +1636,8 @@ def _build_payload_locked():
                         s2["original_title"] = session.get("title") or session.get("project") or s2["rename_id"]
                         s2["title"] = alias
                         s2["display_alias"] = True
+            if session.get("retained"):
+                available, reason = False, "This session was deleted in its tool. Its telemetry is preserved."
             s2["rename_available"], s2["rename_reason"] = available, reason
             s2["cost"] = (sum(d["cost"] for d in days.values()) if days else
                           _priced_usage(source, session["model"],
@@ -1339,25 +1651,75 @@ def _build_payload_locked():
     parent_candidates = {}
     for session in sessions:
         identity = session.get("rename_id")
-        if session.get("source") == "codex" and isinstance(identity, str) and re.fullmatch(
+        if session.get("source") in ("codex", "antigravity") and isinstance(identity, str) and re.fullmatch(
                 r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", identity):
-            key = (session["device"], identity.lower())
+            key = (session["device"], session["source"], identity.lower())
             parent_candidates.setdefault(key, []).append(session)
+        elif (session.get("source") == "cursor" and isinstance(identity, str)
+              and 0 < len(identity) <= 512):
+            # Composer IDs are opaque and are never shortened or normalized.
+            key = (session["device"], "cursor", identity)
+            parent_candidates.setdefault(key, []).append(session)
+    antigravity_child_ids = {}
     for session in sessions:
         parent_id = session.get("parent_id")
-        if session.get("source") != "codex" or not session.get("subagent") or not isinstance(parent_id, str):
+        source = session.get("source")
+        if source == "antigravity":
+            # Only a recorded subagent role plus its explicit immediate parent
+            # link can establish this relationship. root_id is not a substitute.
+            if session.get("subagent") is not True or not isinstance(parent_id, str):
+                continue
+        elif source == "cursor":
+            # The parser sets parent_id only when a native composer child list
+            # explicitly names this composer. Never infer from titles/models.
+            if session.get("subagent") is not True or not isinstance(parent_id, str):
+                continue
+        elif source != "codex" or not session.get("subagent") or not isinstance(parent_id, str):
             continue
-        candidates = parent_candidates.get((session["device"], parent_id), [])
+        key_id = parent_id.lower() if source == "antigravity" else parent_id
+        candidates = parent_candidates.get((session["device"], source, key_id), [])
         if len(candidates) == 1 and candidates[0] is not session:
             parent = candidates[0]
             session["subagent_parent"] = {
                 "id": parent["rename_id"], "title": parent.get("title") or parent.get("project") or parent_id,
-                "source": "codex", "device": parent["device"]}
+                "source": source, "device": parent["device"]}
+            if source == "antigravity":
+                child_id = session.get("rename_id")
+                parent_identity = parent.get("rename_id")
+                if (isinstance(child_id, str) and _UUID.fullmatch(child_id)
+                        and isinstance(parent_identity, str) and _UUID.fullmatch(parent_identity)):
+                    key = (session["device"], parent_identity)
+                    antigravity_child_ids.setdefault(key, set()).add(child_id)
+
+    # Child transcript counts come from distinct retained conversation DBs.
+    # Keep them separate from typed InvokeSubagent request evidence.
+    for session in sessions:
+        if session.get("source") != "antigravity":
+            continue
+        identity = session.get("rename_id")
+        if not isinstance(identity, str) or not _UUID.fullmatch(identity):
+            continue
+        child_ids = antigravity_child_ids.get((session["device"], identity), set())
+        if child_ids:
+            session["subagent_children"] = len(child_ids)
 
     rec_list = []
     for (date, source, model, project, ide, device), v in records.items():
-        rec_list.append({"date": date, "source": source, "model": model,
-                         "project": project, "ide": ide, "device": device, **v})
+        item = {"date": date, "source": source, "model": model,
+                "project": project, "ide": ide, "device": device, **v}
+        quality = record_quality.get((date, source, model, project, ide, device))
+        if quality:
+            status = _ag_combine_status(quality["status"])
+            if status:
+                item["usage_status"] = status
+            availability = {
+                field: _ag_combine_status(states)
+                for field, states in quality["fields"].items()
+            }
+            availability = {field: state for field, state in availability.items() if state}
+            if availability:
+                item["usage_availability"] = availability
+        rec_list.append(item)
     rec_list.sort(key=lambda x: (x["date"], x["source"]))
 
     # keep the payload bounded: the long tail of one-off tool names folds into
@@ -1398,6 +1760,8 @@ def _build_payload_locked():
         "version": VERSION,
         "home": P.HOME,        # to show instruction-file paths as ~/...
         "openclaw_undecoded": undecoded,
+        # compressed Codex logs the last scan needed a zstd decoder for and had none
+        "codex_compressed_unread": int(_meta.get("codex_compressed_unread") or 0),
         "mcp_servers": _mcp_servers(),
         # Real per-1M rates for the models THIS user actually ran, so the client can
         # cost a "what if this had run on X" without any hardcoded model list.
@@ -1894,9 +2258,15 @@ def _cleanup_targets():
     """
     t = []
     for g in P.CLAUDE_GLOBS + P.CODEX_GLOBS:
+        name = os.path.basename(g)
+        if P.is_zstd_path(name) and not P.zstd_available():
+            # Compressed Codex rollouts are offered for deletion only where this
+            # install can read them. Without a decoder their usage never reached the
+            # ledger, and "the dashboard keeps what it has parsed" would be untrue.
+            continue
         head = g.split("**")[0].rstrip(os.sep)
         if os.path.isdir(head):
-            t.append((head, None, "*.jsonl"))
+            t.append((head, None, name))
     for g in P.CLAUDE_DESKTOP_GLOBS:                 # skip the audit.jsonl mirror
         head = g.split("**")[0].rstrip(os.sep)
         if os.path.isdir(head):
@@ -2035,9 +2405,8 @@ def build_storage():
 # ---------------------------------------------------------------------------
 # Devices — see your other machines' usage here, and let them see this one's.
 # Strictly opt-in from Settings over the local network. Device sharing is one
-# separate path for data to leave this machine; other paths are MCP results sent
-# to an opted-in client, confirmed one-time account lookups, and user-clicked
-# software updates. Two separate switches:
+# separate path for data to leave this machine; other paths are confirmed
+# one-time account lookups and user-clicked software updates. Two separate switches:
 #   * Share: a SECOND, read-only listener on the network (PEER_PORT) answering one
 #     route, GET /api/peer/export, and only to a caller holding this device's
 #     pairing code. The dashboard itself stays on 127.0.0.1, so its write
@@ -2185,17 +2554,358 @@ def _devices_meta():
 _EXPORT_KEYS = ("source", "path", "mtime", "archived", "project", "title", "branch", "editor",
                 "entry", "cliver", "subagent", "first_ts", "last_ts", "records", "tools",
                 "skills", "ctx", "hourly", "reads", "totals", "sessions", "open_ctx",
-                "opencode_ids", "opencode_messages", "compactions", "copilot_sdk")
+                "opencode_ids", "opencode_messages", "compactions", "copilot_sdk", "antigravity", "cursor")
+_ANTIGRAVITY_SESSION_EXPORT_KEYS = frozenset((
+    "_sid", "id", "conversation_id", "title", "project", "branch", "model", "start", "end",
+    "subagent", "subagent_type", "subagent_role", "parent_id", "root_id", "nesting_depth",
+    "records", "days", "compactions", "activity_dates", "usage_status", "usage_availability",
+    "model_status", "detail_status", "record_availability", "user_messages",
+    "assistant_messages", "tool_calls", "subagent_requests", "in", "out", "cr", "cc",
+    "reason", "response_out", "req", "asst", "user", "tools", "active", "effort", "reasoning_effort",
+    "efforts",
+))
+_CURSOR_SESSION_EXPORT_FIELDS = frozenset((
+    "_sid", "id", "title", "project", "branch", "model", "models", "nmodels",
+    "current_model", "current_context_tokens", "current_context_limit", "current_context_percent", "current_context_asof",
+    "requested_models", "requested_model_status", "response_model_status",
+    "start", "end", "subagent", "subagent_type", "parent_id",
+    "records", "days", "usage_status", "usage_availability", "model_status",
+    "detail_status", "record_availability", "undated_usage", "in", "out", "cr", "cc", "cc5", "cc1",
+    "reason", "req", "asst", "user", "tools", "active", "prem", "cost", "mode",
+    "lines_add", "lines_del", "think_ms", "subagents", "archived_session",
+))
+_CURSOR_EXPORT_NUMERIC_FIELDS = frozenset((
+    "in", "out", "cr", "cc", "cc5", "cc1", "reason", "response_out", "req", "asst",
+    "user", "tools", "active", "prem", "cost", "ws", "lines_add", "lines_del",
+    "think_ms", "subagents",
+))
+_CURSOR_EXPORT_SUMMARY_FIELDS = frozenset((
+    "usage_status", "usage_availability", "model_status", "detail_status", "record_availability",
+))
+
+
+def _cursor_export_text(value, limit=160):
+    if not isinstance(value, str):
+        return None
+    value = " ".join("".join(ch for ch in value if not unicodedata.category(ch).startswith("C")).split())
+    value = value.strip()[:limit]
+    if (not value or value.startswith(("/", "\\", "~/", "~\\"))
+            or re.search(r"(?:^|\s)[A-Za-z]:[\\/].+", value)
+            or re.search(r"(?:^|\s)/(?:Users|home|private|tmp|var|opt)/", value)):
+        return None
+    return value
+
+
+def _cursor_export_id(value):
+    if not isinstance(value, str) or not re.fullmatch(
+            r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", value):
+        return None
+    return value.lower()
+
+
+def _cursor_export_number(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    try:
+        return value if math.isfinite(value) and 0 <= value <= 10**15 else None
+    except (OverflowError, TypeError, ValueError):
+        return None
+
+
+def _cursor_export_undated_usage(value):
+    """Keep only bounded integer counters for Cursor usage without a safe date."""
+    if not isinstance(value, dict):
+        return {}
+    safe = {}
+    for field in ("in", "out", "asst"):
+        number = value.get(field)
+        if type(number) is int and 0 <= number <= 10**15:
+            safe[field] = number
+    return safe
+
+
+def _cursor_export_records(value):
+    if not isinstance(value, dict):
+        return {}
+    result = {}
+    for key, row in list(value.items())[:20_000]:
+        if not isinstance(key, str) or "\t" not in key or not isinstance(row, dict):
+            continue
+        day, model = key.split("\t", 1)
+        if (not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day) or P._from_iso(day) is None
+                or not model or len(model) > 160 or _cursor_export_text(model, 160) != model):
+            continue
+        safe = {}
+        for field in _CURSOR_EXPORT_NUMERIC_FIELDS:
+            if field not in row:
+                continue
+            number = _cursor_export_number(row.get(field))
+            if number is not None:
+                safe[field] = number
+        status = row.get("usage_status")
+        if isinstance(status, str) and status in _AG_USAGE_STATES:
+            safe["usage_status"] = status
+        availability = _ag_availability(row.get("usage_availability"))
+        if availability:
+            safe["usage_availability"] = availability
+        if safe:
+            result[key] = safe
+    return result
+
+
+def _cursor_export_days(value):
+    if not isinstance(value, dict):
+        return {}
+    result = {}
+    for day, row in list(value.items())[:20_000]:
+        if (not isinstance(day, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day)
+                or P._from_iso(day) is None or not isinstance(row, dict)):
+            continue
+        safe = {field: number for field in _CURSOR_EXPORT_NUMERIC_FIELDS
+                if (number := _cursor_export_number(row.get(field))) is not None}
+        if safe:
+            result[day] = safe
+    return result
+
+
+def _cursor_export_session(session):
+    if not isinstance(session, dict):
+        return None
+    out = {field: session[field] for field in _CURSOR_SESSION_EXPORT_FIELDS if field in session}
+    native_id = _cursor_export_id(session.get("_sid"))
+    if native_id:
+        out["_sid"] = native_id
+        out["id"] = native_id[:8]
+    else:
+        out.pop("_sid", None)
+        display_id = session.get("id")
+        if isinstance(display_id, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,8}", display_id):
+            out["id"] = display_id
+        else:
+            out.pop("id", None)
+    for field in ("parent_id",):
+        identity = _cursor_export_id(session.get(field))
+        if identity:
+            out[field] = identity
+        else:
+            out.pop(field, None)
+    for field in ("title", "project", "branch", "model", "current_model", "mode", "subagent_type"):
+        safe_text = _cursor_export_text(out.get(field), 160)
+        if safe_text:
+            out[field] = safe_text
+        else:
+            out.pop(field, None)
+    for field in ("start", "end"):
+        value = out.get(field)
+        if not isinstance(value, str) or len(value) > 80 or P._from_iso(value) is None:
+            out.pop(field, None)
+    models = out.get("models")
+    if isinstance(models, list):
+        out["models"] = [safe for value in models[:6]
+                         if (safe := _cursor_export_text(value, 160))]
+    else:
+        out.pop("models", None)
+    for field in ("nmodels",):
+        value = out.get(field)
+        if type(value) is not int or not 0 <= value <= 10**6:
+            out.pop(field, None)
+    requested = out.get("requested_models")
+    if isinstance(requested, list):
+        out["requested_models"] = list(dict.fromkeys(
+            safe for value in requested[:6] if (safe := _cursor_export_text(value, 160))))
+    else:
+        out.pop("requested_models", None)
+    for field in ("current_context_tokens", "current_context_limit"):
+        if field in out:
+            number = _cursor_export_number(out.get(field))
+            if number is None:
+                out.pop(field, None)
+            else:
+                out[field] = int(number)
+    if "current_context_percent" in out:
+        value = out.get("current_context_percent")
+        number = _cursor_export_number(value)
+        if number is None or number > 100:
+            out.pop("current_context_percent", None)
+        else:
+            out["current_context_percent"] = number
+    if "current_context_asof" in out:
+        value = out.get("current_context_asof")
+        if not isinstance(value, str) or len(value) > 80 or P._from_iso(value) is None:
+            out.pop("current_context_asof", None)
+    if "undated_usage" in out:
+        safe_undated_usage = _cursor_export_undated_usage(out.get("undated_usage"))
+        if safe_undated_usage:
+            out["undated_usage"] = safe_undated_usage
+        else:
+            out.pop("undated_usage", None)
+    for field in ("subagent", "archived_session"):
+        if field in out and not isinstance(out[field], bool):
+            out.pop(field, None)
+    for field in _CURSOR_EXPORT_NUMERIC_FIELDS:
+        if field not in out:
+            continue
+        number = _cursor_export_number(out.get(field))
+        if number is None:
+            out.pop(field, None)
+        else:
+            out[field] = number
+    if "records" in out:
+        out["records"] = _cursor_export_records(out["records"])
+    if "days" in out:
+        out["days"] = _cursor_export_days(out["days"])
+    status = out.get("usage_status")
+    if not isinstance(status, str) or status not in _AG_USAGE_STATES:
+        out.pop("usage_status", None)
+    availability = _ag_availability(out.get("usage_availability"))
+    if availability:
+        out["usage_availability"] = availability
+    else:
+        out.pop("usage_availability", None)
+    for field in ("model_status", "detail_status"):
+        if not isinstance(out.get(field), str) or out[field] not in _AG_USAGE_STATES:
+            out.pop(field, None)
+    for field in ("requested_model_status", "response_model_status"):
+        if not isinstance(out.get(field), str) or out[field] not in _AG_USAGE_STATES:
+            out.pop(field, None)
+    record_availability = _ag_record_availability(out.get("record_availability"))
+    if record_availability:
+        out["record_availability"] = record_availability
+    else:
+        out.pop("record_availability", None)
+    out["source"] = "cursor"
+    return out
+
+
+def _cursor_export_summary(value):
+    if not isinstance(value, dict):
+        return {}
+    out = {field: value[field] for field in _CURSOR_EXPORT_SUMMARY_FIELDS if field in value}
+    for field in ("usage_status", "model_status", "detail_status"):
+        if not isinstance(out.get(field), str) or out[field] not in _AG_USAGE_STATES:
+            out.pop(field, None)
+    availability = _ag_availability(out.get("usage_availability"))
+    if availability:
+        out["usage_availability"] = availability
+    else:
+        out.pop("usage_availability", None)
+    record_availability = _ag_record_availability(out.get("record_availability"))
+    if record_availability:
+        out["record_availability"] = record_availability
+    else:
+        out.pop("record_availability", None)
+    return out
+
+
+def _cursor_export_agg(agg):
+    out = {"source": "cursor"}
+    for field in ("project", "title", "branch", "editor", "ide", "first_ts", "last_ts"):
+        value = _cursor_export_text(agg.get(field), 160)
+        if value:
+            out[field] = value
+    if isinstance(agg.get("archived"), bool):
+        out["archived"] = agg["archived"]
+    out["records"] = _cursor_export_records(agg.get("records"))
+    sessions = agg.get("sessions") if isinstance(agg.get("sessions"), list) else []
+    out["sessions"] = [safe for session in sessions
+                        if (safe := _cursor_export_session(session)) is not None]
+    summary = _cursor_export_summary(agg.get("cursor"))
+    if summary:
+        out["cursor"] = summary
+    raw_tools = agg.get("tools") if isinstance(agg.get("tools"), dict) else {}
+    tools = {}
+    for key, count in list(raw_tools.items())[:20_000]:
+        if not isinstance(key, str) or "\t" not in key:
+            continue
+        day, name = key.split("\t", 1)
+        safe_name = _cursor_export_text(name, 100)
+        number = _cursor_export_number(count)
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", day) and P._from_iso(day) and safe_name and number is not None:
+            tools[day + "\t" + safe_name] = number
+    out["tools"] = tools
+    raw_hourly = agg.get("hourly") if isinstance(agg.get("hourly"), dict) else {}
+    hourly = {}
+    for key, row in list(raw_hourly.items())[:20_000]:
+        if not isinstance(key, str) or "\t" not in key or not isinstance(row, dict):
+            continue
+        day, hour = key.split("\t", 1)
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day) or P._from_iso(day) is None or not hour.isdigit() or int(hour) > 23:
+            continue
+        safe = {field: number for field in ("tokens", "msgs")
+                if (number := _cursor_export_number(row.get(field))) is not None}
+        if safe:
+            hourly[day + "\t" + hour] = safe
+    out["hourly"] = hourly
+    return out
+
+
+def _cursor_export_ai_lines(value):
+    if not isinstance(value, dict):
+        return {}
+    result = {}
+    fields = ("tab_suggested", "tab_accepted", "composer_suggested", "composer_accepted")
+    for day, row in list(value.items())[:20_000]:
+        if (not isinstance(day, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day)
+                or P._from_iso(day) is None or not isinstance(row, dict)):
+            continue
+        safe = {field: number for field in fields
+                if (number := _cursor_export_number(row.get(field))) is not None}
+        if safe:
+            result[day] = safe
+    return result
+
+
+def _cursor_store_export_key(path):
+    if not isinstance(path, (str, os.PathLike)):
+        return None
+    try:
+        normalized = os.path.normcase(os.path.normpath(os.fspath(path)))
+    except (OSError, TypeError, ValueError):
+        return None
+    if not normalized:
+        return None
+    digest = hashlib.sha256(("agent-telemetry-peer-cursor-store-v1\0" + normalized).encode(
+        "utf-8", errors="surrogatepass")).hexdigest()
+    return "cursor:store:" + digest
 
 
 def _export_agg(agg):
-    a = {k: agg[k] for k in _EXPORT_KEYS if k in agg}
+    a = (_cursor_export_agg(agg) if agg.get("source") == "cursor"
+         else {k: agg[k] for k in _EXPORT_KEYS if k in agg})
+    if agg.get("source") == "antigravity":
+        # Keep only the safe summary contract. In particular, the private
+        # workspace cwd used by the local editor projection never leaves here.
+        if isinstance(a.get("sessions"), list):
+            a["sessions"] = [safe for session in a["sessions"]
+                              if (safe := _ag_export_session(session)) is not None]
+        if "antigravity" in a:
+            a["antigravity"] = _ag_export_summary(a["antigravity"])
+        # Preserve only a canonical, fully validated native UUID so peers can
+        # deduplicate this conversation after its private database path is removed.
+        identity = SN.identity(agg, {})
+        if not identity:
+            for session in agg.get("sessions", []):
+                if isinstance(session, dict):
+                    identity = SN.identity(agg, session)
+                    if identity:
+                        break
+        if identity:
+            a["conversation_id"] = identity
+        else:
+            a.pop("conversation_id", None)
+        # The receiver can identify and deduplicate a conversation by UUID; the
+        # local database path contains a private home directory and is unnecessary.
+        a.pop("path", None)
     # resolved here: Codex's editor lookup reads THIS machine's editor storage
     a["ide"] = P._ide_of(agg["source"], agg)
     # the still-open last turn folded in, so the importer needs no parser state
     a["activity"] = P.activity_of(agg)
     st = agg.get("state") or {}
-    a["state"] = {k: st[k] for k in ("dom_model", "ai_lines") if k in st}
+    if agg.get("source") == "cursor":
+        ai_lines = _cursor_export_ai_lines(st.get("ai_lines"))
+        a["state"] = {"ai_lines": ai_lines} if ai_lines else {}
+    else:
+        a["state"] = {k: st[k] for k in ("dom_model", "ai_lines") if k in st}
     return a
 
 
@@ -2214,9 +2924,34 @@ def _export_body():
         # The receiving device cannot resolve our local directory symlinks.
         # Deduplicate those aliases here while retaining all raw ledger entries.
         claude = _one_per_conversation([(p, a) for p, a in items if a.get("source") == "claude"])
-        selected = {id(a) for a in claude}
-        files = {path: _export_agg(a) for path, a in items
-                 if a.get("source") != "claude" or id(a) in selected}
+        antigravity = _one_per_conversation([(p, a) for p, a in items if a.get("source") == "antigravity"])
+        claude_selected = {id(a) for a in claude}
+        antigravity_selected = {id(a) for a in antigravity}
+        files = {}
+        unknown_antigravity = 0
+        for path, aggregate in items:
+            source = aggregate.get("source")
+            if source == "claude" and id(aggregate) not in claude_selected:
+                continue
+            if source == "antigravity":
+                if id(aggregate) not in antigravity_selected:
+                    continue
+                identity = aggregate.get("conversation_id")
+                if not isinstance(identity, str) or not _UUID.fullmatch(identity):
+                    identity = next((SN.identity(aggregate, session) for session in aggregate.get("sessions", [])
+                                     if isinstance(session, dict) and SN.identity(aggregate, session)), None)
+                if isinstance(identity, str) and _UUID.fullmatch(identity):
+                    export_key = "antigravity:" + identity.lower()
+                else:
+                    unknown_antigravity += 1
+                    export_key = "antigravity:unidentified:" + str(unknown_antigravity)
+            elif source == "cursor":
+                export_key = _cursor_store_export_key(aggregate.get("path", path))
+                if not export_key:
+                    continue
+            else:
+                export_key = path
+            files[export_key] = _export_agg(aggregate)
     finally:
         _refresh_lock.release()
     doc = {"proto": PEER_PROTO, "cache_version": CACHE_VERSION, "device_id": _local_id(),
@@ -2647,16 +3382,6 @@ def _zero():
 # ---------------------------------------------------------------------------
 # HTTP server
 # ---------------------------------------------------------------------------
-def _mcp_python_executable():
-    """Return a console-capable Python path for the stdio child process."""
-    executable = os.path.abspath(sys.executable)
-    if os.path.basename(executable).lower() == "pythonw.exe":
-        console = os.path.join(os.path.dirname(executable), "python.exe")
-        if os.path.isfile(console):
-            executable = console
-    return executable
-
-
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
@@ -2694,7 +3419,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, f.read(), ctype)
 
     def do_GET(self):
-        if not self._origin_ok():
+        if not self._origin_ok(page=True):
             self._send(403, json.dumps({"error": "cross-site request refused"}))
             return
         route = self.path.split("?")[0]
@@ -2708,18 +3433,6 @@ class Handler(BaseHTTPRequestHandler):
                 "building": bool(_meta.get("building")),
                 "pid": os.getpid(),
             }))
-        elif route == "/api/mcp":
-            if not self._loopback_client():
-                self._send(403, json.dumps({"error": "MCP settings are available only on this machine"}))
-                return
-            try:
-                self._send(200, json.dumps(MCP.settings_response(
-                    self._mcp_backend_url(), DATA_DIR, _mcp_python_executable(),
-                    os.path.join(HERE, "mcp_server.py")), allow_nan=False))
-            except MA.AccessError:
-                self._send(500, json.dumps({"error": "MCP access settings are unavailable. The file was preserved; repair them in Settings."}))
-        elif route == "/api/mcp/query":
-            self._send(405, json.dumps({"error": "use POST with MCP authorization"}))
         elif route == "/api/native":
             self._send(200, json.dumps(N.status()))
         elif route == "/api/native-activity":
@@ -2822,8 +3535,20 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self._send(404, "not found", "text/plain")
 
-    def _origin_ok(self):
-        """Pin every dashboard request to this listener, including private GETs."""
+    def _link_to_page(self):
+        """Someone following a link from another site to the dashboard itself: a top-level load of the page.
+
+        The browser shows that page to the person; no other site can read it, frame it or post through it.
+        Everything the page then asks for is same-origin and keeps every check. Asked only from do_GET."""
+        route = self.path.split("?")[0]
+        return (route in ("/", "/index.html")
+                and (self.headers.get("Sec-Fetch-Mode") or "").strip().lower() == "navigate"
+                and (self.headers.get("Sec-Fetch-Dest") or "").strip().lower() == "document")
+
+    def _origin_ok(self, page=False):
+        """Pin every dashboard request to this listener, including private GETs.
+
+        `page`: a link from another site may open the dashboard page (`_link_to_page`), never anything else."""
         server_address = getattr(getattr(self, "server", None), "server_address", None)
         listen_port = (server_address[1] if isinstance(server_address, tuple) and len(server_address) > 1
                        else BIND["port"])
@@ -2843,7 +3568,7 @@ class Handler(BaseHTTPRequestHandler):
         if port is not None and port != listen_port:
             return False
         site = (self.headers.get("Sec-Fetch-Site") or "").strip().lower()
-        if site and site not in ("same-origin", "none"):
+        if site and site not in ("same-origin", "none") and not (page and self._link_to_page()):
             return False
         origin = self.headers.get("Origin")
         if origin:
@@ -2867,60 +3592,6 @@ class Handler(BaseHTTPRequestHandler):
             return ipaddress.ip_address(self.client_address[0]).is_loopback
         except (ValueError, TypeError):
             return False
-
-    def _mcp_backend_url(self):
-        """Use the actual listener port and a literal loopback origin, never Host."""
-        server_address = getattr(getattr(self, "server", None), "server_address", None)
-        port = (server_address[1] if isinstance(server_address, tuple) and len(server_address) > 1
-                else BIND["port"])
-        return MA.canonical_backend_url(f"http://127.0.0.1:{int(port)}")
-
-    def _mcp_builders(self):
-        return {
-            "payload": build_payload,
-            "health": build_diagnostics,
-            "accounts": build_account_payload,
-            "timeline": build_session_timeline,
-            "is_building": lambda: bool(_meta.get("building")),
-        }
-
-    def _mcp_query(self):
-        if not self._loopback_client():
-            self._discard_small_post_body()
-            self._send(403, json.dumps(MCP.error_payload(MCP.MCPBackendError(
-                403, "forbidden", "MCP queries are available only on this machine."))))
-            return
-        if not self._csrf_ok():
-            self._discard_small_post_body()
-            error = MCP.MCPBackendError(403, "forbidden", "The MCP query requires a same-origin JSON request.")
-            self._send(error.status, json.dumps(MCP.error_payload(error)))
-            return
-        try:
-            raw_length = self.headers.get("Content-Length")
-            if raw_length is None or not raw_length.isascii() or not raw_length.isdecimal():
-                raise ValueError
-            length = int(raw_length)
-            if length <= 0:
-                raise ValueError
-        except (ValueError, OverflowError):
-            error = MCP.MCPBackendError(400, "invalid_request", "The MCP query has an invalid body length.")
-            self._send(error.status, json.dumps(MCP.error_payload(error)))
-            return
-        if length > MCP.MAX_REQUEST_BYTES:
-            error = MCP.MCPBackendError(413, "request_too_large", "The MCP query body exceeds the size limit.")
-            self._send(error.status, json.dumps(MCP.error_payload(error)))
-            return
-        raw = self.rfile.read(length)
-        if len(raw) != length:
-            error = MCP.MCPBackendError(400, "invalid_request", "The MCP query body was incomplete.")
-            self._send(error.status, json.dumps(MCP.error_payload(error)))
-            return
-        try:
-            result = MCP.execute_query(raw, self.headers.get("Authorization"), self._mcp_backend_url(),
-                                       DATA_DIR, self._mcp_builders())
-            self._send(200, json.dumps(result, ensure_ascii=False, allow_nan=False, separators=(",", ":")))
-        except MCP.MCPBackendError as error:
-            self._send(error.status, json.dumps(MCP.error_payload(error), ensure_ascii=False))
 
     def _discard_small_post_body(self):
         """Avoid a TCP reset when rejecting a small, separately sent body.
@@ -2955,9 +3626,6 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         route = self.path.split("?")[0]
-        if route == "/api/mcp/query":
-            self._mcp_query()
-            return
         local_server_routes = {
             "/api/local-servers/stop",
             "/api/local-servers/configure",
@@ -2965,7 +3633,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/local-servers/start",
             "/api/local-servers/restart",
         }
-        if route in ("/api/settings", "/api/cache", "/api/update", "/api/devices", "/api/refresh", "/api/native", "/api/shutdown", "/api/sync", "/api/session-name", "/api/accounts", "/api/backups", "/api/mcp", "/api/release-notes") or route in local_server_routes:
+        if route in ("/api/settings", "/api/cache", "/api/update", "/api/devices", "/api/refresh", "/api/native", "/api/shutdown", "/api/sync", "/api/session-name", "/api/accounts", "/api/backups", "/api/release-notes") or route in local_server_routes:
             if route in local_server_routes and not self._loopback_client():
                 self._discard_small_post_body()
                 self._send(403, json.dumps({"error": "local servers can be managed only on this machine"}))
@@ -2973,9 +3641,6 @@ class Handler(BaseHTTPRequestHandler):
             if route == "/api/release-notes" and not self._loopback_client():
                 self._discard_small_post_body()
                 self._send(403, json.dumps({"error": "release notes are available only on this machine"}))
-                return
-            if route == "/api/mcp" and not self._loopback_client():
-                self._send(403, json.dumps({"error": "MCP settings are available only on this machine"}))
                 return
             if not self._csrf_ok():
                 self._discard_small_post_body()
@@ -2995,7 +3660,7 @@ class Handler(BaseHTTPRequestHandler):
                         return
                 else:
                     length = int(raw_length)
-                if length < 0 or (route in local_server_routes and length > 16384) or (route == "/api/mcp" and length > 16384):
+                if length < 0 or (route in local_server_routes and length > 16384):
                     raise ValueError("invalid body length")
             except ValueError:
                 self._send(400, json.dumps({"error": "invalid request body length"}))
@@ -3040,11 +3705,6 @@ class Handler(BaseHTTPRequestHandler):
                         result = service.shown(body["claim"])
                     else:
                         result = service.check()
-                elif route == "/api/mcp":
-                    backend_url = self._mcp_backend_url()
-                    MA.configure(backend_url, DATA_DIR, body)
-                    result = MCP.settings_response(backend_url, DATA_DIR, _mcp_python_executable(),
-                                                   os.path.join(HERE, "mcp_server.py"))
                 elif route == "/api/accounts":
                     A.refresh_account(body.get("source"), body.get("confirmed"))
                     result = build_account_payload()

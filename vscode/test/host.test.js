@@ -1,6 +1,8 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const {Monitor, validMessage} = require('../src/host');
 function snapshot(tokens = 100, revision = '1', overrides = {}) {
   return {schema: 1, revision: revision.includes(':') ? revision : 'service:' + revision, date: '2026-10-18', from: '2026-10-18', to: '2026-10-18', scope: {kind: 'all', label: 'All projects'}, summary: {tokens, cost: tokens / 100, input: tokens, output: 0, cache_read: 0, cache_write: 0, sessions: 1, main_agents: 1, subagents: 0, compactions: 0}, sessions: [{key: 'a', tokens, cost: tokens / 100}], days: [], models: [], ...overrides};
@@ -70,6 +72,20 @@ test('strict webview allowlist rejects extra keys, unknown actions and forged se
   assert.equal(validMessage({type: 'selectSession', value: 'unknown'}, snapshot()), false);
   assert.equal(validMessage({type: 'selectSession', value: 'a'}, snapshot()), true);
   assert.equal(validMessage({type: 'changeRange', value: '7d'}, snapshot()), true);
+});
+test('desktop app request is a bare message: no URL or other field is accepted from the webview', () => {
+  assert.equal(validMessage({type: 'getDesktopApp'}, snapshot()), true);
+  assert.equal(validMessage({type: 'getDesktopApp', url: 'https://example.invalid/'}, snapshot()), false);
+  assert.equal(validMessage({type: 'getDesktopApp', value: 'https://example.invalid/'}, snapshot()), false);
+  assert.equal(validMessage({type: 'openExternal', url: 'https://example.invalid/'}, snapshot()), false);
+});
+test('every simple message in the documented webview allowlist is accepted, and nothing else is documented', () => {
+  const doc = fs.readFileSync(path.join(__dirname, '../../docs/editor-extension-contract.md'), 'utf8');
+  const block = doc.slice(doc.indexOf('Webview -> host allowlist'));
+  const documented = [...block.slice(0, block.indexOf('```', block.indexOf('```') + 3)).matchAll(/^\{type:'(\w+)'(?:, value:[^}]*)?\}/gm)].map(match => match[1]);
+  assert.deepEqual(documented, ['ready', 'refresh', 'start', 'openBrowser', 'changeScope', 'changeRange', 'selectSession', 'resetBaseline', 'setupPython', 'getDesktopApp', 'openSettings']);
+  const withValue = {changeScope: 'all', changeRange: '7d', selectSession: 'a'};
+  for (const type of documented) assert.equal(validMessage(Object.hasOwn(withValue, type) ? {type, value: withValue[type]} : {type}, snapshot()), true, type);
 });
 
 test('shared service identity reset does not become newly recorded usage', async () => {

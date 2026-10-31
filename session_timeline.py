@@ -9,22 +9,57 @@ import datetime as _dt
 import json
 import os
 import re
+import sqlite3
+import unicodedata
 
 if __package__:
+    from . import antigravity as AG
     from .parser import (
         FAST_SUFFIX, US_SUFFIX, _CODEX_SKIP, _buckets, _first_text, _from_iso,
         _is_subagent_path, normalize_claude, normalize_codex, _claude_effort, _sdk_model, _sdk_tokens,
+        ZstdReadError, ZstdUnavailable, is_zstd_path, zstd_stream,
     )
 else:
+    import antigravity as AG
     from parser import (
         FAST_SUFFIX, US_SUFFIX, _CODEX_SKIP, _buckets, _first_text, _from_iso,
         _is_subagent_path, normalize_claude, normalize_codex, _claude_effort, _sdk_model, _sdk_tokens,
+        ZstdReadError, ZstdUnavailable, is_zstd_path, zstd_stream,
     )
 
 
 MAX_BYTES = 64 * 1024 * 1024
-_SOURCES = {"claude", "claude-desktop", "codex", "copilot"}
+_SOURCES = {"claude", "claude-desktop", "codex", "copilot", "antigravity", "cursor"}
 _VIEWS = {"all", "activity", "requests", "tools", "compactions"}
+_AG_MAX_EVENTS = 5000
+_AG_STATUSES = frozenset((
+    "unknown", "pending", "running", "done", "invalid", "cleared", "canceled",
+    "error", "generating", "waiting", "queued", "interrupted",
+))
+_AG_EFFORTS = frozenset(("low", "medium", "high", "xhigh", "max"))
+_AG_VIEW_KINDS = {
+    "activity": frozenset(("session", "user_turn", "model", "subagent", "checkpoint", "compaction")),
+    "requests": frozenset(("request",)),
+    "tools": frozenset(("tool",)),
+    "compactions": frozenset(("compaction",)),
+}
+_CURSOR_VIEW_KINDS = {
+    "activity": frozenset(("session", "user_turn", "model", "subagent", "checkpoint", "compaction", "error")),
+    "requests": frozenset(("request",)),
+    "tools": frozenset(("tool",)),
+    "compactions": frozenset(("compaction",)),
+}
+_AG_NUMERIC_USAGE = (
+    ("in", "input"), ("out", "output"), ("cr", "cache_read"),
+    ("cc", "cache_write"), ("reason", "reasoning"),
+    ("response_out", "response_output"),
+)
+_CURSOR_KINDS = frozenset(("session", "user_turn", "model", "request", "tool",
+                           "compaction", "checkpoint", "subagent", "error"))
+_CURSOR_STATUSES = _AG_STATUSES | frozenset((
+    "completed", "success", "failed", "cancelled", "skipped", "accepted", "rejected",
+    "partial", "started", "finished", "blocked",
+))
 
 
 class _Events(list):
@@ -110,6 +145,312 @@ def _codex_usage(values):
 
 def _text(value, limit=120):
     return value[:limit] if isinstance(value, str) and value else None
+
+
+def _ag_text(value, limit=120):
+    """Bound an Antigravity model/tool label and keep local paths out of detail."""
+    if not isinstance(value, str):
+        return None
+    value = " ".join("".join(ch for ch in value if not unicodedata.category(ch).startswith("C")).split())
+    value = value.strip()[:limit]
+    if (not value or value.startswith(("/", "\\", "~/", "~\\"))
+            or re.search(r"(?:^|\s)[A-Za-z]:[\\/].+", value)
+            or re.search(r"(?:^|\s)/(?:Users|home|private|tmp|var|opt)/", value)):
+        return None
+    return value
+
+
+def _ag_event_matches(event, date_from, date_to, view):
+    if not isinstance(event, dict):
+        return False
+    kind = event.get("kind")
+    if kind == "request" and event.get("checkpoint_usage") is True:
+        kind = "checkpoint"
+    if not isinstance(kind, str) or kind not in {
+            "session", "user_turn", "model", "request", "tool", "subagent", "checkpoint", "compaction"}:
+        return False
+    allowed = _AG_VIEW_KINDS.get(view)
+    if allowed is not None and kind not in allowed:
+        return False
+    timestamp = _timestamp(event.get("timestamp"))
+    if not timestamp:
+        return False
+    return _in_range(timestamp, date_from, date_to)
+
+
+def _ag_flat_usage(raw, event):
+    usage = raw.get("usage") if isinstance(raw.get("usage"), dict) else {}
+    availability = raw.get("usage_availability") if isinstance(raw.get("usage_availability"), dict) else {}
+    safe_availability = {}
+    for source, target in _AG_NUMERIC_USAGE:
+        field = {"in": "input_output", "out": "input_output", "cr": "cache_read",
+                 "cc": "cache_write", "reason": "reasoning", "response_out": "response_output"}[source]
+        state = availability.get(field)
+        if state in ("recorded", "partial", "unavailable"):
+            safe_availability[field] = state
+        value = _number(usage.get(source))
+        if value is not None and state in ("recorded", "partial"):
+            event[target] = value
+    if safe_availability:
+        event["usage_availability"] = safe_availability
+    return event
+
+
+def _ag_public_events(snapshot, cap, date_from, date_to, view):
+    """Project Antigravity's safe normalized events onto the shared timeline shape."""
+    result = []
+    raw_events = snapshot.get("events") if isinstance(snapshot.get("events"), list) else []
+    checkpoint_usage_steps = {
+        event.get("step_index") for event in raw_events[:_AG_MAX_EVENTS]
+        if isinstance(event, dict) and event.get("kind") == "request"
+        and event.get("checkpoint_usage") is True and _number(event.get("step_index")) is not None
+    }
+    for raw in raw_events[:_AG_MAX_EVENTS]:
+        if not _ag_event_matches(raw, date_from, date_to, view):
+            continue
+        timestamp = _timestamp(raw.get("timestamp"))
+        source_kind = raw.get("kind")
+        checkpoint_usage = source_kind == "request" and raw.get("checkpoint_usage") is True
+        kind = "checkpoint" if checkpoint_usage else source_kind
+        if (source_kind == "checkpoint" and raw.get("intent_only") is True
+                and _number(raw.get("step_index")) in checkpoint_usage_steps):
+            continue
+        event = {"timestamp": timestamp, "kind": kind}
+        step_index = _number(raw.get("step_index"))
+        if step_index is not None:
+            event["step_index"] = step_index
+        status = raw.get("status")
+        if (kind in ("tool", "subagent", "session", "user_turn", "checkpoint")
+                and isinstance(status, str) and status in _AG_STATUSES):
+            event["status"] = status
+        if kind == "tool":
+            tool = _ag_text(raw.get("tool"), 100)
+            if tool:
+                event["label"] = tool
+        elif kind == "model":
+            model = _ag_text(raw.get("model"), 120)
+            effort = raw.get("effort")
+            if model:
+                event["model"] = model
+            if isinstance(effort, str) and effort in _AG_EFFORTS:
+                event["effort"] = effort
+            event["label"] = "Recorded model"
+        elif kind == "request":
+            model = _ag_text(raw.get("model"), 120)
+            if model:
+                event["model"] = model
+            event["label"] = "Model request"
+            _ag_flat_usage(raw, event)
+            context = raw.get("context") if isinstance(raw.get("context"), dict) else {}
+            for field in ("estimated_tokens_used", "max_context_tokens"):
+                value = _number(context.get(field))
+                if value is not None:
+                    event[field] = value
+        elif kind == "subagent":
+            role = _ag_text(raw.get("subagent_role"), 80)
+            subtype = _ag_text(raw.get("subagent_type"), 80)
+            event["label"] = "Subagent activity recorded"
+            if role:
+                event["subagent_role"] = role
+            if subtype:
+                event["subagent_type"] = subtype
+        elif kind == "checkpoint":
+            event["label"] = "Recorded checkpoint"
+            if checkpoint_usage:
+                event["intent_only"] = True
+            model = _ag_text(raw.get("model"), 120)
+            if model:
+                event["model"] = model
+            _ag_flat_usage(raw, event)
+            if isinstance(raw.get("intent_only"), bool):
+                event["intent_only"] = raw["intent_only"]
+            included = _number(raw.get("included_steps"))
+            if included is not None:
+                event["included_steps"] = included
+        elif kind == "compaction":
+            event["label"] = "Completed compaction"
+            trigger = raw.get("trigger")
+            if trigger in ("manual", "auto", "threshold", "context_limit_retry", "memory_pressure", "model_switch", "unknown"):
+                event["trigger"] = trigger
+            for field in ("before", "after"):
+                value = _number(raw.get(field))
+                if value is not None:
+                    event[field] = value
+        elif kind == "user_turn":
+            event["label"] = "Recorded user turn"
+        elif kind == "session":
+            event["label"] = "Recorded session activity"
+        result.append(event)
+    result.sort(key=_timestamp_order)
+    return result
+
+
+def _antigravity_timeline(path, session_id, max_events, date_from, date_to, view):
+    result = {"events": [], "truncated": False, "available": False, "detail": "unavailable"}
+    if not isinstance(session_id, str) or not re.fullmatch(
+            r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", session_id):
+        return result
+    try:
+        cap = max(0, min(int(max_events), 2000))
+    except (TypeError, ValueError, OverflowError):
+        cap = 400
+    for name, value in (("date_from", date_from), ("date_to", date_to)):
+        if value is not None:
+            try:
+                if not isinstance(value, str) or len(value) != 10:
+                    raise ValueError
+                _dt.date.fromisoformat(value)
+            except (TypeError, ValueError):
+                if name == "date_from":
+                    date_from = None
+                else:
+                    date_to = None
+    try:
+        if not os.path.isfile(path):
+            return result
+        snapshot = AG.read_conversation(
+            path, max_events=min(_AG_MAX_EVENTS, cap + 1),
+            event_filter=lambda event: _ag_event_matches(event, date_from, date_to, view),
+            include_private=False,
+        )
+    except (AG.AntigravityReadError, OSError, ValueError, sqlite3.Error):
+        return result
+    if not isinstance(snapshot, dict):
+        return result
+    native_id = snapshot.get("conversation_id")
+    if isinstance(native_id, str):
+        native_id = os.path.basename(native_id)
+        if native_id.lower().endswith(".db"):
+            native_id = native_id[:-3]
+    if not isinstance(native_id, str) or native_id.lower() != session_id.lower():
+        return result
+    events = _ag_public_events(snapshot, cap + 1, date_from, date_to, view)
+    truncated = snapshot.get("events_truncated") is True or len(events) > cap
+    if len(events) > cap:
+        events = events[:cap]
+    detail_status = snapshot.get("detail_status")
+    detail = "partial" if truncated or detail_status == "partial" else "source log"
+    result.update(events=events, truncated=truncated, available=True, detail=detail)
+    return result
+
+
+def _cursor_text(value, limit=120):
+    """Bound Cursor labels and exclude local paths from timeline detail."""
+    if not isinstance(value, str):
+        return None
+    value = " ".join("".join(ch for ch in value if not unicodedata.category(ch).startswith("C")).split())
+    value = value.strip()[:limit]
+    if (not value or value.startswith(("/", "\\", "~/", "~\\"))
+            or re.search(r"(?:^|\s)[A-Za-z]:[\\/].+", value)
+            or re.search(r"(?:^|\s)/(?:Users|home|private|tmp|var|opt)/", value)):
+        return None
+    return value
+
+
+def _cursor_event_matches(event, date_from, date_to, view):
+    if not isinstance(event, dict) or event.get("kind") not in _CURSOR_KINDS:
+        return False
+    allowed = _CURSOR_VIEW_KINDS.get(view)
+    if allowed is not None and event.get("kind") not in allowed:
+        return False
+    timestamp = _timestamp(event.get("timestamp"))
+    return bool(timestamp and _in_range(timestamp, date_from, date_to))
+
+
+def _cursor_public_events(snapshot, cap, date_from, date_to, view):
+    result = []
+    raw_events = snapshot.get("events") if isinstance(snapshot.get("events"), list) else []
+    for raw in raw_events[:5001]:
+        if not _cursor_event_matches(raw, date_from, date_to, view):
+            continue
+        timestamp = _timestamp(raw.get("timestamp"))
+        event = {"timestamp": timestamp, "kind": raw["kind"]}
+        status = raw.get("status")
+        if isinstance(status, str) and status in _CURSOR_STATUSES:
+            event["status"] = status
+        usage_status = raw.get("usage_status")
+        if isinstance(usage_status, str) and usage_status in ("recorded", "partial", "unavailable"):
+            event["usage_status"] = usage_status
+        label = _cursor_text(raw.get("label"), 100)
+        model = _cursor_text(raw.get("model"), 120)
+        requested_model = _cursor_text(raw.get("requested_model"), 120)
+        if label:
+            event["label"] = label
+        if model:
+            event["model"] = model
+        if raw.get("kind") == "user_turn" and requested_model:
+            event["requested_model"] = requested_model
+        usage = raw.get("usage") if isinstance(raw.get("usage"), dict) else {}
+        availability = raw.get("usage_availability") if isinstance(raw.get("usage_availability"), dict) else {}
+        safe_availability = {}
+        for field in ("input_output", "cache_read", "cache_write", "reasoning", "response_output"):
+            state = availability.get(field)
+            if state not in ("recorded", "partial", "unavailable"):
+                continue
+            safe_availability[field] = state
+            if state in ("recorded", "partial"):
+                value_fields = ("input", "output") if field == "input_output" else (
+                    {"cache_read": "cache_read", "cache_write": "cache_write",
+                     "reasoning": "reasoning", "response_output": "response_output"}[field],
+                )
+                for value_field in value_fields:
+                    value = _number(usage.get(value_field))
+                    if value is not None:
+                        event[value_field] = value
+        if safe_availability:
+            event["usage_availability"] = safe_availability
+        result.append(event)
+    result.sort(key=_timestamp_order)
+    truncated = snapshot.get("events_truncated") is True or len(result) > cap
+    if len(result) > cap:
+        result = result[:cap]
+    detail_status = snapshot.get("detail_status")
+    detail = "partial" if truncated or detail_status in ("partial", "unavailable") else "source log"
+    return result, truncated, detail
+
+
+def _cursor_timeline(path, session_id, max_events, date_from, date_to, view):
+    result = {"events": [], "truncated": False, "available": False, "detail": "unavailable"}
+    if (not isinstance(session_id, str) or len(session_id) <= 8 or len(session_id) > 512
+            or any(ord(char) < 32 or ord(char) == 127 for char in session_id)
+            or "/" in session_id or "\\" in session_id):
+        return result
+    try:
+        if __package__:
+            from . import cursor_data as CD
+        else:
+            import cursor_data as CD
+    except ImportError:
+        return result
+    try:
+        cap = max(0, min(int(max_events), 2000))
+    except (TypeError, ValueError, OverflowError):
+        cap = 400
+    for name, value in (("date_from", date_from), ("date_to", date_to)):
+        if value is not None:
+            try:
+                if not isinstance(value, str) or len(value) != 10:
+                    raise ValueError
+                _dt.date.fromisoformat(value)
+            except (TypeError, ValueError):
+                if name == "date_from":
+                    date_from = None
+                else:
+                    date_to = None
+    try:
+        if not os.path.isfile(path):
+            return result
+        snapshot = CD.read_conversation(
+            path, session_id, max_events=max(1, min(5001, cap + 1)),
+            event_filter={"date_from": date_from, "date_to": date_to, "view": view},
+        )
+    except (OSError, ValueError, sqlite3.Error, CD.CursorReadError):
+        return result
+    if not isinstance(snapshot, dict) or snapshot.get("conversation_id") != session_id:
+        return result
+    events, truncated, detail = _cursor_public_events(snapshot, cap, date_from, date_to, view)
+    result.update(events=events, truncated=truncated, available=True, detail=detail)
+    return result
 
 
 def _event(timestamp, kind, **fields):
@@ -507,6 +848,10 @@ def timeline(source, path, session_id, max_events=400, date_from=None, date_to=N
         return result
     if not isinstance(path, (str, os.PathLike)):
         return result
+    if source == "antigravity":
+        return _antigravity_timeline(path, session_id, max_events, date_from, date_to, view)
+    if source == "cursor":
+        return _cursor_timeline(path, session_id, max_events, date_from, date_to, view)
     try:
         size = os.path.getsize(path)
         if not os.path.isfile(path):
@@ -514,7 +859,11 @@ def timeline(source, path, session_id, max_events=400, date_from=None, date_to=N
     except OSError:
         return result
 
-    limited = size > MAX_BYTES
+    # A compressed Codex rollout is read through the same decoder the parser uses. Its
+    # file size says nothing about how much text it holds, so the 64 MiB bound applies
+    # to the DECODED bytes, while reading, exactly as it does to a plain log.
+    compressed = source == "codex" and is_zstd_path(path)
+    limited = size > MAX_BYTES and not compressed
     try:
         cap = max(0, min(int(max_events), 2000))
     except (TypeError, ValueError, OverflowError):
@@ -523,7 +872,7 @@ def timeline(source, path, session_id, max_events=400, date_from=None, date_to=N
 
     def source_lines():
         consumed = 0
-        with open(path, "rb") as handle:
+        with (zstd_stream(path) if compressed else open(path, "rb")) as handle:
             while consumed < MAX_BYTES:
                 remaining = MAX_BYTES - consumed
                 raw_line = handle.readline(remaining + 1)
@@ -552,6 +901,12 @@ def timeline(source, path, session_id, max_events=400, date_from=None, date_to=N
     if source == "codex":
         try:
             events = _codex_events(source_lines(), session_id, cap + 1, date_from, date_to, view)
+        except ZstdUnavailable:
+            result["detail"] = "This compressed Codex log needs the zstd command or Python 3.14+ to be read."
+            return result
+        except ZstdReadError:
+            result["detail"] = "The compressed source log is damaged or incomplete."
+            return result
         except OSError:
             return result
     elif source == "copilot":

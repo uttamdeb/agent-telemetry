@@ -18,6 +18,15 @@ MAX_SESSIONS = 500
 _UUID = re.compile(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}")
 _EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra")
 _FIELDS = {"input": "in", "output": "out", "cache_read": "cr", "cache_write": "cc"}
+_USAGE_STATUSES = frozenset(("recorded", "partial", "unavailable"))
+_USAGE_AVAILABILITY_FIELDS = frozenset((
+    "input_output", "cache_read", "cache_write", "reasoning", "response_output",
+))
+_QUALITY_STATUSES = _USAGE_STATUSES | frozenset(("unknown",))
+
+
+def _quality_state(value):
+    return value if isinstance(value, str) and value in _QUALITY_STATUSES else None
 
 
 def _number(value):
@@ -139,6 +148,61 @@ def _timestamp(value):
         return None
 
 
+def _session_cwd(aggregate, session, source):
+    """Return a normalized workspace path for matching; never put it in a row."""
+    path = _path(session.get("cwd"))
+    if path or source != "cursor":
+        return path
+    private_cwds = aggregate.get("_cursor_cwds")
+    native_id = session.get("_sid") or session.get("_cursor_sid")
+    if isinstance(private_cwds, dict) and isinstance(native_id, str):
+        return _path(private_cwds.get(native_id))
+    return None
+
+
+def _combine_quality(states):
+    values = [state for value in states if (state := _quality_state(value)) is not None]
+    if not values or all(state == "recorded" for state in values):
+        return "recorded" if values else None
+    if all(state == "unavailable" for state in values):
+        return "unavailable"
+    if all(state == "unknown" for state in values):
+        return "unknown"
+    return "partial"
+
+
+def _cursor_quality(session, usage):
+    status = _quality_state(session.get("usage_status")) or "unknown"
+    model_status = _quality_state(session.get("model_status")) or "unknown"
+    cost_status = status
+    if status == "recorded":
+        if model_status in ("unavailable", "unknown"):
+            cost_status = "unavailable"
+        elif model_status == "partial":
+            cost_status = "partial" if usage["cost"] > 0 else "unavailable"
+        elif usage["tokens"] > 0 and usage["cost"] <= 0:
+            cost_status = "unavailable"
+    elif status == "partial" and usage["cost"] <= 0:
+        cost_status = "unavailable"
+    return status, model_status, cost_status
+
+
+def _cursor_context(session):
+    context = {}
+    for field in ("current_context_tokens", "current_context_limit"):
+        value = session.get(field)
+        if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 10**15:
+            context[field] = value
+    percent = session.get("current_context_percent")
+    if (isinstance(percent, (int, float)) and not isinstance(percent, bool)
+            and math.isfinite(percent) and 0 <= percent <= 100):
+        context["current_context_percent"] = float(percent)
+    asof = _timestamp(session.get("current_context_asof"))
+    if asof:
+        context["current_context_asof"] = asof
+    return context
+
+
 def _overlaps(session, first, last):
     start, end = _timestamp(session.get("start")), _timestamp(session.get("end"))
     return bool(start and end and start[:10] <= last and end[:10] >= first)
@@ -187,7 +251,7 @@ def build_snapshot(items, local, query, revision, *, price_usage, deduplicate,
         per_session_records = bool(sessions) and all("records" in s for s in sessions)
         aggregate_cwd = None
         if len(sessions) <= 1:
-            aggregate_cwd = (_path(sessions[0].get("cwd")) if sessions else None) or _path(agg.get("cwd"))
+            aggregate_cwd = (_session_cwd(agg, sessions[0], source) if sessions else None) or _path(agg.get("cwd"))
         aggregate_match = bool(aggregate_cwd and any(_contains(root, aggregate_cwd) for root in roots))
         if scope == "all" or aggregate_match:
             buckets = [s.get("records") or {} for s in sessions] if per_session_records else [agg.get("records", {})]
@@ -200,7 +264,7 @@ def build_snapshot(items, local, query, revision, *, price_usage, deduplicate,
                 _add(days.setdefault(date, _empty()), usage)
                 _add(models.setdefault((model, source), _empty()), usage)
         for index, session in enumerate(sessions):
-            cwd = _path(session.get("cwd")) or aggregate_cwd
+            cwd = _session_cwd(agg, session, source) or aggregate_cwd
             matched = scope == "all" or any(_contains(root, cwd) for root in roots)
             bucket = session.get("records")
             if bucket is None and len(sessions) == 1:
@@ -218,7 +282,7 @@ def build_snapshot(items, local, query, revision, *, price_usage, deduplicate,
             if limited and not rows:
                 active = _overlaps(session, first, last) and any(_number(session.get(f)) for f in
                     ("in", "out", "cr", "cc", "asst", "user", "req"))
-            native_id = identity(agg, session) if source in ("claude", "codex") else session.get("_sid")
+            native_id = identity(agg, session) if source in ("claude", "codex", "antigravity") else session.get("_sid")
             if source == "copilot" and not session.get("_sid"):
                 path = str(agg.get("path", "")).replace("\\", "/")
                 match = _UUID.search(path.rsplit("/", 1)[-1]) or _UUID.search(path)
@@ -227,6 +291,8 @@ def build_snapshot(items, local, query, revision, *, price_usage, deduplicate,
                     or any(not c.isprintable() for c in native_id) or _path(native_id)):
                 native_id = ""
             if source == "codex" and not _UUID.fullmatch(native_id):
+                native_id = ""
+            if source == "antigravity" and not _UUID.fullmatch(native_id):
                 native_id = ""
             if source == "claude" and not (_UUID.fullmatch(native_id)
                     or claude_parent_key(agg.get("path"), child=True)):
@@ -264,16 +330,64 @@ def build_snapshot(items, local, query, revision, *, price_usage, deduplicate,
             dominant = max(ranked, key=ranked.get) if ranked else session.get("model") or "Unknown"
             project = _leaf(session.get("project") or agg.get("project"))
             alias = (display_aliases or {}).get((agg.get("path", ""), native_id))
+            # Antigravity's role is evidence-based. A recorded parent_id or
+            # root_id alone never turns an unmarked session into a subagent.
+            is_subagent = (session.get("subagent") is True if source == "antigravity"
+                           else bool(session.get("subagent")))
             row = {"key": key, "id": native_id, "source": source, "device": local,
                    "title": _text(alias or session.get("title")) or project,
-                   "project": project, "subagent": bool(session.get("subagent")),
+                   "project": project, "subagent": is_subagent,
                    "parent_key": None, "parent_title": None,
-                   "parent_status": "unavailable" if session.get("subagent") else "none",
+                   "parent_status": "unavailable" if is_subagent else "none",
                    "model": _text(dominant, 160), "efforts": _efforts(session, first, last),
                    **usage, "compactions": compactions,
                    "start": _timestamp(session.get("start")), "end": _timestamp(session.get("end")),
                    "archived": bool(agg.get("archived") or session.get("archived")),
                    "detail_limited": limited or not native_id}
+            if source == "cursor":
+                usage_status, model_status, cost_status = _cursor_quality(session, usage)
+                row.update(usage_status=usage_status, model_status=model_status,
+                           cost_status=cost_status)
+                availability = session.get("usage_availability")
+                if isinstance(availability, dict):
+                    safe_availability = {
+                        field: _quality_state(state) for field, state in availability.items()
+                        if field in _USAGE_AVAILABILITY_FIELDS and _quality_state(state)
+                    }
+                else:
+                    safe_availability = {}
+                if safe_availability:
+                    row["usage_availability"] = safe_availability
+                response_status = session.get("response_model_status")
+                response_status = _quality_state(response_status)
+                if response_status:
+                    row["response_model_status"] = response_status
+                requested_status = session.get("requested_model_status")
+                requested_status = _quality_state(requested_status)
+                if requested_status:
+                    row["requested_model_status"] = requested_status
+                requested_models = session.get("requested_models")
+                if isinstance(requested_models, list):
+                    clean_models = list(dict.fromkeys(
+                        _text(model, 160) for model in requested_models if _text(model, 160)))
+                    if clean_models:
+                        row["requested_models"] = clean_models[:6]
+                current_model = _text(session.get("current_model"), 160)
+                if current_model and current_model.lower() != "default":
+                    row["current_model"] = current_model
+                row.update(_cursor_context(session))
+            if source == "antigravity":
+                status = session.get("usage_status", agg.get("usage_status"))
+                if isinstance(status, str) and status in _USAGE_STATUSES:
+                    row["usage_status"] = status
+                availability = session.get("usage_availability", agg.get("usage_availability"))
+                if isinstance(availability, dict):
+                    safe_availability = {
+                        field: state for field, state in availability.items()
+                        if field in _USAGE_AVAILABILITY_FIELDS and isinstance(state, str) and state in _USAGE_STATUSES
+                    }
+                    if safe_availability:
+                        row["usage_availability"] = safe_availability
             parent = None
             if source == "claude":
                 recognized = claude_parent_key(agg.get("path"), child=bool(session.get("subagent")))
@@ -284,6 +398,10 @@ def build_snapshot(items, local, query, revision, *, price_usage, deduplicate,
             elif source == "copilot" and native_id:
                 parent = ("copilot", native_id)
                 row["usage_status"] = (session.get("copilot_sdk") or {}).get("usage_status", "recorded")
+            elif source == "antigravity" and _UUID.fullmatch(native_id):
+                # Conversation UUIDs are globally unique in the source format;
+                # deduplicated local copies share this exact parent namespace.
+                parent = ("antigravity", native_id.lower())
             all_sessions.append((row, parent, session.get("parent_id")))
             if active and cwd is None:
                 unassigned += 1
@@ -346,6 +464,11 @@ def build_snapshot(items, local, query, revision, *, price_usage, deduplicate,
         if row["source"] == "codex":
             parent = (("codex", parent_id.lower()) if isinstance(parent_id, str)
                       and _UUID.fullmatch(parent_id) else None)
+        elif row["source"] == "antigravity":
+            # Only an explicit immediate parent_id is link evidence. root_id is
+            # retained by the parser for context but cannot stand in for parent_id.
+            parent = (("antigravity", parent_id.lower()) if isinstance(parent_id, str)
+                      and _UUID.fullmatch(parent_id) else None)
         found = candidates.get(parent, []) if parent else []
         if len(found) == 1 and found[0]["key"] != row["key"]:
             actual = found[0]
@@ -356,6 +479,13 @@ def build_snapshot(items, local, query, revision, *, price_usage, deduplicate,
     summary.update(sessions=total, main_agents=sum(not s["subagent"] for s in selected),
                    subagents=sum(s["subagent"] for s in selected),
                    compactions=sum(s["compactions"] for s in selected))
+    if any(session["source"] == "cursor" for session in selected):
+        usage_states = [_quality_state(session.get("usage_status")) or "recorded"
+                        for session in selected]
+        cost_states = [_quality_state(session.get("cost_status", session.get("usage_status", "recorded")))
+                       or "recorded" for session in selected]
+        summary["usage_status"] = _combine_quality(usage_states)
+        summary["cost_status"] = _combine_quality(cost_states)
     limitations = ["Costs are estimates at API list prices.",
                   "Main agents are sessions without a recorded subagent marker.",
                   "Parent links require full recorded source identities; missing links remain unavailable.",

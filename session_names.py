@@ -192,10 +192,27 @@ def identity(aggregate, session):
         except ValueError: return stem
     if aggregate["source"] == "codex":
         if aggregate.get("_session_id"): return aggregate["_session_id"]
-        tail = Path(aggregate.get("path", "")).stem[-36:]
+        name = Path(aggregate.get("path", "")).name
+        if name.lower().endswith(".jsonl.zst"):      # the same thread as the plain rollout it replaced
+            name = name[:-4]
+        tail = Path(name).stem[-36:]
         try: uuid.UUID(tail)
         except ValueError: return ""
         return tail
+    if aggregate["source"] == "antigravity":
+        # Antigravity's transcript reader records one full UUID per SQLite
+        # conversation. Do not use a path, title, or shortened table id as an
+        # identity; the reader's snapshot ID is only a fallback for old rows.
+        for value in (session.get("_sid"), aggregate.get("conversation_id"), session.get("id")):
+            if not isinstance(value, str) or "/" in value or "\\" in value:
+                continue
+            if value.lower().endswith(".db"):
+                value = value[:-3]
+            try:
+                return str(uuid.UUID(value))
+            except (ValueError, AttributeError):
+                continue
+        return ""
     return session.get("_sid") or session.get("id") or ""
 
 
@@ -274,7 +291,7 @@ def _codex_rpc(method, params, home=None):
             return message.get("result", {})
     try:
         send({"id": 1, "method": "initialize", "params": {"clientInfo": {
-            "name": "agent_telemetry", "title": "AgentTelemetry", "version": "2.1.0"}}})
+            "name": "agent_telemetry", "title": "AgentTelemetry", "version": "2.2.0"}}})
         receive(1); send({"method": "initialized", "params": {}})
         send({"id": 2, "method": method, "params": params})
         return receive(2)

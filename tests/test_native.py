@@ -405,6 +405,33 @@ class MonitorTests(unittest.TestCase):
             self.monitor.refresh()
         self.assertEqual(self.monitor.snapshot()["tokens"], 0)
 
+    def test_a_backend_still_on_its_first_parse_is_not_ready_yet(self):
+        # The backend binds its port before parsing and answers only afterwards: a health request is accepted,
+        # then times out. That is "not ready yet", never a failure.
+        import socket
+        busy = socket.socket()
+        busy.bind(("127.0.0.1", 0))
+        busy.listen(5)
+        try:
+            monitor = Monitor("/fixture", "/fixture-data", sys.executable,
+                              url="http://127.0.0.1:%d" % busy.getsockname()[1])
+            self.assertIsNone(monitor._probe())
+        finally:
+            busy.close()
+
+    def test_start_keeps_waiting_through_a_health_timeout(self):
+        from unittest.mock import Mock
+        process = Mock(pid=123)
+        process.poll.return_value = None
+        self.monitor.process = process
+        health = {"ready": True, "service": "agent-telemetry", "pid": 123}
+        with patch.object(self.monitor, "_request", side_effect=[TimeoutError("timed out"), health]), \
+             patch.object(self.monitor, "refresh") as refresh, patch("subprocess.Popen") as child, \
+             patch("time.sleep"):
+            self.assertTrue(self.monitor.start())
+            child.assert_not_called()
+            refresh.assert_called_once_with(intent=0)
+
     def test_restart_waits_for_an_already_owned_starting_process(self):
         from unittest.mock import Mock
         process = Mock(pid=123)
@@ -558,6 +585,9 @@ class MonitorTests(unittest.TestCase):
                 self._redirect()
 
             def do_POST(self):
+                # Read the body before answering: closing a socket with unread data makes Windows reset the
+                # connection, and the client then saw ConnectionAbortedError instead of the redirect (a race).
+                self.rfile.read(int(self.headers.get("Content-Length") or 0))
                 self._redirect()
 
             def log_message(self, *args):

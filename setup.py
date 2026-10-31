@@ -8,7 +8,9 @@ ALLOWED_MODULES = {
     "__init__",
     "__main__",
     "accounts",
+    "antigravity",
     "cli",
+    "cursor_data",
     "dashboard",
     "editor_snapshot",
     "ledger_backups",
@@ -21,13 +23,6 @@ ALLOWED_MODULES = {
     "parser",
     "release_notes",
     "session_names",
-    "mcp_access",
-    "mcp_backend",
-    "mcp_protocol",
-    "mcp_server",
-    "mcp_tools",
-    "telemetry_query",
-    "telemetry_insights",
 }
 
 

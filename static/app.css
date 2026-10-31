@@ -19,10 +19,10 @@
   --good:#16803c; --warn:#a86a00; --bad:#c9302c;
   --grid:rgba(16,19,24,.07);
   --shadow-lg:0 12px 32px rgba(16,24,40,.14),0 2px 6px rgba(16,24,40,.06);
-  /* categorical — tools (validated order: claude, codex, copilot, cursor, claude-desktop, openclaw, opencode, hermes) */
+  /* categorical — tools (validated order: claude, codex, copilot, cursor, claude-desktop, openclaw, opencode, hermes, antigravity) */
   --t-claude:#eb6834; --t-codex:#1baf7a; --t-copilot:#4a3aa7;
   --t-cursor:#e87ba4; --t-claude-desktop:#eda100; --t-opencode:#2a78d6;
-  --t-hermes:#7a9e1e;
+  --t-hermes:#7a9e1e; --t-antigravity:#3186ff;
   --t-openclaw:#c62f4b;
   /* categorical — providers */
   --p-anthropic:#eb6834; --p-openai:#1baf7a; --p-google:#2a78d6; --p-other:#e87ba4;
@@ -48,7 +48,7 @@
     --shadow-lg:0 18px 44px rgba(0,0,0,.55);
     --t-claude:#d95926; --t-codex:#199e70; --t-copilot:#9085e9;
     --t-cursor:#d55181; --t-claude-desktop:#c98500; --t-opencode:#3987e5;
-    --t-hermes:#6b8a1a;
+    --t-hermes:#6b8a1a; --t-antigravity:#3186ff;
     --t-openclaw:#d9475f;
     --p-anthropic:#d95926; --p-openai:#199e70; --p-google:#3987e5; --p-other:#d55181;
     --k-in:#3987e5; --k-cr:#d95926; --k-cw:#199e70; --k-out:#c98500; --k-think:#d55181;
@@ -68,7 +68,7 @@
   --shadow-lg:0 18px 44px rgba(0,0,0,.55);
   --t-claude:#d95926; --t-codex:#199e70; --t-copilot:#9085e9;
   --t-cursor:#d55181; --t-claude-desktop:#c98500; --t-opencode:#3987e5;
-  --t-hermes:#6b8a1a;
+  --t-hermes:#6b8a1a; --t-antigravity:#3186ff;
   --t-openclaw:#d9475f;
   --p-anthropic:#d95926; --p-openai:#199e70; --p-google:#3987e5; --p-other:#d55181;
   --k-in:#3987e5; --k-cr:#d95926; --k-cw:#199e70; --k-out:#c98500; --k-think:#d55181;
@@ -145,7 +145,7 @@ a{color:inherit}
 .icon-btn:hover{background:var(--surface-2);color:var(--text);border-color:var(--border)}
 .side-note{font-size:11px;color:var(--text-3);line-height:1.5;padding:0 6px}
 .coverage-meta{display:flex;flex-wrap:wrap;gap:2px 8px}
-.coverage-dates{white-space:nowrap}
+.coverage-meta:empty{display:none}
 .coverage-detail{flex-basis:100%;overflow-wrap:anywhere}
 .side-ver{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;margin-top:4px}
 .side-ver .ver{font-family:var(--mono,ui-monospace,SFMono-Regular,Menlo,monospace);color:var(--text-2)}
@@ -618,29 +618,6 @@ code.cmd{display:block;background:var(--surface-2);border:1px solid var(--border
 .dev-form input:focus{outline:none;border-color:var(--text-3)}
 @media (max-width:520px){ .dev-form{grid-template-columns:1fr} }
 
-/* ---------- optimize ---------- */
-.finding{background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--border-2);
-  border-radius:var(--r);padding:16px 20px;margin-bottom:12px}
-/* The stripe carries TOOL identity (inline --t-<source>) only when exactly one tool
-   is in scope; a finding spanning several stays neutral. Never severity. */
-.finding.sev-neutral{border-left-color:var(--border-2)}
-.finding-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}
-.finding-title{font-size:14.5px;font-weight:640;line-height:1.35}
-.finding-impact{text-align:right;font-size:18px;font-weight:680;white-space:nowrap}
-.finding-impact span{display:block;font-size:10.5px;font-weight:560;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;margin-top:1px}
-.finding-body{font-size:13px;line-height:1.65;color:var(--text-2);margin-top:8px}
-.finding-body b{color:var(--text);font-weight:640}
-.finding-body code{font-family:var(--mono);font-size:12px}
-.finding-todo{font-size:13px;line-height:1.6;color:var(--text-2);margin-top:10px;padding-top:10px;border-top:1px solid var(--border)}
-.finding-todo b{color:var(--text);font-weight:640;margin-right:6px}
-.finding-tbl{width:100%;margin-top:12px;border-collapse:collapse;font-size:12px}
-.finding-tbl td{padding:5px 8px 5px 0;border-top:1px solid var(--border);border-bottom:0;color:var(--text-2)}
-.finding-tbl td.name{color:var(--text);max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.finding-tbl tr:hover{background:none}
-.finding-scope{margin-top:6px;display:flex;gap:5px;flex-wrap:wrap}
-.scope-chip{display:inline-block;font-size:10.5px;font-weight:620;color:var(--text-3);background:var(--surface-2);
-  border:1px solid var(--border);border-radius:5px;padding:1px 6px}
-
 /* ---------- responsive ---------- */
 @media(max-width:1280px){
   .col-8,.col-7{grid-column:span 12}.col-6,.col-5,.col-4{grid-column:span 6}
@@ -815,20 +792,6 @@ code.cmd{display:block;background:var(--surface-2);border:1px solid var(--border
 @media(prefers-reduced-motion:reduce){.release-notes-dialog[open]{animation:none}}
 
 /* Change contributions use signed text as well as neutral magnitude bars. */
-.change-head{flex-wrap:wrap}
-.change-seg{flex-wrap:wrap;max-width:100%}
-.change-periods,.change-note{color:var(--text-3);font-size:12px;margin:0 0 10px}
-.change-note{color:var(--text-2)}
-.change-table table{width:100%;min-width:440px}
-.change-table td:last-child{position:relative;isolation:isolate;min-width:105px}
-.change-bar{position:absolute;inset:22% 0 22% auto;background:var(--surface-3);border-radius:3px;z-index:-1}
-.change-link{font:inherit;color:var(--text);background:none;border:0;padding:3px 0;cursor:pointer;text-align:inherit}
-.change-link:hover{text-decoration:underline}
-.change-link:focus-visible{outline:2px solid var(--text-2);outline-offset:3px}
-.change-method,.change-all{margin-top:12px;color:var(--text-2);font-size:12px}
-.change-method summary,.change-all summary{cursor:pointer}
-.change-method p{max-width:78ch;margin:8px 0;line-height:1.6}
-.change-table tfoot th,.change-table tfoot td{border-top:1px solid var(--border);font-weight:600}
 .session-timeline{margin-top:24px;border-top:1px solid var(--border);padding-top:16px}
 .session-timeline h3{font-size:14px;margin:0 0 12px}
 .session-timeline .hint{font-size:12px;line-height:1.5;color:var(--text-3);margin:8px 0}
@@ -854,6 +817,5 @@ code.cmd{display:block;background:var(--surface-2);border:1px solid var(--border
 .maintenance-issues summary{cursor:pointer}
 .maintenance-issues li{margin:10px 0;line-height:1.5}
 @media(max-width:520px){
-  .change-seg{width:100%;margin-top:8px}
   .session-timeline-events li{grid-template-columns:1fr;gap:4px}
 }

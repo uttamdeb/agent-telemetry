@@ -4,7 +4,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const {getHtml} = require('../src/webview');
-const {compact, money, forest, composition, effortLabel} = require('../media/desk');
+const {compact, money, forest, composition, effortLabel, sourceLabel, sessionUsageDisplay,
+  summaryUsageDisplay, modelDisplay, contextSnapshot} = require('../media/desk');
 const {makeState, scenario} = require('./fixtures/desk-state');
 const {createServer, page} = require('./preview-webview');
 const nonce = 'test-webview-nonce-2026';
@@ -53,6 +54,45 @@ test('token composition is disjoint and handles unavailable numeric fields', () 
   assert.deepEqual(composition({input: NaN, output: -1, cache_read: Infinity}).map(part => part.value), [0, 0, 0, 0]);
   assert.equal(compact(3322000), '3.32M'); assert.equal(money(.001), '<$0.01'); assert.equal(money(0), '$0.00');
 });
+test('Cursor editor rows and summary distinguish unknown, partial and unavailable usage', () => {
+  const unavailable = sessionUsageDisplay({source: 'cursor', usage_status: 'unavailable', cost_status: 'unavailable', tokens: 0, cost: 0});
+  assert.equal(unavailable.tokens, '—');
+  assert.equal(unavailable.cost, 'Unavailable');
+  assert.equal(unavailable.tokenLabel, 'unavailable');
+  assert.match(unavailable.note, /not a known zero/);
+
+  const partial = sessionUsageDisplay({source: 'cursor', usage_status: 'partial', cost_status: 'partial', tokens: 240, cost: .001});
+  assert.equal(partial.tokens, '240');
+  assert.equal(partial.cost, 'Partial · <$0.01');
+  assert.equal(partial.tokenLabel, 'partial tokens');
+  assert.match(partial.note, /recorded values only/);
+
+  const unpriced = sessionUsageDisplay({source: 'cursor', usage_status: 'recorded', cost_status: 'unavailable', tokens: 240, cost: 0});
+  assert.equal(unpriced.tokens, '240');
+  assert.equal(unpriced.cost, 'Unavailable');
+
+  const legacy = sessionUsageDisplay({source: 'cursor', tokens: 0, cost: 0});
+  assert.equal(legacy.usage, 'unknown');
+  assert.equal(legacy.tokens, '—');
+  assert.equal(legacy.cost, 'Not recorded');
+  assert.match(legacy.note, /older session entry/);
+
+  const mixed = summaryUsageDisplay({usage_status: 'partial', cost_status: 'partial', tokens: 200, cost: .002});
+  assert.equal(mixed.tokens, '200');
+  assert.equal(mixed.cost, 'Partial · <$0.01');
+  assert.match(mixed.note, /lower bounds/);
+  const onlyMetadata = summaryUsageDisplay({usage_status: 'unavailable', cost_status: 'unavailable', tokens: 0, cost: 0});
+  assert.equal(onlyMetadata.tokens, '—');
+  assert.equal(onlyMetadata.cost, 'Unavailable');
+
+  assert.equal(modelDisplay({source: 'cursor', model: 'Unknown', model_status: 'unavailable', current_model: 'Last chosen model'}), 'Unavailable');
+  assert.equal(contextSnapshot({current_context_tokens: 12000, current_context_percent: 24,
+    current_context_limit: 50000, current_context_asof: '2026-10-25T11:45:00Z'}), '12K used · 24% · 50K limit · as of Oct 25');
+  const fields = composition({source: 'cursor', usage_status: 'partial', input: 40, output: 15, cache_read: 0, cache_write: 0,
+    usage_availability: {input_output: 'partial', cache_read: 'unavailable', cache_write: 'unavailable'}});
+  assert.deepEqual(fields.map(part => part.status), ['partial', 'partial', 'unavailable', 'unavailable']);
+  assert.deepEqual(fields.map(part => part.value), [40, 15, 0, 0]);
+});
 test('shell offers exact session controls, accessible scope/range and truthful onboarding', () => {
   const html = getHtml(webview, uri, nonce);
   for (const label of ['All sessions', 'Main agents', 'Subagents', 'Project scope', 'Date range', 'Selected session']) assert.ok(html.includes(label));
@@ -67,6 +107,10 @@ test('recorded effort uses the app labels, including Ultra and partial evidence'
   assert.equal(['ultra', 'unrecorded'].map(effortLabel).join(' · '), 'Ultra · Not recorded');
   assert.equal(effortLabel(null), 'Not recorded');
 });
+test('Antigravity sessions use their own source label in the editor UI', () => {
+  assert.equal(sourceLabel('antigravity'), 'Antigravity');
+  assert.equal(sourceLabel('gemini'), 'gemini', 'Model/provider names do not replace the tool source');
+});
 test('webview uses text DOM, exact message actions and no telemetry storage', () => {
   const js = fs.readFileSync(path.join(__dirname, '../media/desk.js'), 'utf8');
   assert.doesNotMatch(js, /\.innerHTML|insertAdjacentHTML|\beval\(|new Function|\bfetch\(|XMLHttpRequest|localStorage|sessionStorage/);
@@ -74,6 +118,14 @@ test('webview uses text DOM, exact message actions and no telemetry storage', ()
   assert.match(js, /ArrowDown/); assert.match(js, /aria-expanded/); assert.match(js, /preventScroll/);
   assert.match(js, /Start local monitoring/);
   assert.match(js, /sessionFilter/);
+  assert.match(js, /Current composer setting · whole session/);
+  assert.match(js, /Context is a saved snapshot, not billed tokens/);
+});
+test('webview offers the desktop app beside Set up Python and never holds a URL to open', () => {
+  const js = fs.readFileSync(path.join(__dirname, '../media/desk.js'), 'utf8');
+  assert.match(js, /action\('Set up Python', 'setupPython'\), action\('Get the desktop app', 'getDesktopApp'\)/);
+  assert.match(js, /const allowed = \[[^\]]*'getDesktopApp'[^\]]*\]/);
+  assert.doesNotMatch(js, /https?:\/\/(?!www\.w3\.org\/2000\/svg)/, 'the host owns the download URL; the webview posts a bare action');
 });
 test('preview scenarios are fake, exercise partial and stale evidence, and escape injected text', () => {
   assert.equal(scenario('stale').connection.status, 'offline');
