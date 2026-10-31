@@ -46,9 +46,9 @@ These builds are unsigned/unnotarized. macOS may require **System Settings → P
 Security → Open Anyway**; Windows SmartScreen may require **More info → Run anyway**.
 [Product and install page](https://agenttelemetry-app.vercel.app/) ·
 [All releases](https://github.com/uttamdeb/agent-telemetry/releases) ·
-[What's new in 2.1.0](docs/releases/v2.1.0.md) ·
+[What's new in 2.2.0](docs/releases/v2.2.0.md) ·
 [SHA-256 checksums in release assets](https://github.com/uttamdeb/agent-telemetry/releases/latest) ·
-[PyPI package 2.1.0](https://pypi.org/project/agenttelemetry-app/2.1.0/)
+[PyPI package 2.2.0](https://pypi.org/project/agenttelemetry-app/2.2.0/)
 
 ---
 
