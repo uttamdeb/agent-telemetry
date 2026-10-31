@@ -14,6 +14,10 @@ AgentTelemetry also ships as a **macOS menu bar app** and a **Windows tray app**
 
 **[Download the latest release](https://github.com/uttamdeb/agent-telemetry/releases/latest)** for macOS 13+ (Apple Silicon or Intel DMG) or Windows 10/11 (x64 installer), or see the [product and install page](https://agenttelemetry-app.vercel.app/). These builds are unsigned/unnotarized: macOS may require **System Settings → Privacy & Security → Open Anyway**, and Windows SmartScreen may require **More info → Run anyway**. You can also run **AgentTelemetry: Get the desktop app** from the Command Palette.
 
+## AgentTelemetry Pro
+
+This extension and the desktop apps are free and open source. **[AgentTelemetry Pro](https://agenttelemetry-app.vercel.app/#pro)** is an optional add-on with a sign-in: your dashboard in any browser or on your phone, chat with your running Claude Code and Codex sessions, answering Claude Code's permission prompts from your phone, sessions that message each other across your devices, Optimize, and the local MCP bridge. See [Free vs Pro](https://agenttelemetry-app.vercel.app/#pro).
+
 ## Follow the work
 
 - **Start with your workspace.** The brief matches recorded absolute working directories to your open local folders. Two projects with the same folder name do not get merged by name. Switch to **All local projects** to include history without a recorded workspace path.
@@ -128,7 +132,7 @@ The extension performs no account lookup, provider model call, credential read o
 ## More ways to get AgentTelemetry
 
 - **Desktop apps** for [macOS and Windows](https://github.com/uttamdeb/agent-telemetry/releases/latest), with their own Python.
-- **[Product and install page](https://agenttelemetry-app.vercel.app/)**.
+- **[Product and install page](https://agenttelemetry-app.vercel.app/)**, including [AgentTelemetry Pro](https://agenttelemetry-app.vercel.app/#pro).
 - **This extension** on the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=agenttelemetry-team.agenttelemetry) and on [Open VSX](https://open-vsx.org/extension/agenttelemetry-team/agenttelemetry).
 - **Browser dashboard and source**: the [Python package or source checkout](https://github.com/uttamdeb/agent-telemetry#quick-start) on GitHub.
 

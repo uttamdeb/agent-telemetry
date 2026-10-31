@@ -23,6 +23,12 @@ Covers **Claude Code · Claude Desktop · Codex · GitHub Copilot · Cursor · A
 [Browser dashboard (Python or source)](#quick-start) ·
 [Product page](https://agenttelemetry-app.vercel.app/)
 
+**AgentTelemetry Pro (optional).** Everything above stays free, open source and local. [AgentTelemetry
+Pro](https://agenttelemetry-app.vercel.app/#pro) is a separate add-on with a sign-in: your dashboard in any browser or
+on your phone; chat with your running Claude Code and Codex sessions from the web, your phone or the Pro app on Mac
+and Windows; answering Claude Code's permission prompts from your phone; sessions that message each other across
+your devices; Optimize; and the local MCP bridge. See [Free vs Pro](https://agenttelemetry-app.vercel.app/#pro).
+
 ## Download the app
 
 Choose the installer for your platform from the release's **Assets** section.
