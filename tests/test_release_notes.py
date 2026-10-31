@@ -277,6 +277,13 @@ class ReleaseNotesTests(unittest.TestCase):
             RN._API_ROOT + "/releases/tags/v2.0.0",
         ])
 
+    def test_packaged_version_links_to_the_v_prefixed_release_page(self):
+        # Packaged apps (the DMG, the EXE, Pro) report "2.2.0"; the public tag is v2.2.0.
+        for version in ("2.2.0", "v2.2.0"):
+            release = self.client(version).status()["release"]
+            self.assertEqual(release["url"], RN._RELEASE_ROOT + "v2.2.0")
+            self.assertEqual(release["availability"], "unavailable")
+
     def test_network_and_rate_limit_failures_keep_cached_notes_and_safe_errors(self):
         client = self.client("v2.0.0")
         self.api(_release("v2.0.0", "Cached release"))
