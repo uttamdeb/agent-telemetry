@@ -95,3 +95,42 @@ for (const [status, type, code] of [[302, 'application/json', 'HTTP_302'], [200,
     assert.equal(result, true, 'rejected local response must not leave an unbounded draining socket');
   });
 }
+test('the Agent desk reads the AgentTelemetry Pro app when the free service is not running, and moves back when it is', async () => {
+  assert.equal(healthIdentity({service: 'agent-telemetry-pro', ready: true, version: '2.2.0'}).service, 'agent-telemetry-pro');
+  const listening = new Map([[7888, {service: 'agent-telemetry-pro', ready: true, version: '2.2.0', distribution: 'pro'}]]);
+  const asked = [];
+  const transport = async (port, route) => {
+    asked.push([port, route]);
+    if (route !== '/api/health') return {revision: 'r'};
+    if (!listening.has(port)) throw Object.assign(new Error('not running'), {code: 'ECONNREFUSED'});
+    return listening.get(port);
+  };
+  const client = new LocalClient(7878, transport, {fallbackPorts: [7888, 7889]});
+  assert.equal((await client.health()).service, 'agent-telemetry-pro');
+  assert.equal(client.endpoint, 'http://127.0.0.1:7888');
+  await client.sync();
+  assert.deepEqual(asked.at(-1), [7888, '/api/sync'], 'later requests go to the Pro service');
+
+  listening.set(7878, {service: 'agent-telemetry', ready: true, version: '2.2.0'});
+  assert.equal((await client.health()).service, 'agent-telemetry', 'the free service wins as soon as it runs');
+  assert.equal(client.port, 7878);
+  assert.equal(client.configuredPort, 7878);
+});
+
+test('the fallback is only the Pro app: never another program, never after another failure, never on a chosen port', async () => {
+  const refused = () => Object.assign(new Error('not running'), {code: 'ECONNREFUSED'});
+  const other = new LocalClient(7878, async (port) => { if (port === 7878) throw refused(); return {service: 'agent-telemetry', ready: true, version: '1'}; }, {fallbackPorts: [7888]});
+  await assert.rejects(other.health(), {code: 'ECONNREFUSED'});
+  assert.equal(other.port, 7878);
+
+  let probed = false;
+  const foreign = new LocalClient(7878, async (port) => {
+    if (port === 7878) throw Object.assign(new Error('x'), {code: 'IDENTITY'});
+    probed = true; return {service: 'agent-telemetry-pro', ready: true, version: '1'};
+  }, {fallbackPorts: [7888]});
+  await assert.rejects(foreign.health(), {code: 'IDENTITY'});
+  assert.equal(probed, false, 'a port held by something else is reported, not worked around');
+
+  const chosen = new LocalClient(9000, async () => { throw refused(); });
+  await assert.rejects(chosen.health(), {code: 'ECONNREFUSED'});
+});

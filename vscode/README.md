@@ -59,7 +59,7 @@ a separate product from the standalone Antigravity IDE.
 
 ## First connection
 
-If an AgentTelemetry service is already listening on `127.0.0.1:7878`, the extension identifies it and attaches automatically. Attaching requires no new Python process and uses that service's existing ledger. It never stops a service it finds.
+If an AgentTelemetry service is already listening on `127.0.0.1:7878`, the extension identifies it and attaches automatically. Attaching requires no new Python process and uses that service's existing ledger. It never stops a service it finds. If nothing listens there but the **AgentTelemetry Pro** app is running, the Agent desk reads the Pro app's local service instead (port 7888 for Stable, 7889 for Beta); the free service always wins when it runs, and a port you set yourself is the only one used.
 
 If no service is running, choose **Start local monitoring** in the Agent desk or **AgentTelemetry: Start monitoring**. The first start explains that the shared local service **keeps running after the editor closes**, so other editor windows and native clients can use it. Starting is explicit; installing or opening the extension does not start Python automatically.
 

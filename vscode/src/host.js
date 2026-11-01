@@ -56,6 +56,11 @@ class Monitor {
     const current = () => !this.disposed && generation === this.generation && client === this.client;
     try {
       const health = await client.health(); if (!current()) return;
+      // The free service and the Pro app keep separate ledgers: moving between them starts the figures afresh.
+      if (this.servedBy && this.servedBy !== client.endpoint) { this.revision = null; this.baseline = null; this.state.snapshot = null; this.state.since = null; this.state.selected_session = null; }
+      this.servedBy = client.endpoint;
+      this.state.connection.endpoint = client.endpoint;
+      this.state.connection.pro = health.service === 'agent-telemetry-pro';
       this.state.connection.version = health.version;
       if (!health.ready) { this.state.connection.status = 'starting'; this.state.connection.message = 'AgentTelemetry is reading local logs. The first scan can take a minute.'; this.emit(); return; }
       if (force) { await client.refresh(); if (!current()) return; }
@@ -69,7 +74,8 @@ class Monitor {
         // Use the revision of the returned snapshot: a tick may change mid-request.
         this.revision = snapshot.revision;
       }
-      this.state.connection = {...this.state.connection, status: 'connected', code: '', message: this.state.remote ? 'This editor is remote. Showing this computer only; remote workspace attribution is unavailable.' : this.state.scope === 'all' ? 'Local machine only. Usage from shared devices is excluded.' : '', last_success: Date.now() / 1000};
+      const via = this.state.connection.pro ? ' Read from the AgentTelemetry Pro app on this computer.' : '';
+      this.state.connection = {...this.state.connection, status: 'connected', code: '', message: `${this.state.remote ? 'This editor is remote. Showing this computer only; remote workspace attribution is unavailable.' : this.state.scope === 'all' ? 'Local machine only. Usage from shared devices is excluded.' : ''}${via}`.trim(), last_success: Date.now() / 1000};
       this.emit();
     } catch (error) {
       if (current()) { this.state.connection.status = error.code === 'ECONNREFUSED' ? 'offline' : 'error'; this.state.connection.code = typeof error.code === 'string' ? error.code : 'ERROR'; this.state.connection.message = `${error.message}${this.state.snapshot ? ' Showing the last successful snapshot; figures are stale.' : ''}`; this.emit(); }

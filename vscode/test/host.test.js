@@ -93,3 +93,18 @@ test('shared service identity reset does not become newly recorded usage', async
   client.revision = 'other-service:2'; client.value = snapshot(200, 'other-service:2'); await monitor.poll();
   assert.equal(monitor.state.since.tokens, 0); assert.equal(monitor.state.since.reset, true);
 });
+test('moving between the free service and the Pro app starts the figures afresh and says where they come from', async () => {
+  const client = fakeClient(); const monitor = new Monitor({client});
+  await monitor.poll();
+  assert.equal(monitor.state.connection.pro, false);
+  monitor.resetBaseline();
+  client.endpoint = 'http://127.0.0.1:7888';
+  client.health = async function health() { this.calls.push('health'); return {service: 'agent-telemetry-pro', ready: true, version: '2.2.0'}; };
+  client.calls.length = 0;
+  await monitor.poll();
+  assert.deepEqual(client.calls, ['health', 'sync', 'snapshot'], 'same revision, but a different ledger: read again');
+  assert.equal(monitor.state.connection.pro, true);
+  assert.equal(monitor.state.connection.endpoint, 'http://127.0.0.1:7888');
+  assert.match(monitor.state.connection.message, /AgentTelemetry Pro app/);
+  assert.equal(monitor.state.since.tokens, 0, 'the counter starts afresh');
+});
