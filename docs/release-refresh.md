@@ -37,3 +37,7 @@ release will need: the 2.2.0 betas are extension **2.1.1**, 2.1.2, …, publishe
 **2.2.0**, which is higher, so beta testers move to it automatically. People opt in with "Switch to
 Pre-Release Version". The bundled backend reports the app version (`pyproject.toml`), not the
 extension's; `BUILD-INFO.json` records both.
+
+From 2.2.1 the owner numbers the extension's pre-release with the app version: the 2.2.1 betas ship extension
+**2.2.1** as a pre-release. A version can be published only once, so the stable extension that follows must be higher
+(2.2.2 or later), even if the app itself is released as 2.2.1.
