@@ -126,7 +126,7 @@ function startupFailure(logFile) {
   return new ServiceError('AgentTelemetry exited before it could start. Check the private startup log at ' + logFile + ' and retry after fixing the Python setup.', 'BACKEND_START');
 }
 async function startBackend({client, extensionPath, configuredPython = '', roots = [], stillAllowed = () => true}) {
-  if (client.port !== 7878) throw new ServiceError('Start monitoring uses shared port 7878. Restore the default port, or attach to your existing service.', 'CONFIG');
+  if ((client.configuredPort ?? client.port) !== 7878) throw new ServiceError('Start monitoring uses shared port 7878. Restore the default port, or attach to your existing service.', 'CONFIG');
   const backend = path.join(extensionPath, 'backend');
   const script = path.join(backend, 'dashboard.py');
   if (!fs.existsSync(script)) throw new ServiceError('The bundled backend is missing. Reinstall the AgentTelemetry extension.', 'BACKEND');

@@ -3,7 +3,9 @@ const vscode = require('vscode');
 const path = require('node:path');
 const fs = require('node:fs');
 const crypto = require('node:crypto');
-const {LocalClient} = require('./client');
+const {LocalClient, PRO_PORTS} = require('./client');
+// The default port also finds the AgentTelemetry Pro app's service when the free one isn't running.
+const clientFor = port => new LocalClient(port, undefined, {fallbackPorts: port === 7878 ? PRO_PORTS : []});
 const {Monitor, validMessage} = require('./host');
 const {startBackend} = require('./runtime');
 const {getHtml} = require('./webview');
@@ -88,7 +90,7 @@ class ActivityTree {
     if (row) return row.children || [];
     const state = this.state; if (!state) return [];
     const connected = state.connection.status === 'connected';
-    const rows = [{id: 'connection', label: state.connection.code === 'UPGRADE' ? 'Backend upgrade needed' : connected ? 'Connected locally' : state.connection.status === 'starting' ? 'Reading local logs…' : state.snapshot ? 'Disconnected · stale figures' : 'Local monitoring is offline', description: state.connection.endpoint, tooltip: state.connection.message || state.connection.endpoint, icon: connected ? 'plug' : 'warning', action: state.connection.status === 'offline' ? 'start' : 'open'}];
+    const rows = [{id: 'connection', label: state.connection.code === 'UPGRADE' ? 'Backend upgrade needed' : connected ? (state.connection.pro ? 'Connected to AgentTelemetry Pro' : 'Connected locally') : state.connection.status === 'starting' ? 'Reading local logs…' : state.snapshot ? 'Disconnected · stale figures' : 'Local monitoring is offline', description: state.connection.endpoint, tooltip: state.connection.message || state.connection.endpoint, icon: connected ? 'plug' : 'warning', action: state.connection.status === 'offline' ? 'start' : 'open'}];
     if (state.remote) rows.push({id: 'remote', label: 'This computer only', description: 'Remote workspace excluded', icon: 'remote', tooltip: 'The extension runs locally. Remote workspaces and remote devices are not included.'});
     const snapshot = state.snapshot;
     if (!snapshot) { rows.push(state.connection.code === 'UPGRADE' ? {id: 'setup', label: 'Upgrade the local backend', action: 'openBrowser', icon: 'info', tooltip: state.connection.message} : {id: 'setup', label: state.trusted ? 'Start monitoring' : 'Trust workspace to start', action: 'start', icon: 'play'}); return rows; }
@@ -120,7 +122,7 @@ function activate(context) {
   const tree = new ActivityTree();
   const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
   status.name = 'AgentTelemetry'; status.command = COMMAND + 'open';
-  const monitor = new Monitor({client: new LocalClient(appSetting('port', 7878)), roots: localRoots(), remote: Boolean(vscode.env.remoteName), trusted: vscode.workspace.isTrusted, editorName: vscode.env.appName, onChange: state => {
+  const monitor = new Monitor({client: clientFor(appSetting('port', 7878)), roots: localRoots(), remote: Boolean(vscode.env.remoteName), trusted: vscode.workspace.isTrusted, editorName: vscode.env.appName, onChange: state => {
     tree.update(state);
     if (panel) void panel.webview.postMessage({type: 'state', state});
     const snapshot = state.snapshot;
@@ -205,7 +207,7 @@ function activate(context) {
   for (const [name, handler] of Object.entries({open, refresh: () => monitor.poll(true), start, openBrowser: browser, resetBaseline: () => monitor.resetBaseline(), setupPython, getDesktopApp, settings})) context.subscriptions.push(vscode.commands.registerCommand(COMMAND + name, handler));
   context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(() => void monitor.setWorkspace(localRoots(), Boolean(vscode.env.remoteName), vscode.workspace.isTrusted)));
   context.subscriptions.push(vscode.workspace.onDidGrantWorkspaceTrust(() => void monitor.setWorkspace(localRoots(), Boolean(vscode.env.remoteName), true)));
-  context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(event => { if (event.affectsConfiguration('agentTelemetry')) { const port = appSetting('port', 7878); if (port !== monitor.client.port) void monitor.setClient(new LocalClient(port)); else monitor.emit(); } }));
+  context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(event => { if (event.affectsConfiguration('agentTelemetry')) { const port = appSetting('port', 7878); if (port !== monitor.client.configuredPort) void monitor.setClient(clientFor(port)); else monitor.emit(); } }));
   const timer = setInterval(() => void monitor.poll(), 1000);
   context.subscriptions.push({dispose() {clearInterval(timer); monitor.dispose(); if (panel) panel.dispose();}});
   active = monitor; monitor.emit(); void monitor.poll();

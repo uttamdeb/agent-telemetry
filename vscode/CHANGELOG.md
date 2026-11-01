@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.2.1 (pre-release)
+
+- **Works with the AgentTelemetry Pro app.** When no free AgentTelemetry service is running on the default port, the Agent desk reads the Pro app's local service instead (Stable on port 7888, Beta on 7889) and says so ("Connected to AgentTelemetry Pro"). The free service always wins when it runs; moving between the two starts the figures afresh, because each keeps its own history. A port you set yourself is the only one used. The extension never starts or stops the Pro service.
+
 ## 2.2.0
 
 - The stable release of everything in 2.1.1: **Active now** in the sidebar, **Get the desktop app**, and the AgentTelemetry 2.2.0 backend (Antigravity and first-class Cursor telemetry, Codex's compressed logs, usage kept when a tool deletes it from a log).
