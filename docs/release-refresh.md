@@ -41,3 +41,8 @@ extension's; `BUILD-INFO.json` records both.
 From 2.2.1 the owner numbers the extension's pre-release with the app version: the 2.2.1 betas ship extension
 **2.2.1** as a pre-release. A version can be published only once, so the stable extension that follows must be higher
 (2.2.2 or later), even if the app itself is released as 2.2.1.
+
+Open VSX also has extension **2.2.2**, a pre-release of the 2.2.1 code. The app moved to **2.2.2** on `beta` with no
+open-source release, so AgentTelemetry Pro 2.2.2 (which must match the open-source version it is built on) could ship;
+the extension stays 2.2.1 meanwhile. Pro's build accepts an extension at or below the app version, so the next
+extension (2.2.3 or later) needs the app at 2.2.3 or later too: the next open-source release is 2.2.3, not 2.2.2.
