@@ -700,3 +700,29 @@ console.log('Frontend regression checks passed: pricing, precision, scope, model
   assert.doesNotMatch(check(`sessionModelHTML({...old,model:'<img src=x>',models:['<img src=x>']})`),/<img src=x>/,'Labels and tooltips remain escaped');
   console.log('Sessions model labels follow date/model/provider/precision scope; zero activity, historical limitations and bounded lists stay honest.');
 }
+
+{ // The theme button shows the mode in use: sun (Light), moon (Dark), half and half (Auto).
+  const use={href:null,setAttribute(name,value){if(name==='href')this.href=value;}};
+  const button={title:'',label:'',setAttribute(name,value){if(name==='aria-label')this.label=value;},querySelector:()=>use};
+  const docRoot={dataset:{},removeAttribute(name){delete this.dataset[name.replace('data-','')];}};
+  const store={};
+  const themed=vm.createContext({console,RAW:null,
+    document:{documentElement:docRoot,getElementById:id=>id==='themeBtn'?button:null},
+    localStorage:{getItem:key=>store[key]??null,setItem:(key,value)=>{store[key]=value;}},
+    matchMedia:()=>({matches:false})});
+  const core=fs.readFileSync(path.join(root,'static/core.js'),'utf8');
+  vm.runInContext(core.slice(core.indexOf('/* ---------- theme ---------- */'),core.indexOf('/* ---------- dropdown plumbing ---------- */')),themed);
+  for(const [mode,icon,name] of [['light','#i-theme-light','Light'],['dark','#i-theme-dark','Dark'],['auto','#i-theme-auto','Auto']]){
+    vm.runInContext(`applyTheme(${JSON.stringify(mode)})`,themed);
+    assert.equal(use.href,icon,mode);
+    assert.equal(button.title,`Theme: ${name} (t)`);
+    assert.equal(button.label,`Theme: ${name}. Change theme`);
+  }
+  vm.runInContext('applyTheme("light"); cycleTheme()',themed);
+  assert.equal(use.href,'#i-theme-dark','Light is followed by Dark');
+  vm.runInContext('applyTheme("<x>")',themed);
+  assert.equal(use.href,'#i-theme-auto','an unknown mode from a link shows Auto');
+  const html=fs.readFileSync(path.join(root,'index.html'),'utf8');
+  for(const id of ['i-theme-auto','i-theme-light','i-theme-dark']) assert.ok(html.includes(`<symbol id="${id}"`),id);
+  console.log('Theme button shows a different icon for Light, Dark and Auto.');
+}

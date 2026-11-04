@@ -574,7 +574,13 @@ function applyTheme(mode){
     matchMedia("(prefers-color-scheme: dark)").matches);
   root.dataset.resolved = dark?"dark":"light";
   try{ localStorage.setItem("aiu.theme", mode); }catch(e){}
-  document.getElementById("themeBtn").title = "Theme: "+mode+" (t)";
+  // The button shows the mode in use: a sun for Light, a moon for Dark, half and half for Auto (follow the system).
+  const shown = mode==="light"||mode==="dark" ? mode : "auto";
+  const name = {auto:"Auto", light:"Light", dark:"Dark"}[shown];
+  const btn=document.getElementById("themeBtn");
+  btn.title = "Theme: "+name+" (t)";
+  btn.setAttribute("aria-label", "Theme: "+name+". Change theme");
+  btn.querySelector("use").setAttribute("href", "#i-theme-"+shown);
   if(RAW) renderAll();
 }
 function cycleTheme(){
