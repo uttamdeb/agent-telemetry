@@ -46,3 +46,7 @@ Open VSX also has extension **2.2.2**, a pre-release of the 2.2.1 code. The app 
 open-source release, so AgentTelemetry Pro 2.2.2 (which must match the open-source version it is built on) could ship;
 the extension stays 2.2.1 meanwhile. Pro's build accepts an extension at or below the app version, so the next
 extension (2.2.3 or later) needs the app at 2.2.3 or later too: the next open-source release is 2.2.3, not 2.2.2.
+
+The 2.2.3 betas (`v2.2.3-beta.<n>`) ship the app and the extension as **2.2.3** together, the extension as a
+pre-release on both stores (packaged with `vsce package --pre-release`, because `ovsx publish --pre-release` ignores the
+flag for a VSIX that was packaged without it). The stable extension that follows must be 2.2.4 or later.

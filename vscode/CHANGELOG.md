@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.2.3 (pre-release)
+
+- The bundled AgentTelemetry 2.2.3 backend: the dashboard's theme button now shows a sun for Light, a moon for Dark and a half-filled circle for Auto, and its label names the current mode.
+- Version 2.2.2 was the 2.2.1 extension published again as a pre-release on Open VSX only; 2.2.3 is the next version on both stores.
+
 ## 2.2.1 (pre-release)
 
 - **Works with the AgentTelemetry Pro app.** When no free AgentTelemetry service is running on the default port, the Agent desk reads the Pro app's local service instead (Stable on port 7888, Beta on 7889) and says so ("Connected to AgentTelemetry Pro"). The free service always wins when it runs; moving between the two starts the figures afresh, because each keeps its own history. A port you set yourself is the only one used. The extension never starts or stops the Pro service.
