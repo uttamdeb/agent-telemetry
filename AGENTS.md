@@ -884,6 +884,12 @@ routine migration: it discards the durable history.
 A new `claude-<tier>-<n>-<m>` id normalises by itself, so only the price row is missing and
 nothing warns: the model just costs $0 (Sonnet 5.5 did, for its first day). Diff the vendor's
 whole table against `PRICING`, and look for all-zero rows in the payload's `prices`.
+Other tools' spellings (OpenCode, Hermes, Cursor, a Copilot model id) go through `_canonicalize`,
+whose Claude tier list must name every tier: Fable and Mythos were missing until 5.2, so those
+tools priced them at $0. Adding them needed no `CACHE_VERSION` bump: `price_of()` canonicalizes
+at request time, so costs were right at once, and the store-based sources reparse whole on
+their next change, which renames their rows. Check the vendor's fast-mode table too
+(`FAST_PRICING`): a model without a row there prices its fast requests at $0.
 
 **A vendor changed a price** → the new tuple goes in `PRICING` (always today's rate) and the old one moves into `PRICE_HISTORY` with
 the last date it applied. `price_of(model, date)` picks by each record's date, so a cut
