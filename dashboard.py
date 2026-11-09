@@ -1808,14 +1808,16 @@ def _build_payload_locked():
         "pricing_long_context": {m: list(P.price_of(m, long_context=True))
             for m in set(P.LONG_CONTEXT_PRICING) | set(model_meta)
             if P.price_of(m, long_context=True) != P.price_of(m)},
-        "pricing_note": ("Anthropic costs use current list pricing (Fable 5 $10/$50, Opus 5.5 "
+        "pricing_note": ("Anthropic costs use current list pricing (Fable & Mythos 5.2 $8/$40, "
+                         "Fable & Mythos 5/5.1 $10/$50, Opus 5.5 "
                          "$4/$20, Opus 5 & 4.x $5/$25, Sonnet 5 & 5.5 $2/$10, Sonnet 4.x "
                          "$3/$15, Haiku 4.5 $1/$5 per Mtok). Haiku 5.5 uses $0.10/$0.50 "
                          "up to 100K prompt tokens and $0.50/$2.50 above 100K, including cache "
                          "reads/writes in each request's threshold; available Claude logs retain "
                          "that split, while older archives/peers and other tools without request "
                          "detail use the short-prompt rate. Cache write is billed at 1.25x (5-min) "
-                         "/ 2x (1-hour) input and cache read at 0.1x (0.05x on Opus 5.5, 0.025x on Fable 5.1); OpenAI/"
+                         "/ 2x (1-hour) input and cache read at 0.1x (0.05x on Opus 5.5 and on "
+                         "Sonnet 5.5 from 2026-10-07, 0.025x on Fable & Mythos 5.1/5.2); OpenAI/"
                          "Codex/Copilot/Cursor prices are estimates. Codex GPT-5.4/5.5/5.6/6 use "
                          "verified OpenAI list rates (e.g. GPT-6 Sol $2/$10, cached $0.20; GPT-6.1 Sol cached $0.10), each "
                          "day priced at the rate in force then — OpenAI cut GPT-5.6 prices on "

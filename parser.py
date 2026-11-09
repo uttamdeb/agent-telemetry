@@ -200,23 +200,27 @@ EDITOR_LABEL = {
 #   (input, output, cache_write_5m, cache_write_1h, cache_read)
 # Anthropic prices verified against the current model table (Opus 4.x = $5/$25,
 # NOT the old $15/$75 — Opus pricing dropped with 4.5). Cache write = 1.25x input
-# (5-min TTL) / 2x input (1-hour TTL); cache read = 0.1x input, EXCEPT Opus 5.5
-# (0.05x) and Fable/Mythos 5.1 (0.025x) — so the cache_read slot is written out per
-# row, never derived from input. Most OpenAI rows have no cache-write tier
+# (5-min TTL) / 2x input (1-hour TTL); cache read = 0.1x input, EXCEPT Opus 5.5 and
+# Sonnet 5.5 (0.05x) and Fable/Mythos 5.1 and 5.2 (0.025x) — so the cache_read slot is
+# written out per row, never derived from input. Most OpenAI rows have no cache-write tier
 # (cw5/cw1 = 0, billed at the input rate); cached input goes in the cache_read slot.
 # Codex/Copilot/Cursor are subscription-billed, so their $ is an API-equivalent
 # estimate, not an actual charge. Costs are computed at request time — edit
 # freely, no re-parse needed.
 # ---------------------------------------------------------------------------
 PRICING = {
-    # Anthropic Claude 5 family — verified against platform.claude.com pricing (2026-09-29).
+    # Anthropic Claude 5 family — verified against platform.claude.com pricing (2026-11-10).
+    # 5.2 (launched 2026-11-09) is $8/$40 with 5.1's 0.025x cache read ($0.20).
+    "Claude Fable 5.2": (8, 40, 10, 16, 0.20),
+    "Claude Mythos 5.2": (8, 40, 10, 16, 0.20),
     # 5.1 keeps 5's $10/$50 but cuts cache reads to 0.025x input ($0.25, not $1).
     "Claude Fable 5.1": (10, 50, 12.5, 20, 0.25),
     "Claude Mythos 5.1": (10, 50, 12.5, 20, 0.25),
     "Claude Fable 5": (10, 50, 12.5, 20, 1.0),
     "Claude Mythos 5": (10, 50, 12.5, 20, 1.0),
-    # Sonnet 5.5 lists the same $2/$10 as Sonnet 5, with the usual 0.1x cache read.
-    "Claude Sonnet 5.5": (2, 10, 2.5, 4, 0.20),
+    # Sonnet 5.5 lists the same $2/$10 as Sonnet 5. Its cache read was cut from 0.1x to
+    # 0.05x ($0.10) on 2026-10-07 (Anthropic's release notes); the old rate is in PRICE_HISTORY.
+    "Claude Sonnet 5.5": (2, 10, 2.5, 4, 0.10),
     # Sonnet 5's $2/$10 launch "intro" rate became its standard price — Anthropic
     # cancelled the $3/$15 increase scheduled for 2026-09-01, so there's no date split.
     "Claude Sonnet 5": (2, 10, 2.5, 4, 0.20),
@@ -346,6 +350,9 @@ PRICE_HISTORY = {
     # "Starting today", 2026-08-21: Sol -20% "for the next 3 months"
     # (community.openai.com/t/1391726).
     "GPT-5.6 Sol": [("2026-08-20", (5, 30, 0, 0, 0.50))],
+    # 2026-10-07: Sonnet 5.5 cache reads $0.20 -> $0.10; nothing else changed
+    # (platform.claude.com release notes).
+    "Claude Sonnet 5.5": [("2026-10-06", (2, 10, 2.5, 4, 0.20))],
 }
 
 
@@ -353,9 +360,12 @@ PRICE_HISTORY = {
 # model name so they show as their own row and price without a new record field.
 FAST_SUFFIX = " (fast)"
 US_SUFFIX = " (US)"
-# Fast mode's own rate card (platform.claude.com pricing, 2026-09): the cache
-# multipliers apply on top of the fast input rate, same as standard speed.
+# Fast mode's own rate card (platform.claude.com pricing, 2026-09; Fable/Mythos 5.2
+# added 2026-11-10): the cache multipliers apply on top of the fast input rate, same as
+# standard speed.
 FAST_PRICING = {
+    "Claude Fable 5.2": (16, 80, 20, 32, 0.40),
+    "Claude Mythos 5.2": (16, 80, 20, 32, 0.40),
     "Claude Opus 5.5": (8, 40, 10, 16, 0.40),
     "Claude Opus 5": (10, 50, 12.5, 20, 1.0),
     "Claude Opus 4.8": (10, 50, 12.5, 20, 1.0),
@@ -465,8 +475,11 @@ def _canonicalize(name):
     if "raptor" in low:
         return "Raptor Mini"
 
-    # Claude — "Claude Sonnet 4.5", "claude-sonnet-4-5", "claude-3.5-sonnet"
-    tier = next((t.capitalize() for t in ("opus", "sonnet", "haiku") if t in low), None)
+    # Claude — "Claude Sonnet 4.5", "claude-sonnet-4-5", "claude-3.5-sonnet", "claude-fable-5-2".
+    # Fable and Mythos were missing here, so OpenCode, Hermes and Cursor ids for them priced at $0.
+    if "claude" in low and "mythos" in low and "preview" in low:
+        return "Claude Mythos Preview"
+    tier = next((t.capitalize() for t in ("opus", "sonnet", "haiku", "fable", "mythos") if t in low), None)
     if "claude" in low and tier:
         nums = re.findall(r"\d+(?:\.\d+)?", low)
         ver = ""
