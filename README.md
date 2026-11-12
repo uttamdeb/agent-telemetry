@@ -496,12 +496,12 @@ dollars**, so cost is always derived. Rates live in `parser.py → PRICING` as
   when it runs through supported tools, at the Standard rate for prompts up to 200K
   tokens. Live, TTS, image and embedding models are not priced, and nor are the higher Pro rate
   for longer prompts or audio input. The Gemini CLI itself writes no token counts to read.
-- **Gemini 4 Argon** is recognized across the supported tools and uses Google's
-  [announced introductory rates](https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-4-argon/):
-  $2 input, $10 output and $0.10 cached input per 1M tokens. Access is still limited to
-  trusted testers, and Google has not listed a public API model ID. These are API-equivalent
-  estimates for Argon usage found in logs. The later $4/$20 rate has no effective date yet
-  and is not applied ahead of time; cache storage charges are not modeled.
+- **Gemini 4 Argon and Gemini 4 Carbon** (`gemini-4-argon`, `gemini-4-carbon`) are recognized
+  across the supported tools and use Google's [published rates](https://aistudio.google.com/docs/pricing):
+  $2 input, $10 output and $0.10 cached input per 1M tokens through November 30, 2026. Google
+  doubles them to $4, $20 and $0.20 on December 1, 2026. The higher rate is not applied ahead
+  of time: it goes in once it takes effect, and earlier usage keeps the rate it had then.
+  Cache storage charges are not modeled.
 
 ## Note on log retention
 

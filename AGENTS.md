@@ -546,8 +546,12 @@ existing guarded `GET /api/local-servers` for the separate local server list.
   `_canonicalize` recognizes Argon display/raw spellings without treating audio/image/Live
   variants as the text model. On or after 2026-12-01 move the current tuple into
   `PRICE_HISTORY` dated 2026-11-30 and put the new rates in `PRICING` — never before.
-  Cache storage is not modeled. There is no "Gemini 4 Carbon" on Google's pricing page
-  (checked 2026-10-30); add nothing until Google publishes it.
+  Cache storage is not modeled.
+- **Gemini 4 Carbon (`gemini-4-carbon`) has Argon's rate card**: $2/$10 and $0.10 cached
+  through 2026-11-30, then $4/$20 and $0.20 from 2026-12-01, verified against Google's
+  [pricing page](https://aistudio.google.com/docs/pricing) on 2026-11-12 (implicit caching
+  only). `_canonicalize` treats it like Argon, and on 2026-12-01 it moves the same way: both
+  tuples into `PRICE_HISTORY` dated 2026-11-30, the new rates into `PRICING`.
 - **Claude's advisor iterations** (`usage.iterations[].type == "advisor_message"`) are not
   priced separately — none exist in any log seen, so their shape can't be verified. Every
   iteration here is a plain `message`, already covered by the response's own `usage`.
