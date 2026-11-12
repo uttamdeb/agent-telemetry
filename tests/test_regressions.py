@@ -122,6 +122,27 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(D._cost("opencode", *args, logged_cost=7.5), 7.5)
         self.assertAlmostEqual(D._cost("openclaw", *args, logged_cost=99), 12.1)
 
+    def test_carbon_names_prices_and_modality_exclusions(self):
+        # Verified against aistudio.google.com/docs/pricing (2026-11-12): gemini-4-carbon is $2 / $10,
+        # $0.10 cached through 2026-11-30 (then $4 / $20 / $0.20), like Argon. It priced at $0 before.
+        aliases = ["Gemini 4 Carbon", "Google: Gemini 4 Carbon", "gemini-4-carbon",
+                   "gemini-4-carbon-preview", "gemini_4_carbon", "google/gemini-4-carbon",
+                   "models/gemini-4-carbon", "Gemini 4 Carbon (Preview)"]
+        for name in aliases:
+            with self.subTest(name=name):
+                self.assertEqual(P._canonicalize(name), "Gemini 4 Carbon")
+                self.assertEqual(P.price_of(name, "2026-11-12"), (2, 10, 0, 0, 0.1))
+                self.assertEqual(P._normalize_cursor_model(name), "Gemini 4 Carbon")
+                self.assertEqual(P._normalize_hermes(name), "Gemini 4 Carbon")
+                self.assertEqual(P._normalize_opencode(name, "google"), "Gemini 4 Carbon")
+                self.assertEqual(P.normalize_copilot(name, ""), "Gemini 4 Carbon")
+        for suffix in ("live", "tts", "image", "audio", "embedding"):
+            with self.subTest(modality=suffix):
+                self.assertFalse(any(P.price_of("gemini-4-carbon-" + suffix)))
+        self.assertEqual(P._canonicalize("gemini-4-argon"), "Gemini 4 Argon", "Argon unchanged")
+        args = ("Gemini 4 Carbon", 1_000_000, 1_000_000, 1_000_000, 0, 0)
+        self.assertAlmostEqual(D._cost("cursor", *args), 12.1)
+
     def test_copilot_recorded_tokens_and_older_text_estimates(self):
         path = self.root / "chat.json"
         request = {"timestamp": 1790899200000, "modelId": "google/gemini-4-argon",
