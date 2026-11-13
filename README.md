@@ -502,6 +502,9 @@ dollars**, so cost is always derived. Rates live in `parser.py → PRICING` as
   doubles them to $4, $20 and $0.20 on December 1, 2026. The higher rate is not applied ahead
   of time: it goes in once it takes effect, and earlier usage keeps the rate it had then.
   Cache storage charges are not modeled.
+- **Gemini 4 Hydrogen** (`gemini-4-hydrogen`) uses Google's paid rate: $1.50 input, $7.50 output
+  and $0.075 cached input per 1M tokens. Its free tier can't be told apart in logs, so usage
+  is shown at the paid rate.
 
 ## Note on log retention
 

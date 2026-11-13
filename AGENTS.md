@@ -552,6 +552,12 @@ existing guarded `GET /api/local-servers` for the separate local server list.
   [pricing page](https://aistudio.google.com/docs/pricing) on 2026-11-12 (implicit caching
   only). `_canonicalize` treats it like Argon, and on 2026-12-01 it moves the same way: both
   tuples into `PRICE_HISTORY` dated 2026-11-30, the new rates into `PRICING`.
+- **Gemini 4 Hydrogen (`gemini-4-hydrogen`) is $1.50/$7.50 and $0.075 cached**, one rate
+  with no prompt-size tier and no dated change, verified against Google's
+  [pricing page](https://aistudio.google.com/docs/pricing) on 2026-11-13 (implicit caching
+  only). It has a free tier, which the logs cannot tell apart, so it is priced at the paid
+  rate like every other model. A new Gemini 4 name needs its word in `_canonicalize`'s
+  Gemini rule as well as a `PRICING` row, or every tool keeps the raw id at $0.
 - **Claude's advisor iterations** (`usage.iterations[].type == "advisor_message"`) are not
   priced separately — none exist in any log seen, so their shape can't be verified. Every
   iteration here is a plain `message`, already covered by the response's own `usage`.
