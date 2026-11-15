@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.3.0
+
+- The stable release of everything in the 2.2.1–2.2.4 pre-releases, with the bundled AgentTelemetry 2.3.0 backend:
+  - **Works with AgentTelemetry Pro.** The Agent desk reads the Pro app's local service when no free service runs.
+  - **New prices:** Claude Fable 5.2 and Mythos 5.2, Gemini 4 Carbon and Gemini 4 Hydrogen. Sonnet 5.5's cheaper cache reads count from 2026-10-07.
+  - **Rename every session.** Codex sessions can be renamed even when Codex isn't on your PATH. Copilot, Cursor, Claude Desktop and Antigravity sessions can be named in AgentTelemetry.
+  - **The theme button** shows a sun, a moon or a half circle for Light, Dark and Auto.
+
 ## 2.2.4 (pre-release)
 
 - The bundled AgentTelemetry 2.2.4 backend:
