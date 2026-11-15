@@ -45,7 +45,15 @@ no third-party GUI dependency. Linux stays on the existing browser workflow.
   `thread/read` / `thread/name/set` API, never starts/resumes a thread or model turn;
   OpenCode updates only the title columns of recognized SQLite session tables in one
   transaction. Unknown/generated schemas or title triggers are refused. Remote,
-  missing and unverified source formats cannot be edited. UI/POST targets use FULL
+  missing and unverified source formats cannot be edited. Tools without a safe title
+  edit (Copilot, Cursor, Claude Desktop, Antigravity, Hermes, OpenClaw, OpenCode's JSON
+  storage) and Claude subagents get an AgentTelemetry-only display name instead
+  (`SN.display_scope`): private, in `session-display-names.json`, never in the ledger
+  or peer exports, and their files are never written. Codex's program comes from
+  `native.codex_executable()`, never a bare `shutil.which`: a service the Mac or Windows
+  app starts has no shell PATH, and Codex's own apps (ChatGPT.app's bundle, each editor
+  extension, the Windows desktop app) never put theirs on it, so every Codex session
+  read "CLI required" in the app. Accounts' Codex lookup uses it too. UI/POST targets use FULL
   native ids (`rename_id`), never the eight-character ids shown in the table.
   `POST /api/session-name` goes through `_csrf_ok()`: preview returns a one-use,
   five-minute ticket; writing requires that ticket and explicit warning confirmation.

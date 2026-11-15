@@ -6,7 +6,6 @@ import os
 from pathlib import Path, PurePosixPath
 import queue
 import re
-import shutil
 import sqlite3
 import subprocess
 import threading
@@ -49,13 +48,29 @@ def claude_child_identity(path):
     return ""
 
 
+def display_scope(source, path, subagent=False):
+    """Whether this session's name is kept only in AgentTelemetry.
+
+    Claude subagents, and every tool whose own title can't be edited safely
+    (Copilot, Cursor, Claude Desktop, Antigravity, Hermes, OpenClaw, OpenCode's
+    older JSON storage): their source files are never written for a name.
+    """
+    if source == "claude": return bool(subagent)
+    if source == "opencode": return not str(path).endswith(".db")
+    return source not in SUPPORTED
+
+
 def display_availability(source, path, subagent=False, remote=False):
     if remote: return False, "Name this session on its source device."
-    if source != "claude" or not subagent or not claude_child_identity(path):
+    if source == "claude" and (not subagent or not claude_child_identity(path)):
         return False, "This Claude child transcript layout is not supported for a local display name."
+    if not display_scope(source, path, subagent):
+        return False, "This session is renamed in its own tool."
     if not os.path.isfile(path):
         return False, "The original log is unavailable; its saved telemetry is preserved."
-    return True, "Names this subagent only in AgentTelemetry; Claude and its parent session stay unchanged."
+    if source == "claude":
+        return True, "Names this subagent only in AgentTelemetry; Claude and its parent session stay unchanged."
+    return True, "Names this session only in AgentTelemetry; the tool keeps its own title."
 
 
 def display_names():
@@ -134,11 +149,11 @@ def _write_display_names(names):
         except FileNotFoundError: pass
 
 
-def prepare_display(device, source, path, session_id, name, original_title):
+def prepare_display(device, source, path, session_id, name, original_title, subagent=True):
     name = validate_name(name)
-    ok, reason = display_availability(source, path, True)
+    ok, reason = display_availability(source, path, subagent)
     if not ok: raise ValueError(reason)
-    if session_id != claude_child_identity(path):
+    if source == "claude" and session_id != claude_child_identity(path):
         raise ValueError("The Claude child identity does not match its discovered transcript.")
     names = display_names()
     stat = os.stat(path)
@@ -162,7 +177,7 @@ def commit_display(ticket, device, source, path, session_id, confirmed):
     plan = _plans.pop(ticket, None) if isinstance(ticket, str) else None
     if (plan is None or plan.get("scope") != "display" or time.monotonic() - plan["at"] > 300
             or [plan[k] for k in ("device", "source", "path", "id")] != [device, source, path, session_id]
-            or session_id != claude_child_identity(path)):
+            or (source == "claude" and session_id != claude_child_identity(path))):
         raise ValueError("Display-name preview expired or the source changed. Review it again.")
     stat = os.stat(path)
     if ([stat.st_dev, stat.st_ino] != plan["file_identity"]
@@ -239,8 +254,9 @@ def availability(source, path, remote=False):
         try: uuid.UUID(Path(path).stem)
         except ValueError:
             return False, "This Claude transcript has no verified session UUID."
-    if source == "codex" and not shutil.which("codex"):
-        return False, "Codex's local CLI is required to use its official rename API."
+    if source == "codex" and not N.codex_executable():
+        return False, ("Codex's command-line program wasn't found. Install the ChatGPT app, "
+                       "the Codex editor extension or the Codex CLI to rename Codex sessions.")
     if source == "codex":
         try: _codex_home(path)
         except ValueError as error: return False, str(error)
@@ -257,9 +273,9 @@ def _codex_home(path):
 def _codex_rpc(method, params, home=None):
     if method not in ("thread/read", "thread/name/set"):
         raise ValueError("Only Codex title metadata methods are permitted.")
-    executable = shutil.which("codex")
+    executable = N.codex_executable()
     if not executable:
-        raise ValueError("Codex CLI is unavailable.")
+        raise ValueError("Codex's command-line program wasn't found.")
     # A dedicated local metadata connection: never start/resume a thread or turn.
     environment = os.environ.copy()
     environment.pop("AGENT_TELEMETRY_CONTROL_TOKEN", None)

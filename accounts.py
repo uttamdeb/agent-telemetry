@@ -148,8 +148,8 @@ def _environment(source):
 
 
 def _codex_read():
-    executable = shutil.which("codex")
-    if not executable: raise ValueError("Codex CLI is unavailable on the dashboard's PATH.")
+    executable = N.codex_executable()
+    if not executable: raise ValueError("Codex's command-line program wasn't found on this device.")
     # This child exposes only read methods. Never start/resume a thread/model turn.
     process = subprocess.Popen([executable, "app-server", "--listen", "stdio://", "-c", "analytics.enabled=false"],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,

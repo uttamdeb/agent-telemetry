@@ -289,7 +289,7 @@ class AccountTests(unittest.TestCase):
             def close(self): self.recorded = self.getvalue()
         for after, success in (({"type": "chatgpt", "email": "A"}, True), ({"type": "chatgpt", "email": "B"}, False)):
             process = FakeProcess(after); process.stdin = Input()
-            with patch.object(A.shutil, "which", return_value="fixture-codex"), patch.object(A.subprocess, "Popen", return_value=process) as popen:
+            with patch.object(A.N, "codex_executable", return_value="fixture-codex"), patch.object(A.subprocess, "Popen", return_value=process) as popen:
                 if success: A._codex_read()
                 else:
                     with self.assertRaisesRegex(ValueError, "changed"): A._codex_read()
