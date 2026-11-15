@@ -1498,6 +1498,12 @@ function renameButton(s,text=false){
     '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m10.5 2.5 3 3-7.5 7.5-4 1 1-4zM9 4l3 3"/></svg>'}</button>`;
 }
 let sessionRenameTarget=null, sessionRenameSaving=false;
+// What stays as it was when a name is kept in AgentTelemetry only: a Claude subagent's
+// transcript and parent, or another tool's own title (its files are never written).
+function displayNameKeeps(source){
+  return source==='claude'?'Claude and the parent session stay unchanged.'
+    :`${(SRC[source]||{label:source}).label} keeps its own title; its files are not changed.`;
+}
 function openSessionRename(identity){
   if(sessionRenameSaving) return;
   const s=RAW.sessions.find(x=>sessionIdentity(x)===identity); if(!s||s.rename_available===false) return;
@@ -1505,7 +1511,7 @@ function openSessionRename(identity){
   const display=s.rename_scope==='display';
   document.getElementById('sessionNameHeading').textContent=display?'Name in AgentTelemetry':'Rename session';
   document.getElementById('sessionNameHelp').textContent=display
-    ?'This display name is saved only in AgentTelemetry on this device. Claude and the parent session stay unchanged. You will review the change before saving.'
+    ?`This display name is saved only in AgentTelemetry on this device. ${displayNameKeeps(s.source)} You will review the change before saving.`
     :'Renaming changes the original tool’s saved session name. You’ll review a warning before it is saved.';
   const input=document.getElementById('sessionNameInput');
   input.value=s.title||s.project||s.id;
@@ -1530,7 +1536,7 @@ async function saveSessionName(name){
     if(!await askConfirm({title:display?'Name in AgentTelemetry?':'Rename in '+(SRC[target.source]||{label:target.source}).label+'?',ok:display?'Save display name':'Rename in tool',
       body:display?`<p>This changes only the local display name in <b>AgentTelemetry</b>.</p>
         <p><b>${esc(preview.current_name)}</b> → <b>${esc(preview.name)}</b></p>
-        <div class="modal-note">Claude’s transcript, native subagent name, and parent session stay unchanged. The private name is not included in the usage ledger or device sharing.</div>
+        <div class="modal-note">${target.source==='claude'?'Claude’s transcript, native subagent name, and parent session stay unchanged.':esc(displayNameKeeps(target.source))} The private name is not included in the usage ledger or device sharing.</div>
         <p>Target: <code>${esc(preview.target)}</code></p>`:
         `<p>This changes the name in the <b>original coding tool</b>, not only AgentTelemetry.</p>
         <p><b>${esc(preview.current_name)}</b> → <b>${esc(preview.name)}</b></p>
@@ -1657,7 +1663,7 @@ function openSessionDetails(s,related=false){
     ${sessionUsageDetails(s)}
     ${cursorDetailStatusDetails(s)}
     ${sessionUndatedUsageDetails(s)}
-    ${row("Name scope",s.rename_scope==='display'?'AgentTelemetry only — Claude and its parent session are unchanged.':null)}
+    ${row("Name scope",s.rename_scope==='display'?(s.source==='claude'?'AgentTelemetry only — Claude and its parent session are unchanged.':`AgentTelemetry only — ${esc((SRC[s.source]||{label:s.source}).label)} keeps its own title.`):null)}
     ${row("Source title",s.display_alias?esc(s.original_title):null)}
     ${sessionDelegationDetails(s)}
     ${row("Device",multiDevice()?esc(deviceName(s.device||RAW.device.id)):null)}

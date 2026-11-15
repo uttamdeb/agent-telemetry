@@ -368,12 +368,16 @@ anything is saved. Close the session in its original tool before confirming, and
 that tool if needed. Token, cost, prompt, tool-call and compaction records stay intact.
 Previous title metadata is backed up privately in
 `AgentTelemetryNative/session-title-backups/`, separately from the usage ledger.
-This supports local Claude Code transcripts, Codex through its installed CLI’s
+This supports local Claude Code transcripts, Codex through its
 [official name API](https://learn.chatgpt.com/docs/app-server), and OpenCode’s SQLite
-session stores. Other formats, remote sessions and deleted logs cannot be edited.
-Recognized local Claude subagent transcripts instead offer **Name in AgentTelemetry**.
-This saves a private display name on this device without editing Claude's transcript,
-native subagent name, or parent session. The preview states this scope explicitly.
+session stores. Codex's program is found wherever its apps install it (the ChatGPT app,
+the Codex editor extension, the Codex desktop app on Windows, or a Codex CLI), with no
+need for it on your PATH. Remote sessions and deleted logs cannot be renamed.
+Recognized local Claude subagent transcripts, and sessions from tools whose own title
+can't be edited safely (Copilot, Cursor, Claude Desktop, Antigravity, Hermes, OpenClaw),
+instead offer **Name in AgentTelemetry**. This saves a private display name on this
+device without editing the tool's files, Claude's transcript, native subagent name, or
+parent session. The preview states this scope explicitly.
 These names live in `AgentTelemetryNative/session-display-names.json`, outside the
 usage ledger, summaries, and device sharing. Enter the source title again to remove
 a display-name override. See [subagent name behavior](docs/subagent-sessions.md).
