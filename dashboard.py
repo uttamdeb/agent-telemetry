@@ -661,7 +661,8 @@ def build_native_activity(observed_at=None):
         local_items = [(path_by_object.get(id(aggregate), aggregate.get("path", "")), aggregate)
                        for aggregate in unique]
         snapshot = NA.project(local_items, observed_at=observed_at,
-                              identity=SN.identity, local_device=local_device)
+                              identity=SN.identity, local_device=local_device,
+                              display_scope=SN.display_scope)
     names = {}
     if NA.has_display_aliases(snapshot):
         try:
@@ -863,10 +864,11 @@ def set_session_name(body):
         aggregate, session = matches[0]
         path = aggregate["path"]
         original = session.get("title") or session.get("project") or session_id
-        display_only = source == "claude" and bool(session.get("subagent"))
+        subagent = bool(session.get("subagent"))
+        display_only = SN.display_scope(source, path, subagent)
         if body.get("action") == "preview":
             if display_only:
-                return SN.prepare_display(device, source, path, session_id, body.get("name"), original)
+                return SN.prepare_display(device, source, path, session_id, body.get("name"), original, subagent)
             return SN.prepare(device, source, path, session_id, body.get("name"), original)
         if body.get("action") != "rename":
             raise ValueError("Review the name-change preview before saving.")
@@ -962,14 +964,16 @@ def build_editor_snapshot(query):
         except ValueError:
             names, alias_error = {}, True
         for path, agg in items if names else ():
-            if (str(path).startswith("peer:") or agg.get("source") != "claude" or not agg.get("subagent")
-                    or agg.get("_device") not in (None, "", local)):
+            if str(path).startswith("peer:") or agg.get("_device") not in (None, "", local):
                 continue
             for session in agg.get("sessions", []):
+                if not SN.display_scope(agg.get("source"), agg.get("path", ""),
+                                        bool(session.get("subagent") or agg.get("subagent"))):
+                    continue
                 native_id = SN.identity(agg, session)
                 if not native_id:
                     continue
-                alias = SN.display_name(names, local, "claude", agg.get("path", ""), native_id)
+                alias = SN.display_name(names, local, agg.get("source"), agg.get("path", ""), native_id)
                 if alias:
                     aliases[(agg.get("path", ""), native_id)] = alias
         result = ES.build_snapshot(items, local, query, refresh_sync()["revision"],
@@ -1623,10 +1627,11 @@ def _build_payload_locked():
                 s2["account_metadata"] = A.session_metadata(agg)
             available, reason = SN.availability(source, agg.get("path", ""), remote)
             s2["rename_id"] = _session_identity(agg, session)
-            if not s2["rename_id"]:
-                available, reason = False, "The full native session identity is unavailable."
-            if source == "claude" and session.get("subagent"):
-                available, reason = SN.display_availability(source, agg.get("path", ""), True, remote)
+            subagent = bool(session.get("subagent"))
+            if SN.display_scope(source, agg.get("path", ""), subagent):
+                # Claude subagents and tools whose own title can't be edited safely are
+                # named in AgentTelemetry only; their source files are never written.
+                available, reason = SN.display_availability(source, agg.get("path", ""), subagent, remote)
                 if not remote:
                     s2["rename_scope"] = "display"
                     if display_name_error:
@@ -1636,6 +1641,8 @@ def _build_payload_locked():
                         s2["original_title"] = session.get("title") or session.get("project") or s2["rename_id"]
                         s2["title"] = alias
                         s2["display_alias"] = True
+            if not s2["rename_id"]:
+                available, reason = False, "The full native session identity is unavailable."
             if session.get("retained"):
                 available, reason = False, "This session was deleted in its tool. Its telemetry is preserved."
             s2["rename_available"], s2["rename_reason"] = available, reason
@@ -1808,21 +1815,24 @@ def _build_payload_locked():
         "pricing_long_context": {m: list(P.price_of(m, long_context=True))
             for m in set(P.LONG_CONTEXT_PRICING) | set(model_meta)
             if P.price_of(m, long_context=True) != P.price_of(m)},
-        "pricing_note": ("Anthropic costs use current list pricing (Fable 5 $10/$50, Opus 5.5 "
+        "pricing_note": ("Anthropic costs use current list pricing (Fable & Mythos 5.2 $8/$40, "
+                         "Fable & Mythos 5/5.1 $10/$50, Opus 5.5 "
                          "$4/$20, Opus 5 & 4.x $5/$25, Sonnet 5 & 5.5 $2/$10, Sonnet 4.x "
                          "$3/$15, Haiku 4.5 $1/$5 per Mtok). Haiku 5.5 uses $0.10/$0.50 "
                          "up to 100K prompt tokens and $0.50/$2.50 above 100K, including cache "
                          "reads/writes in each request's threshold; available Claude logs retain "
                          "that split, while older archives/peers and other tools without request "
                          "detail use the short-prompt rate. Cache write is billed at 1.25x (5-min) "
-                         "/ 2x (1-hour) input and cache read at 0.1x (0.05x on Opus 5.5, 0.025x on Fable 5.1); OpenAI/"
+                         "/ 2x (1-hour) input and cache read at 0.1x (0.05x on Opus 5.5 and on "
+                         "Sonnet 5.5 from 2026-10-07, 0.025x on Fable & Mythos 5.1/5.2); OpenAI/"
                          "Codex/Copilot/Cursor prices are estimates. Codex GPT-5.4/5.5/5.6/6 use "
                          "verified OpenAI list rates (e.g. GPT-6 Sol $2/$10, cached $0.20; GPT-6.1 Sol cached $0.10), each "
                          "day priced at the rate in force then — OpenAI cut GPT-5.6 prices on "
                          "2026-07-30 and 2026-08-21; a >272K-input surcharge is not modeled, so "
-                         "heavy-context sessions may be higher. Gemini 4 Argon uses Google's "
-                         "announced introductory rates ($2 input/$10 output, cached input $0.10 "
-                         "per Mtok). Other Gemini text models use Standard rates for prompts "
+                         "heavy-context sessions may be higher. Gemini 4 Argon and Carbon use "
+                         "Google's rates through 2026-11-30 ($2 input/$10 output, cached input "
+                         "$0.10 per Mtok); Gemini 4 Hydrogen is $1.50/$7.50, cached $0.075. "
+                         "Other Gemini text models use Standard rates for prompts "
                          "up to 200K tokens. "
                          "Actual "
                          "billing may differ. Claude Code/Desktop & Codex can run on either "

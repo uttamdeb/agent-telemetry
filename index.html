@@ -45,7 +45,9 @@
     <symbol id="i-storage" viewBox="0 0 16 16"><ellipse cx="8" cy="3.9" rx="5.2" ry="1.9"/><path d="M2.8 3.9v8.2c0 1.1 2.3 1.9 5.2 1.9s5.2-.8 5.2-1.9V3.9M2.8 8c0 1.1 2.3 1.9 5.2 1.9s5.2-.8 5.2-1.9"/></symbol>
     <symbol id="i-servers" viewBox="0 0 16 16"><rect x="2.3" y="2.2" width="11.4" height="4.1" rx="1.2"/><rect x="2.3" y="9.7" width="11.4" height="4.1" rx="1.2"/><path d="M4.5 4.2h.1M4.5 11.7h.1M7.2 4.2h4.2M7.2 11.7h4.2"/></symbol>
     <symbol id="i-refresh" viewBox="0 0 16 16"><path d="M13.2 8a5.2 5.2 0 1 1-1.6-3.8"/><path d="M13.2 2.6v2.9h-2.9"/></symbol>
-    <symbol id="i-theme" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.6"/><path d="M8 2.4v11.2a5.6 5.6 0 0 0 0-11.2z" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-theme-auto" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.6"/><path d="M8 2.4v11.2a5.6 5.6 0 0 0 0-11.2z" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-theme-light" viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.7"/><path d="M8 1.6v1.5M8 12.9v1.5M1.6 8h1.5M12.9 8h1.5M3.5 3.5l1.1 1.1M11.4 11.4l1.1 1.1M3.5 12.5l1.1-1.1M11.4 4.6l1.1-1.1"/></symbol>
+    <symbol id="i-theme-dark" viewBox="0 0 16 16"><path d="M13.3 9.7A5.6 5.6 0 0 1 6.3 2.7a5.6 5.6 0 1 0 7 7z"/></symbol>
     <symbol id="i-settings" viewBox="0 0 16 16"><path d="M12.76 6.86 L14.34 7.15 L14.34 8.85 L12.76 9.14 L12.18 10.56 L13.09 11.88 L11.88 13.09 L10.56 12.18 L9.14 12.76 L8.85 14.34 L7.15 14.34 L6.86 12.76 L5.44 12.18 L4.12 13.09 L2.91 11.88 L3.82 10.56 L3.24 9.14 L1.66 8.85 L1.66 7.15 L3.24 6.86 L3.82 5.44 L2.91 4.12 L4.12 2.91 L5.44 3.82 L6.86 3.24 L7.15 1.66 L8.85 1.66 L9.14 3.24 L10.56 3.82 L11.88 2.91 L13.09 4.12 L12.18 5.44Z" stroke-linejoin="round"/><circle cx="8" cy="8" r="2.1"/></symbol>
     <symbol id="i-sidebar" viewBox="0 0 16 16"><rect x="2" y="2.6" width="12" height="10.8" rx="1.8"/><path d="M6.2 2.6v10.8"/><path d="M4 5.4h.6M4 7.4h.6M4 9.4h.6"/></symbol>
     <symbol id="i-filter" viewBox="0 0 16 16"><path d="M2.3 3.2h11.4L9.3 8.5v4.3l-2.6 1.3V8.5z"/></symbol>
@@ -93,7 +95,7 @@
       </button>
       <div class="side-actions">
         <button class="icon-btn" id="refreshBtn" title="Refresh now (r)" aria-label="Refresh now"><svg class="ic"><use href="#i-refresh"/></svg></button>
-        <button class="icon-btn" id="themeBtn" title="Theme (t)" aria-label="Theme"><svg class="ic"><use href="#i-theme"/></svg></button>
+        <button class="icon-btn" id="themeBtn" title="Theme: Auto (t)" aria-label="Theme: Auto. Change theme"><svg class="ic"><use href="#i-theme-auto"/></svg></button>
         <button class="icon-btn" id="settingsBtn" title="Settings" aria-label="Settings"><svg class="ic"><use href="#i-settings"/></svg></button>
       </div>
       <div class="side-note coverage-meta" id="coverage"></div>

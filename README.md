@@ -23,6 +23,12 @@ Covers **Claude Code · Claude Desktop · Codex · GitHub Copilot · Cursor · A
 [Browser dashboard (Python or source)](#quick-start) ·
 [Product page](https://agenttelemetry-app.vercel.app/)
 
+**AgentTelemetry Pro (optional).** Everything above stays free, open source and local. [AgentTelemetry
+Pro](https://agenttelemetry-app.vercel.app/#pro) is a separate add-on with a sign-in: your dashboard in any browser or
+on your phone; chat with your running Claude Code and Codex sessions from the web, your phone or the Pro app on Mac
+and Windows; answering Claude Code's permission prompts from your phone; sessions that message each other across
+your devices; Optimize; and the local MCP bridge. See [Free vs Pro](https://agenttelemetry-app.vercel.app/#pro).
+
 ## Download the app
 
 Choose the installer for your platform from the release's **Assets** section.
@@ -46,9 +52,9 @@ These builds are unsigned/unnotarized. macOS may require **System Settings → P
 Security → Open Anyway**; Windows SmartScreen may require **More info → Run anyway**.
 [Product and install page](https://agenttelemetry-app.vercel.app/) ·
 [All releases](https://github.com/uttamdeb/agent-telemetry/releases) ·
-[What's new in 2.2.0](docs/releases/v2.2.0.md) ·
+[What's new in 2.3.0](docs/releases/v2.3.0.md) ·
 [SHA-256 checksums in release assets](https://github.com/uttamdeb/agent-telemetry/releases/latest) ·
-[PyPI package 2.2.0](https://pypi.org/project/agenttelemetry-app/2.2.0/)
+[PyPI package 2.3.0](https://pypi.org/project/agenttelemetry-app/2.3.0/)
 
 ---
 
@@ -362,12 +368,16 @@ anything is saved. Close the session in its original tool before confirming, and
 that tool if needed. Token, cost, prompt, tool-call and compaction records stay intact.
 Previous title metadata is backed up privately in
 `AgentTelemetryNative/session-title-backups/`, separately from the usage ledger.
-This supports local Claude Code transcripts, Codex through its installed CLI’s
+This supports local Claude Code transcripts, Codex through its
 [official name API](https://learn.chatgpt.com/docs/app-server), and OpenCode’s SQLite
-session stores. Other formats, remote sessions and deleted logs cannot be edited.
-Recognized local Claude subagent transcripts instead offer **Name in AgentTelemetry**.
-This saves a private display name on this device without editing Claude's transcript,
-native subagent name, or parent session. The preview states this scope explicitly.
+session stores. Codex's program is found wherever its apps install it (the ChatGPT app,
+the Codex editor extension, the Codex desktop app on Windows, or a Codex CLI), with no
+need for it on your PATH. Remote sessions and deleted logs cannot be renamed.
+Recognized local Claude subagent transcripts, and sessions from tools whose own title
+can't be edited safely (Copilot, Cursor, Claude Desktop, Antigravity, Hermes, OpenClaw),
+instead offer **Name in AgentTelemetry**. This saves a private display name on this
+device without editing the tool's files, Claude's transcript, native subagent name, or
+parent session. The preview states this scope explicitly.
 These names live in `AgentTelemetryNative/session-display-names.json`, outside the
 usage ledger, summaries, and device sharing. Enter the source title again to remove
 a display-name override. See [subagent name behavior](docs/subagent-sessions.md).
@@ -455,9 +465,10 @@ dollars**, so cost is always derived. Rates live in `parser.py → PRICING` as
 `(input, output, cache_write_5m, cache_write_1h, cache_read)` per 1M tokens; edit freely
 (recomputed on each request, no re-parse needed).
 
-- **Anthropic** rates are current list prices (Opus 5.5 $4/$20, Opus 5 & 4.x $5/$25, Sonnet 5
-  & 5.5 $2/$10, Sonnet 4.x $3/$15, Haiku 4.5 $1/$5; cache write 1.25×/2× input for 5-min/1-hour, cache
-  read 0.1× — 0.05× on Opus 5.5). **OpenAI** GPT-5.4/5.5/5.6/6 are verified from OpenAI docs;
+- **Anthropic** rates are current list prices (Fable & Mythos 5.2 $8/$40, Fable & Mythos 5/5.1
+  $10/$50, Opus 5.5 $4/$20, Opus 5 & 4.x $5/$25, Sonnet 5 & 5.5 $2/$10, Sonnet 4.x $3/$15, Haiku
+  4.5 $1/$5; cache write 1.25×/2× input for 5-min/1-hour, cache read 0.1× — 0.05× on Opus 5.5 and
+  Sonnet 5.5, 0.025× on Fable & Mythos 5.1/5.2). **OpenAI** GPT-5.4/5.5/5.6/6 are verified from OpenAI docs;
   older/other models are estimates.
 - **Haiku 5.5** uses [Anthropic's published rates](https://platform.claude.com/docs/en/about-claude/pricing):
   $0.10/$0.50 per million input/output tokens up to 100K prompt tokens, $0.50/$2.50
@@ -466,7 +477,8 @@ dollars**, so cost is always derived. Rates live in `parser.py → PRICING` as
   message counts stay unchanged. Older archives/peers and other tools without that
   detail use the short-prompt rate.
 - **Price changes are date-aware.** When a vendor cuts a price (OpenAI's GPT-5.6 cuts of
-  2026-07-30 and 2026-08-21), usage from before the change keeps the rate it had then —
+  2026-07-30 and 2026-08-21, Anthropic's Sonnet 5.5 cache-read cut of 2026-10-07), usage
+  from before the change keeps the rate it had then —
   see `parser.py → PRICE_HISTORY`.
 - **These are API-equivalent values.** If you're on a subscription (Claude Max/Pro, Codex,
   Copilot), you don't pay per token — the $ is "what this would cost at API rates."
@@ -488,12 +500,15 @@ dollars**, so cost is always derived. Rates live in `parser.py → PRICING` as
   when it runs through supported tools, at the Standard rate for prompts up to 200K
   tokens. Live, TTS, image and embedding models are not priced, and nor are the higher Pro rate
   for longer prompts or audio input. The Gemini CLI itself writes no token counts to read.
-- **Gemini 4 Argon** is recognized across the supported tools and uses Google's
-  [announced introductory rates](https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-4-argon/):
-  $2 input, $10 output and $0.10 cached input per 1M tokens. Access is still limited to
-  trusted testers, and Google has not listed a public API model ID. These are API-equivalent
-  estimates for Argon usage found in logs. The later $4/$20 rate has no effective date yet
-  and is not applied ahead of time; cache storage charges are not modeled.
+- **Gemini 4 Argon and Gemini 4 Carbon** (`gemini-4-argon`, `gemini-4-carbon`) are recognized
+  across the supported tools and use Google's [published rates](https://aistudio.google.com/docs/pricing):
+  $2 input, $10 output and $0.10 cached input per 1M tokens through November 30, 2026. Google
+  doubles them to $4, $20 and $0.20 on December 1, 2026. The higher rate is not applied ahead
+  of time: it goes in once it takes effect, and earlier usage keeps the rate it had then.
+  Cache storage charges are not modeled.
+- **Gemini 4 Hydrogen** (`gemini-4-hydrogen`) uses Google's paid rate: $1.50 input, $7.50 output
+  and $0.075 cached input per 1M tokens. Its free tier can't be told apart in logs, so usage
+  is shown at the paid rate.
 
 ## Note on log retention
 

@@ -45,8 +45,12 @@ function requestJSON(port, pathname, { method = 'GET', body, timeout = 5000, max
     req.end();
   });
 }
+// The AgentTelemetry Pro app runs the same dashboard service (same API) under its own name, on its own reserved
+// ports: Stable 7888, Beta 7889. The Agent desk reads either; it never starts or controls the Pro service.
+const SERVICES = new Set(['agent-telemetry', 'agent-telemetry-pro']);
+const PRO_PORTS = Object.freeze([7888, 7889]);
 function healthIdentity(value) {
-  if (!value || value.service !== 'agent-telemetry' || typeof value.ready !== 'boolean' || typeof value.version !== 'string') throw new ServiceError('This port belongs to another service. AgentTelemetry will not start over it.', 'IDENTITY');
+  if (!value || !SERVICES.has(value.service) || typeof value.ready !== 'boolean' || typeof value.version !== 'string') throw new ServiceError('This port belongs to another service. AgentTelemetry will not start over it.', 'IDENTITY');
   return value;
 }
 function validateSnapshot(value) {
@@ -110,9 +114,31 @@ function validateSnapshot(value) {
     limitations: list(value.limitations, 50).map(item => string(item, 4096))};
 }
 class LocalClient {
-  constructor(port = 7878, transport = requestJSON) { this.port = portNumber(port); this.transport = transport; }
+  // `fallbackPorts`: where to look for the Pro app's service when nothing listens on `port` (only for the default
+  // port; a port the user chose is the only one used). The configured service always wins when it runs, so every
+  // health check tries it first and the client moves back to it as soon as it answers.
+  constructor(port = 7878, transport = requestJSON, {fallbackPorts = []} = {}) {
+    this.configuredPort = portNumber(port); this.port = this.configuredPort; this.transport = transport;
+    this.fallbackPorts = fallbackPorts.map(portNumber).filter(value => value !== this.configuredPort);
+  }
   get endpoint() { return `http://127.0.0.1:${this.port}`; }
-  async health() { return healthIdentity(await this.transport(this.port, '/api/health', {maxBytes: 32768})); }
+  async health() {
+    try {
+      const value = healthIdentity(await this.transport(this.configuredPort, '/api/health', {maxBytes: 32768}));
+      this.port = this.configuredPort;
+      return value;
+    } catch (error) {
+      if (error.code !== 'ECONNREFUSED' || !this.fallbackPorts.length) throw error;
+      for (const port of this.fallbackPorts) {
+        let value;
+        try { value = await this.transport(port, '/api/health', {maxBytes: 32768}); } catch { continue; }
+        if (value?.service !== 'agent-telemetry-pro') continue; // only the Pro app's service, never another program
+        this.port = port;
+        return healthIdentity(value);
+      }
+      throw error;
+    }
+  }
   async sync() {
     const value = await this.transport(this.port, '/api/sync', {maxBytes: 32768});
     if (!value || typeof value.revision !== 'string' || value.revision.length > 512) throw new ServiceError('Update AgentTelemetry to use its shared refresh clock.', 'SCHEMA');
@@ -130,4 +156,4 @@ class LocalClient {
   }
   async refresh() { return this.transport(this.port, '/api/refresh', {method: 'POST', body: {}, timeout: 90000, maxBytes: 65536}); }
 }
-module.exports = {LocalClient, ServiceError, requestJSON, portNumber, healthIdentity, validateSnapshot};
+module.exports = {LocalClient, ServiceError, requestJSON, portNumber, healthIdentity, validateSnapshot, PRO_PORTS};

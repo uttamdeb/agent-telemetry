@@ -2,6 +2,7 @@
 import copy
 from contextlib import closing
 import json
+import os
 from pathlib import Path
 import sqlite3
 import sys
@@ -75,7 +76,12 @@ class CopilotSDKTests(unittest.TestCase):
 
     def parse(self, previous=None, write=True):
         if write:
+            before = self.path.stat().st_mtime_ns if self.path.exists() else None
             self.path.write_text("".join(json.dumps(e) + "\n" for e in self.events), encoding="utf-8")
+            # A rewrite of the same size can keep the same modified time on Windows (coarse timestamps), and the
+            # parser then rightly skips the file as unchanged. Real logs grow; move the time on so a test's edit is seen.
+            if before is not None and self.path.stat().st_mtime_ns <= before:
+                os.utime(self.path, ns=(before + 1_000_000_000, before + 1_000_000_000))
         return P.update_file(previous, "copilot", str(self.path), "Copilot SDK", {})
 
     def test_discovery_and_exact_host_totals_not_context_or_last_call(self):

@@ -45,7 +45,15 @@ no third-party GUI dependency. Linux stays on the existing browser workflow.
   `thread/read` / `thread/name/set` API, never starts/resumes a thread or model turn;
   OpenCode updates only the title columns of recognized SQLite session tables in one
   transaction. Unknown/generated schemas or title triggers are refused. Remote,
-  missing and unverified source formats cannot be edited. UI/POST targets use FULL
+  missing and unverified source formats cannot be edited. Tools without a safe title
+  edit (Copilot, Cursor, Claude Desktop, Antigravity, Hermes, OpenClaw, OpenCode's JSON
+  storage) and Claude subagents get an AgentTelemetry-only display name instead
+  (`SN.display_scope`): private, in `session-display-names.json`, never in the ledger
+  or peer exports, and their files are never written. Codex's program comes from
+  `native.codex_executable()`, never a bare `shutil.which`: a service the Mac or Windows
+  app starts has no shell PATH, and Codex's own apps (ChatGPT.app's bundle, each editor
+  extension, the Windows desktop app) never put theirs on it, so every Codex session
+  read "CLI required" in the app. Accounts' Codex lookup uses it too. UI/POST targets use FULL
   native ids (`rename_id`), never the eight-character ids shown in the table.
   `POST /api/session-name` goes through `_csrf_ok()`: preview returns a one-use,
   five-minute ticket; writing requires that ticket and explicit warning confirmation.
@@ -546,8 +554,18 @@ existing guarded `GET /api/local-servers` for the separate local server list.
   `_canonicalize` recognizes Argon display/raw spellings without treating audio/image/Live
   variants as the text model. On or after 2026-12-01 move the current tuple into
   `PRICE_HISTORY` dated 2026-11-30 and put the new rates in `PRICING` — never before.
-  Cache storage is not modeled. There is no "Gemini 4 Carbon" on Google's pricing page
-  (checked 2026-10-30); add nothing until Google publishes it.
+  Cache storage is not modeled.
+- **Gemini 4 Carbon (`gemini-4-carbon`) has Argon's rate card**: $2/$10 and $0.10 cached
+  through 2026-11-30, then $4/$20 and $0.20 from 2026-12-01, verified against Google's
+  [pricing page](https://aistudio.google.com/docs/pricing) on 2026-11-12 (implicit caching
+  only). `_canonicalize` treats it like Argon, and on 2026-12-01 it moves the same way: both
+  tuples into `PRICE_HISTORY` dated 2026-11-30, the new rates into `PRICING`.
+- **Gemini 4 Hydrogen (`gemini-4-hydrogen`) is $1.50/$7.50 and $0.075 cached**, one rate
+  with no prompt-size tier and no dated change, verified against Google's
+  [pricing page](https://aistudio.google.com/docs/pricing) on 2026-11-13 (implicit caching
+  only). It has a free tier, which the logs cannot tell apart, so it is priced at the paid
+  rate like every other model. A new Gemini 4 name needs its word in `_canonicalize`'s
+  Gemini rule as well as a `PRICING` row, or every tool keeps the raw id at $0.
 - **Claude's advisor iterations** (`usage.iterations[].type == "advisor_message"`) are not
   priced separately — none exist in any log seen, so their shape can't be verified. Every
   iteration here is a plain `message`, already covered by the response's own `usage`.
@@ -884,6 +902,12 @@ routine migration: it discards the durable history.
 A new `claude-<tier>-<n>-<m>` id normalises by itself, so only the price row is missing and
 nothing warns: the model just costs $0 (Sonnet 5.5 did, for its first day). Diff the vendor's
 whole table against `PRICING`, and look for all-zero rows in the payload's `prices`.
+Other tools' spellings (OpenCode, Hermes, Cursor, a Copilot model id) go through `_canonicalize`,
+whose Claude tier list must name every tier: Fable and Mythos were missing until 5.2, so those
+tools priced them at $0. Adding them needed no `CACHE_VERSION` bump: `price_of()` canonicalizes
+at request time, so costs were right at once, and the store-based sources reparse whole on
+their next change, which renames their rows. Check the vendor's fast-mode table too
+(`FAST_PRICING`): a model without a row there prices its fast requests at $0.
 
 **A vendor changed a price** → the new tuple goes in `PRICING` (always today's rate) and the old one moves into `PRICE_HISTORY` with
 the last date it applied. `price_of(model, date)` picks by each record's date, so a cut

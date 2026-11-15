@@ -61,6 +61,44 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(P._normalize_opencode("gpt-6.1-terra", "openai"), "GPT-6.1 Terra")
         self.assertEqual(P.price_of("GPT-6.1 Sol", "2026-10-30"), (2, 10, 2.50, 0, 0.10), "Sol unchanged")
 
+    def test_fable_and_mythos_5_2_are_named_and_priced_from_every_source(self):
+        # Verified against platform.claude.com pricing and release notes (2026-11-10): launched
+        # 2026-11-09 at $8 / $40, cache writes $10 / $16, cache read $0.20 (0.025x input); fast
+        # mode $16 / $80 with the same multipliers. Other tools' Fable/Mythos ids priced at $0.
+        for tier in ("fable", "mythos"):
+            name = f"Claude {tier.capitalize()} 5.2"
+            self.assertEqual(P.normalize_claude(f"claude-{tier}-5-2"), name)
+            for raw in (f"claude-{tier}-5-2", f"anthropic/claude-{tier}-5.2", name,
+                        f"claude-{tier}-5-2-20261109"):
+                with self.subTest(raw=raw):
+                    self.assertEqual(P._canonicalize(raw), name)
+                    self.assertEqual(P._normalize_opencode(raw, "anthropic"), name)
+                    self.assertEqual(P._normalize_hermes(raw), name)
+                    self.assertEqual(P._normalize_cursor_model(raw), name)
+                    self.assertEqual(P.normalize_copilot(raw, ""), name)
+                    self.assertEqual(P.price_of(raw), (8, 40, 10, 16, 0.20))
+            self.assertEqual(P.price_of(name + P.FAST_SUFFIX), (16, 80, 20, 32, 0.40))
+            self.assertEqual(P.price_of(f"Claude {tier.capitalize()} 5.1"), (10, 50, 12.5, 20, 0.25))
+            self.assertEqual(P._normalize_opencode(f"claude-{tier}-5-1", "anthropic"),
+                             f"Claude {tier.capitalize()} 5.1")
+        self.assertEqual(P._canonicalize("anthropic/claude-mythos-preview"), "Claude Mythos Preview")
+        self.assertEqual(P._canonicalize("claude-sonnet-4-5"), "Claude Sonnet 4.5", "other tiers unchanged")
+        args = ("Claude Fable 5.2", 1_000_000, 1_000_000, 1_000_000, 0, 0)
+        self.assertAlmostEqual(D._cost("opencode", *args), 48.2)
+        self.assertAlmostEqual(D._cost("hermes", "claude-fable-5-2", *args[1:]), 48.2)
+
+    def test_sonnet_5_5_cache_read_cut_is_dated(self):
+        # Anthropic's release notes, 2026-10-07: Sonnet 5.5 cache reads $0.20 -> $0.10 per 1M
+        # (0.05x input). Cache writes and every other price unchanged; Sonnet 5 keeps 0.1x.
+        before, after = (2, 10, 2.5, 4, 0.20), (2, 10, 2.5, 4, 0.10)
+        self.assertEqual(P.price_of("Claude Sonnet 5.5", "2026-10-06"), before)
+        self.assertEqual(P.price_of("Claude Sonnet 5.5", "2026-10-07"), after)
+        self.assertEqual(P.price_of("Claude Sonnet 5.5"), after)
+        self.assertEqual(P.price_of("Claude Sonnet 5", "2026-10-07"), before)
+        reads = ("Claude Sonnet 5.5", 0, 0, 1_000_000, 0, 0)
+        self.assertAlmostEqual(D._cost("claude", *reads, date="2026-10-06"), 0.20)
+        self.assertAlmostEqual(D._cost("claude", *reads, date="2026-10-07"), 0.10)
+
     def test_argon_names_prices_and_modality_exclusions(self):
         aliases = ["Gemini 4 Argon", "Google: Gemini 4 Argon", "gemini-4-argon",
                    "gemini-4-argon-preview", "gemini_4_argon", "google/gemini-4-argon",
@@ -83,6 +121,48 @@ class RegressionTests(unittest.TestCase):
         self.assertAlmostEqual(D._cost("cursor", *args), 12.1)
         self.assertEqual(D._cost("opencode", *args, logged_cost=7.5), 7.5)
         self.assertAlmostEqual(D._cost("openclaw", *args, logged_cost=99), 12.1)
+
+    def test_carbon_names_prices_and_modality_exclusions(self):
+        # Verified against aistudio.google.com/docs/pricing (2026-11-12): gemini-4-carbon is $2 / $10,
+        # $0.10 cached through 2026-11-30 (then $4 / $20 / $0.20), like Argon. It priced at $0 before.
+        aliases = ["Gemini 4 Carbon", "Google: Gemini 4 Carbon", "gemini-4-carbon",
+                   "gemini-4-carbon-preview", "gemini_4_carbon", "google/gemini-4-carbon",
+                   "models/gemini-4-carbon", "Gemini 4 Carbon (Preview)"]
+        for name in aliases:
+            with self.subTest(name=name):
+                self.assertEqual(P._canonicalize(name), "Gemini 4 Carbon")
+                self.assertEqual(P.price_of(name, "2026-11-12"), (2, 10, 0, 0, 0.1))
+                self.assertEqual(P._normalize_cursor_model(name), "Gemini 4 Carbon")
+                self.assertEqual(P._normalize_hermes(name), "Gemini 4 Carbon")
+                self.assertEqual(P._normalize_opencode(name, "google"), "Gemini 4 Carbon")
+                self.assertEqual(P.normalize_copilot(name, ""), "Gemini 4 Carbon")
+        for suffix in ("live", "tts", "image", "audio", "embedding"):
+            with self.subTest(modality=suffix):
+                self.assertFalse(any(P.price_of("gemini-4-carbon-" + suffix)))
+        self.assertEqual(P._canonicalize("gemini-4-argon"), "Gemini 4 Argon", "Argon unchanged")
+        args = ("Gemini 4 Carbon", 1_000_000, 1_000_000, 1_000_000, 0, 0)
+        self.assertAlmostEqual(D._cost("cursor", *args), 12.1)
+
+    def test_hydrogen_names_prices_and_modality_exclusions(self):
+        # Verified against aistudio.google.com/docs/pricing (2026-11-13): gemini-4-hydrogen is $1.50 /
+        # $7.50, $0.075 cached, with no prompt-size tier or dated change. It priced at $0 before.
+        aliases = ["Gemini 4 Hydrogen", "Google: Gemini 4 Hydrogen", "gemini-4-hydrogen",
+                   "gemini-4-hydrogen-preview", "gemini_4_hydrogen", "google/gemini-4-hydrogen",
+                   "models/gemini-4-hydrogen", "Gemini 4 Hydrogen (Preview)"]
+        for name in aliases:
+            with self.subTest(name=name):
+                self.assertEqual(P._canonicalize(name), "Gemini 4 Hydrogen")
+                self.assertEqual(P.price_of(name, "2026-11-13"), (1.5, 7.5, 0, 0, 0.075))
+                self.assertEqual(P._normalize_cursor_model(name), "Gemini 4 Hydrogen")
+                self.assertEqual(P._normalize_hermes(name), "Gemini 4 Hydrogen")
+                self.assertEqual(P._normalize_opencode(name, "google"), "Gemini 4 Hydrogen")
+                self.assertEqual(P.normalize_copilot(name, ""), "Gemini 4 Hydrogen")
+        for suffix in ("live", "tts", "image", "audio", "embedding"):
+            with self.subTest(modality=suffix):
+                self.assertFalse(any(P.price_of("gemini-4-hydrogen-" + suffix)))
+        self.assertEqual(P._canonicalize("gemini-4-carbon"), "Gemini 4 Carbon", "Carbon unchanged")
+        args = ("Gemini 4 Hydrogen", 1_000_000, 1_000_000, 1_000_000, 0, 0)
+        self.assertAlmostEqual(D._cost("cursor", *args), 9.075)
 
     def test_copilot_recorded_tokens_and_older_text_estimates(self):
         path = self.root / "chat.json"

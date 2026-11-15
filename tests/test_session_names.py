@@ -309,6 +309,49 @@ class SessionNameTests(unittest.TestCase):
             with self.assertRaises(OSError): self.commit(preview)
         self.assertEqual(self.path.read_bytes(), current)
 
+    def copilot(self):
+        sid = str(uuid.uuid4())
+        path = self.root / "chatSessions" / (sid + ".json")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        request = {"timestamp": 1790899200000, "modelId": "copilot/gpt-6.1-terra",
+                   "message": {"text": "Copilot fixture"}, "promptTokens": 100, "completionTokens": 10,
+                   "result": {"details": "GPT-6.1 Terra • 1x"}}
+        path.write_text(json.dumps({"sessionId": sid, "requests": [request]}), encoding="utf-8")
+        with patch.object(P, "_copilot_project_map", return_value={}):
+            aggregate = P.update_file(None, "copilot", str(path), "VS Code", {})
+        D._state["files"][str(path)] = aggregate
+        P.discover.return_value.append(("copilot", str(path), "VS Code"))
+        return path, aggregate, {**self.body, "source": "copilot", "id": SN.identity(aggregate, aggregate["sessions"][0])}
+
+    def test_tools_without_a_safe_title_edit_get_an_agenttelemetry_only_name(self):
+        path, aggregate, body = self.copilot()
+        raw = path.read_bytes()
+        with patch.object(P, "_copilot_project_map", return_value={}):
+            row = next(s for s in D.build_payload()["sessions"] if s["source"] == "copilot")
+        self.assertEqual(row["rename_scope"], "display")
+        self.assertTrue(row["rename_available"])
+        self.assertIn("only in AgentTelemetry", row["rename_reason"])
+        preview = D.set_session_name({**body, "action": "preview", "name": "Copilot display fixture"})
+        self.assertEqual(preview["scope"], "display")
+        with patch.object(SN, "commit") as native_commit, patch.object(P, "update_file") as parse:
+            D.set_session_name({**body, "action": "rename", "ticket": preview["ticket"], "confirmed": True})
+            native_commit.assert_not_called(); parse.assert_not_called()
+        self.assertEqual(path.read_bytes(), raw)
+        with patch.object(P, "_copilot_project_map", return_value={}):
+            row = next(s for s in D.build_payload()["sessions"] if s["source"] == "copilot")
+        self.assertEqual((row["title"], row["display_alias"]), ("Copilot display fixture", True))
+        for item in D._state["files"].values():
+            self.assertNotIn("Copilot display fixture", json.dumps(D._export_agg(item)))
+        # Tools whose own title is edited keep doing so; a Claude parent is never display-only.
+        self.assertFalse(SN.display_scope("claude", str(self.path), False))
+        self.assertFalse(SN.display_scope("codex", "rollout.jsonl"))
+        self.assertFalse(SN.display_scope("opencode", "opencode.db"))
+        for source in ("copilot", "cursor", "claude-desktop", "antigravity", "hermes", "openclaw"):
+            self.assertTrue(SN.display_scope(source, "store"), source)
+        self.assertTrue(SN.display_scope("opencode", "storage/message/ses/msg.json"))
+        self.assertFalse(SN.display_availability("copilot", str(path), remote=True)[0])
+        self.assertFalse(SN.display_availability("codex", str(path))[0])
+
     def test_unknown_remote_imported_and_invalid_names_cannot_edit_a_source(self):
         raw = self.path.read_bytes()
         for name in ("", "  ", "a\nb", "x" * 91, "\ud800", True, 42, []):
@@ -399,14 +442,14 @@ class SessionNameTests(unittest.TestCase):
             calls.append((method, params))
             self.assertEqual(kwargs["home"], str(path.parent.parent.resolve()))
             return {"thread": {"name": "Original Codex"}} if method == "thread/read" else {}
-        with patch.object(SN.shutil, "which", return_value="fixture-codex"), patch.object(SN, "_codex_rpc", side_effect=rpc):
+        with patch.object(SN.N, "codex_executable", return_value="fixture-codex"), patch.object(SN, "_codex_rpc", side_effect=rpc):
             preview = SN.prepare("fixture-device", "codex", str(path), self.sid, "New Codex", "Original Codex")
             SN.commit(preview["ticket"], "fixture-device", "codex", str(path), self.sid, True)
         self.assertEqual([m for m, _ in calls], ["thread/read", "thread/read", "thread/name/set"])
         self.assertTrue(all(not p.get("includeTurns") for m, p in calls if m == "thread/read"))
         self.assertEqual(path.read_text(), 'original rollout\n')
 
-    @unittest.skipUnless(SN.shutil.which("codex"), "Optional native Codex CLI is not installed")
+    @unittest.skipUnless(SN.N.codex_executable(), "Optional native Codex CLI is not installed")
     def test_actual_codex_api_isolated_profile_updates_native_index_without_rewriting_rollout(self):
         home = self.root / "isolated-codex"
         folder = home / "sessions" / "2026" / "10" / "12"; folder.mkdir(parents=True)

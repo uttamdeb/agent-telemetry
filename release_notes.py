@@ -498,7 +498,9 @@ def _fetch_release(url: str, required_version: Optional[str] = None):
 
 def _placeholder(version: Optional[str], tag_hint: Optional[str] = None) -> dict:
     tag = tag_hint if tag_hint and _tag_version(tag_hint) and _tag_version(tag_hint)[0] == version else None
-    url = _tag_url(tag) if tag else ""
+    # Releases are tagged vX.Y.Z, but a packaged app knows only its bare version
+    # ("2.2.0"), and /releases/tag/2.2.0 is a 404.
+    url = _tag_url("v" + tag.lstrip("v")) if tag else ""
     label = "AgentTelemetry " + (version or "release")
     return {
         "key": tag or version,

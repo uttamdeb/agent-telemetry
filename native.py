@@ -3,7 +3,9 @@ import json
 import ntpath
 import os
 from pathlib import Path
+import platform
 import posixpath
+import re
 import subprocess
 import sys
 import threading
@@ -12,6 +14,103 @@ import uuid
 
 _lock = threading.Lock()
 REFRESH_INTERVALS = (0, 15, 60, 300, 900)
+_CODEX_FOUND = {"at": None, "path": None}
+_CODEX_TTL = 60
+_EDITOR_DIR = re.compile(r"\.(vscode|cursor|windsurf|antigravity)")
+_CODEX_EXTENSION = re.compile(r"openai\.chatgpt-(\d+(?:\.\d+)*)")
+
+
+def codex_candidates(env=None, home=None, system=None, machine=None):
+    """Where Codex's command-line program may be, in the Pro connector's order.
+
+    A service started by the macOS or Windows app does not see the user's shell
+    PATH, and Codex's own apps never put their copy on it: the ChatGPT app keeps
+    one inside its bundle, each editor extension one per version, and the Codex
+    desktop app on Windows one per build. Paths only; nothing is started here.
+    """
+    env = os.environ if env is None else env
+    home = str(Path.home()) if home is None else home
+    system = sys.platform if system is None else system
+    windows = system == "win32"
+    join = ntpath.join if windows else posixpath.join
+    exe = "codex.exe" if windows else "codex"
+    machine = (platform.machine() if machine is None else machine).lower()
+    arm = machine in ("arm64", "aarch64")
+    found = []
+    override = env.get("CODEX_BIN")
+    if override:
+        found.append(override)
+    path_key = next((k for k in env if k.lower() == "path"), None) if windows else "PATH"
+    for folder in (env.get(path_key) or "").split(";" if windows else ":"):
+        if folder:
+            found.append(join(folder, exe))
+    if windows:
+        # The Codex desktop app's own copy, newest build first; it is never on the saved PATH.
+        root = join(env.get("LOCALAPPDATA") or join(home, "AppData", "Local"), "OpenAI", "Codex", "bin")
+        builds = []
+        try:
+            names = os.listdir(root)
+        except OSError:
+            names = []
+        for name in names:
+            path = join(root, name, exe)
+            try:
+                builds.append((os.stat(path).st_mtime, path))
+            except OSError:
+                continue
+        found += [path for _, path in sorted(builds, reverse=True)]
+    target = ("windows" if windows else "macos" if system == "darwin" else "linux") + (
+        "-aarch64" if arm else "-x86_64")
+    extensions = []
+    try:
+        editors = sorted(name for name in os.listdir(home) if _EDITOR_DIR.match(name))
+    except OSError:
+        editors = []
+    for editor in editors:
+        try:
+            names = os.listdir(join(home, editor, "extensions"))
+        except OSError:
+            continue
+        for name in names:
+            match = _CODEX_EXTENSION.match(name)
+            if match:
+                version = tuple(int(part) for part in match.group(1).split("."))
+                extensions.append((version, join(home, editor, "extensions", name, "bin", target, exe)))
+    found += [path for _, path in sorted(extensions, key=lambda item: item[0], reverse=True)]
+    if windows:
+        # An npm global install puts only codex.cmd on PATH; its real program is in a platform package.
+        package = "codex-win32-arm64" if arm else "codex-win32-x64"
+        binary = join("vendor", "aarch64-pc-windows-msvc" if arm else "x86_64-pc-windows-msvc", "bin", exe)
+        prefix = join(env.get("APPDATA") or join(home, "AppData", "Roaming"), "npm")
+        found += [join(prefix, "node_modules", "@openai", "codex", "node_modules", "@openai", package, binary),
+                  join(prefix, "node_modules", "@openai", package, binary)]
+    else:
+        if system == "darwin":
+            app = join("Applications", "ChatGPT.app", "Contents", "Resources", "codex-cli",
+                       "CodexCLI.app", "Contents", "MacOS", "codex")
+            found += ["/" + app, join(home, app)]
+        # Where a CLI install usually goes; a service's PATH often lacks them.
+        found += [join(folder, exe) for folder in ("/opt/homebrew/bin", "/usr/local/bin",
+                                                  join(home, ".local", "bin"))]
+    unique = []
+    for path in found:
+        if path not in unique:
+            unique.append(path)
+    return unique
+
+
+def codex_executable():
+    """The first runnable Codex program (see codex_candidates), or None. Cached for a minute."""
+    now = time.monotonic()
+    with _lock:
+        cached, at = _CODEX_FOUND["path"], _CODEX_FOUND["at"]
+    if at is not None and now - at < _CODEX_TTL and (cached is None or os.path.isfile(cached)):
+        return cached
+    path = next((candidate for candidate in codex_candidates()
+                 if os.path.isfile(candidate) and os.access(candidate, os.X_OK)), None)
+    with _lock:
+        _CODEX_FOUND.update(at=now, path=path)
+    return path
 
 
 def _project_path(value):

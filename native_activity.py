@@ -235,7 +235,7 @@ def is_local_live_aggregate(aggregate, local_device=None) -> bool:
 
 
 def project(items: Iterable, *, observed_at=None, identity: Optional[Callable] = None,
-            local_device: Optional[str] = None) -> dict:
+            local_device: Optional[str] = None, display_scope: Optional[Callable] = None) -> dict:
     """Build the bounded public snapshot and private alias references.
 
     ``items`` is the local ``(path, aggregate)`` list after the dashboard's
@@ -305,7 +305,11 @@ def project(items: Iterable, *, observed_at=None, identity: Optional[Callable] =
                     if safe_availability:
                         row["usage_availability"] = safe_availability
             alias = None
-            if source == "claude" and subagent and isinstance(path, str):
+            # A private AgentTelemetry-only name: Claude subagents, and tools whose own
+            # title is never edited (display_scope decides; without it, Claude children only).
+            scoped = (display_scope(source, path, subagent) if callable(display_scope)
+                      else source == "claude" and subagent)
+            if scoped and isinstance(path, str):
                 alias_id = source_id[len("native:"):] if source_id.startswith("native:") else source_id
                 alias = (local_device, source, path, alias_id)
             entry = {"row": row, "_alias": alias, "_sort": end}
@@ -330,7 +334,7 @@ def has_display_aliases(snapshot) -> bool:
 
 
 def apply_display_aliases(snapshot, names, display_name: Callable) -> dict:
-    """Apply private Claude child names only after the session passed eligibility."""
+    """Apply private AgentTelemetry-only names only after the session passed eligibility."""
     public = []
     for row in snapshot.get("sessions", []):
         result = {key: value for key, value in row.items() if key != "_display_alias"}

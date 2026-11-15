@@ -148,8 +148,8 @@ def _environment(source):
 
 
 def _codex_read():
-    executable = shutil.which("codex")
-    if not executable: raise ValueError("Codex CLI is unavailable on the dashboard's PATH.")
+    executable = N.codex_executable()
+    if not executable: raise ValueError("Codex's command-line program wasn't found on this device.")
     # This child exposes only read methods. Never start/resume a thread/model turn.
     process = subprocess.Popen([executable, "app-server", "--listen", "stdio://", "-c", "analytics.enabled=false"],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
@@ -183,7 +183,7 @@ def _codex_read():
             if not isinstance(result, dict): raise ValueError("Codex returned an unsupported account response.")
             return result
     try:
-        request(1, "initialize", {"clientInfo": {"name": "agent_telemetry", "title": "AgentTelemetry", "version": "2.2.0"}})
+        request(1, "initialize", {"clientInfo": {"name": "agent_telemetry", "title": "AgentTelemetry", "version": "2.3.0"}})
         process.stdin.write('{"method":"initialized","params":{}}\n'); process.stdin.flush()
         before = request(2, "account/read", {"refreshToken": False}).get("account")
         limits = request(3, "account/rateLimits/read", {}) if isinstance(before, dict) and before.get("type") == "chatgpt" else {}
