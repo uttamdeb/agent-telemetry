@@ -59,6 +59,11 @@ no third-party GUI dependency. Linux stays on the existing browser workflow.
   five-minute ticket; writing requires that ticket and explicit warning confirmation.
   Re-check title/file state after confirmation; back up previous metadata before any
   write. Never rewrite a usage transcript or rebuild the ledger for a title edit.
+  A Claude session that Claude Code is running is refused at preview and again before
+  the write (`claude_running`): it re-appends its in-memory name on its next turn.
+  It reads only `<config>/sessions/<pid>.json` beside the transcript's `projects/`,
+  for this computer's `pidDomain`, a live pid and a matching POSIX `procStart`.
+  Never `os.kill` a pid on Windows (it terminates); use `OpenProcess`.
   Source-derived title edits/display capability fields do not change aggregate shape.
 - `windows/tray.py` owns the notification icon and serialized worker queue;
   `windows/popover.py` renders the native counterpart of macOS `StatusMenu` using

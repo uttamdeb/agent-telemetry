@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.3.1 (pre-release)
+
+- The bundled AgentTelemetry 2.3.1 backend: renaming a Claude Code session that is still running now explains that Claude Code would put its old name back, and suggests `/rename` in Claude Code, instead of saving a name that does not last.
+
 ## 2.3.0
 
 - The stable release of everything in the 2.2.1–2.2.4 pre-releases, with the bundled AgentTelemetry 2.3.0 backend:
