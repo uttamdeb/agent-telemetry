@@ -50,3 +50,6 @@ extension (2.2.3 or later) needs the app at 2.2.3 or later too: the next open-so
 The 2.2.3 betas (`v2.2.3-beta.<n>`) ship the app and the extension as **2.2.3** together, the extension as a
 pre-release on both stores (packaged with `vsce package --pre-release`, because `ovsx publish --pre-release` ignores the
 flag for a VSIX that was packaged without it). The stable extension that follows must be 2.2.4 or later.
+
+The 2.2.4 betas (`v2.2.4-beta.<n>`) do the same with **2.2.4**. The stable extension that follows must be 2.2.5 or
+later.

@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.2.4 (pre-release)
+
+- The bundled AgentTelemetry 2.2.4 backend:
+  - **Prices:** Claude Fable 5.2 and Mythos 5.2, Gemini 4 Carbon and Gemini 4 Hydrogen are priced (they showed $0). Sonnet 5.5's cheaper cache reads apply from 2026-10-07.
+  - **Rename:** Codex sessions can be renamed again when Codex isn't on your PATH. Sessions from Copilot, Cursor, Claude Desktop and Antigravity can be named in AgentTelemetry.
+
 ## 2.2.3 (pre-release)
 
 - The bundled AgentTelemetry 2.2.3 backend: the dashboard's theme button now shows a sun for Light, a moon for Dark and a half-filled circle for Auto, and its label names the current mode.
