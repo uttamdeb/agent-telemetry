@@ -8,6 +8,7 @@ import queue
 import re
 import sqlite3
 import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -263,6 +264,103 @@ def availability(source, path, remote=False):
     return True, ""
 
 
+RUNNING_CLAUDE = ("Claude Code is running this session, and it would put the old name back on its next turn. "
+                  "Rename it with /rename in Claude Code, or rename it here after you close the session.")
+
+
+def _pid_alive(pid):
+    """Whether a process with this id exists. Never os.kill on Windows: there it terminates the process."""
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        open_process = kernel["OpenProcess"]
+        open_process.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+        open_process.restype = wintypes.HANDLE
+        exit_code = kernel["GetExitCodeProcess"]
+        exit_code.argtypes = (wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD))
+        exit_code.restype = wintypes.BOOL
+        close = kernel["CloseHandle"]
+        close.argtypes = (wintypes.HANDLE,)
+        close.restype = wintypes.BOOL
+        handle = open_process(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            return ctypes.get_last_error() == 5  # ERROR_ACCESS_DENIED: it exists
+        try:
+            code = wintypes.DWORD()
+            return bool(exit_code(handle, ctypes.byref(code))) and code.value == 259  # STILL_ACTIVE
+        finally:
+            close(handle)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def _same_process(pid, started):
+    """False only when this pid now belongs to a process started at another time (a reused pid).
+    Claude Code records `procStart` in ps's lstart format, in UTC; Windows records are not compared."""
+    if os.name == "nt" or not isinstance(started, str) or not started.strip():
+        return True
+    try:
+        out = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True,
+                             timeout=3, env={**os.environ, "TZ": "UTC", "LC_ALL": "C"})
+    except (OSError, subprocess.SubprocessError):
+        return True
+    actual = " ".join(out.stdout.split())
+    return out.returncode != 0 or not actual or actual == " ".join(started.split())
+
+
+def _this_computer(domain):
+    """Claude Code's registry may be shared with another computer; its pids mean nothing here."""
+    if domain is None:
+        return True
+    if not isinstance(domain, str):
+        return False
+    if os.name == "nt":
+        name = os.environ.get("COMPUTERNAME", "")
+        return bool(name) and domain.lower().startswith("win32:") and \
+            domain[6:].split(".")[0].lower() == name.split(".")[0].lower()
+    return domain == sys.platform
+
+
+def claude_running(path, session_id):
+    """Whether a Claude Code process on this computer has this session open. A running session keeps
+    its name in memory and appends it again on its next turn, so a rename from here would not last.
+    Reads only Claude Code's own session registry (<config>/sessions/<pid>.json) beside the
+    transcript's <config>/projects folder."""
+    transcript = Path(path)
+    if len(transcript.parents) < 3 or transcript.parents[1].name != "projects":
+        return False
+    registry = transcript.parents[2] / "sessions"
+    try:
+        names = sorted(os.listdir(registry))[:512]
+    except OSError:
+        return False
+    for name in names:
+        match = re.fullmatch(r"(\d{1,10})\.json", name)
+        if not match:
+            continue
+        try:
+            with open(registry / name, "rb") as handle:
+                record = json.loads(handle.read(65536))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(record, dict) or record.get("sessionId") != session_id:
+            continue
+        pid = record.get("pid")
+        if (isinstance(pid, int) and not isinstance(pid, bool) and pid == int(match.group(1)) and pid > 0 and
+                _this_computer(record.get("pidDomain")) and _pid_alive(pid) and
+                _same_process(pid, record.get("procStart"))):
+            return True
+    return False
+
+
 def _codex_home(path):
     for parent in Path(path).resolve().parents:
         if parent.name in ("sessions", "archived_sessions"):
@@ -307,7 +405,7 @@ def _codex_rpc(method, params, home=None):
             return message.get("result", {})
     try:
         send({"id": 1, "method": "initialize", "params": {"clientInfo": {
-            "name": "agent_telemetry", "title": "AgentTelemetry", "version": "2.3.0"}}})
+            "name": "agent_telemetry", "title": "AgentTelemetry", "version": "2.3.1"}}})
         receive(1); send({"method": "initialized", "params": {}})
         send({"id": 2, "method": method, "params": params})
         return receive(2)
@@ -380,6 +478,8 @@ def prepare(device, source, path, session_id, name, current_title):
             raise ValueError("This Claude transcript has no verified session UUID.")
         if Path(path).stem != session_id:
             raise ValueError("The Claude session identity does not match its transcript.")
+        if claude_running(path, session_id):
+            raise ValueError(RUNNING_CLAUDE)
     snapshot = _snapshot(source, path, session_id, current_title)
     ticket = uuid.uuid4().hex
     now = time.monotonic()
@@ -444,6 +544,8 @@ def commit(ticket, device, source, path, session_id, confirmed):
             for table, previous in old["rows"]:
                 c.execute("UPDATE " + table + " SET title=? WHERE id=?", (name, session_id))
     elif source == "claude":
+        if claude_running(path, session_id):
+            raise ValueError(RUNNING_CLAUDE)
         flags = os.O_RDWR | os.O_APPEND | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
         fd = os.open(path, flags)
         try:

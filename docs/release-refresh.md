@@ -56,3 +56,6 @@ later.
 
 **2.3.0** is the stable release of the 2.2.1–2.2.4 betas: app, extension (a regular release on both stores, packaged
 without `--pre-release`) and PyPI package all 2.3.0. Betas after it start at 2.3.1.
+
+The 2.3.1 betas (`v2.3.1-beta.<n>`) ship the app and the extension as **2.3.1**, the extension as a pre-release on
+both stores. The stable extension that follows must be 2.3.2 or later.

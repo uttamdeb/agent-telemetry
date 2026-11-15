@@ -5,8 +5,10 @@ import copy
 import http.client
 import io
 import json
+import os
 from pathlib import Path
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import threading
@@ -294,6 +296,60 @@ class SessionNameTests(unittest.TestCase):
         self.assertEqual(json.loads(backup.read_text())["snapshot"]["title"], "Original fixture")
         if sys.platform != "win32": self.assertEqual(backup.stat().st_mode & 0o777, 0o600)
         with self.assertRaises(ValueError): self.commit({"ticket": next(iter(SN._plans), "consumed")})
+
+    def claude_config(self):
+        """The fixture transcript inside a Claude config folder, beside Claude Code's session registry."""
+        config = self.root / "claude-config"
+        transcript = config / "projects" / "-fixture-project" / (self.sid + ".jsonl")
+        transcript.parent.mkdir(parents=True)
+        transcript.write_bytes(self.path.read_bytes())
+        (config / "sessions").mkdir()
+        return config, transcript
+
+    def register(self, config, process, name=None, **fields):
+        here = "win32:" + os.environ.get("COMPUTERNAME", "") if os.name == "nt" else sys.platform
+        record = {"pid": process, "sessionId": self.sid, "pidDomain": here, "name": "Fixture", **fields}
+        (config / "sessions" / ((name or str(process)) + ".json")).write_text(json.dumps(record))
+
+    def test_a_running_claude_session_is_refused_because_it_would_write_its_old_name_back(self):
+        config, transcript = self.claude_config()
+        raw = transcript.read_bytes()
+        rename = lambda: SN.prepare("fixture-device", "claude", str(transcript), self.sid, "New fixture", "Original fixture")
+        exited = subprocess.Popen([sys.executable, "-c", "pass"]); exited.wait()
+        # Registry records that do not prove this session runs here never block a rename.
+        mine = config / "sessions" / (str(os.getpid()) + ".json")
+        for label, fields in {"another session": {"sessionId": str(uuid.uuid4())},
+                              "another computer": {"pidDomain": "elsewhere:fixture"},
+                              "a malformed pid": {"pid": True}}.items():
+            self.register(config, os.getpid(), **fields)
+            self.assertFalse(SN.claude_running(str(transcript), self.sid), label)
+        mine.unlink()
+        self.register(config, exited.pid)                       # its process has ended
+        self.register(config, os.getpid(), name="1")            # the file names another pid
+        (config / "sessions" / "7.json").write_text("{not json")
+        preview = rename()
+        self.assertEqual(preview["current_name"], "Original fixture")
+        for path in (config / "sessions").iterdir(): path.unlink()
+        if os.name != "nt":
+            # A reused pid: the process now using it started at another time.
+            self.register(config, os.getpid(), procStart="Mon Jan  1 00:00:00 2001")
+            self.assertFalse(SN.claude_running(str(transcript), self.sid))
+            (config / "sessions" / (str(os.getpid()) + ".json")).unlink()
+        # The session starts running before the warning is confirmed: nothing is written.
+        self.register(config, os.getpid())
+        guard = patch.object(SN.os, "kill", side_effect=AssertionError("os.kill terminates on Windows")) \
+            if os.name == "nt" else contextlib.nullcontext()
+        with guard:
+            with self.assertRaisesRegex(ValueError, "/rename in Claude Code"):
+                SN.commit(preview["ticket"], "fixture-device", "claude", str(transcript), self.sid, True)
+            with self.assertRaisesRegex(ValueError, "Claude Code is running this session"):
+                rename()
+        self.assertEqual(transcript.read_bytes(), raw)
+        self.assertFalse((N.support_dir() / "session-title-backups").exists())
+        # Once it closes (Claude Code removes its record), the rename goes through.
+        (config / "sessions" / (str(os.getpid()) + ".json")).unlink()
+        SN.commit(rename()["ticket"], "fixture-device", "claude", str(transcript), self.sid, True)
+        self.assertEqual(json.loads(transcript.read_bytes()[len(raw):])["customTitle"], "New fixture")
 
     def test_changed_or_incomplete_transcript_and_backup_failure_refuse_writes(self):
         preview = self.preview()
