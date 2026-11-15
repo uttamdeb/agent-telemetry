@@ -53,3 +53,6 @@ flag for a VSIX that was packaged without it). The stable extension that follows
 
 The 2.2.4 betas (`v2.2.4-beta.<n>`) do the same with **2.2.4**. The stable extension that follows must be 2.2.5 or
 later.
+
+**2.3.0** is the stable release of the 2.2.1–2.2.4 betas: app, extension (a regular release on both stores, packaged
+without `--pre-release`) and PyPI package all 2.3.0. Betas after it start at 2.3.1.
