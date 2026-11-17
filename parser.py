@@ -255,8 +255,8 @@ PRICING = {
     # for GPT-5.6 and GPT-6 only — older rows keep 0, which _cost() bills at the
     # plain input rate). Long-context (>272K input) rates are per request and not
     # modeled; see AGENTS.md "What the logs cannot show".
-    # Sol's $4/$20 is a promo "at least through November 21, 2026" — if it reverts,
-    # move this tuple into PRICE_HISTORY and restore $5/$30 here.
+    # Sol's $4/$20 is a promo that the pricing page now lists "until November 30, 2026" — if it
+    # reverts, move this tuple into PRICE_HISTORY and restore $5/$30 here.
     "GPT-5.6 Sol": (4, 20, 5.00, 0, 0.40),
     "GPT-5.6 Terra": (2, 12, 2.50, 0, 0.20),
     "GPT-5.6 Luna": (0.20, 1.20, 0.25, 0, 0.02),
@@ -274,6 +274,13 @@ PRICING = {
     # rows are per request and still not modeled (AGENTS.md "What the logs cannot show").
     "GPT-6.1 Sol": (2, 10, 2.50, 0, 0.10),
     "GPT-6.1 Terra": (1, 5, 1.25, 0, 0.05),
+    # GPT-6.2 launched 2026-11-17; verified against developers.openai.com/api/docs/pricing and
+    # the gpt-6.2-astra / gpt-6.2-sol model pages on 2026-11-18, short context (<=272K), same
+    # shape as 6.1: cached input 5% of input, 30-minute cache write 1.25x input. Astra is a cut
+    # from GPT-6 Astra ($10 / $50, which stays as it was); Sol is unchanged from 6.1 Sol. The
+    # long-context (>272K), Fast and Ultrafast rows are per request and not modeled.
+    "GPT-6.2 Astra": (8, 40, 10.00, 0, 0.40),
+    "GPT-6.2 Sol": (2, 10, 2.50, 0, 0.10),
     # OpenAI GPT-5.4 / 5.5 — verified from OpenAI API pricing docs (2026-07).
     # NOTE: GPT-5.5 has a >272K-input surcharge (2x in / 1.5x out for the session)
     # not modeled here, so heavy-context Codex sessions may cost somewhat more.
@@ -296,6 +303,12 @@ PRICING = {
     # models-and-pricing (2026-09-27): the per-token rate Copilot bills past a plan's
     # included allowance. No cache-write column is listed.
     "MAI-Code-1.1-Flash": (0.20, 1.20, 0, 0, 0.02),
+    # MAI Code 2 and 2 Flash (GA, same page, verified 2026-11-18) are at a promotional rate
+    # "until May 17, 2027": from that day Code 2 is $1.00 / $5.00 / $0.05 cached and Code 2
+    # Flash $0.10 / $0.50 / $0.01. On 2027-05-17 move both tuples into PRICE_HISTORY dated
+    # 2027-05-16 and put the new rates here — never before.
+    "MAI Code 2": (0.50, 2.50, 0, 0, 0.025),
+    "MAI Code 2 Flash": (0.05, 0.25, 0, 0, 0.005),
     # OpenAI legacy (estimates)
     "GPT-4.1": (2, 8, 0, 0, 0.5),
     "GPT-4.1 Mini": (0.40, 1.6, 0, 0, 0.10),
@@ -520,6 +533,17 @@ def _canonicalize(name):
         return f"GPT-{mg.group(1)}{suffix}".strip()
     if low.startswith("gpt-oss"):
         return "GPT-OSS"
+
+    # Microsoft MAI Code — "MAI Code 2 Flash" (GitHub's display name), "mai-code-2-flash",
+    # "microsoft/mai-code-1.1-flash". Only the versions with a price row are mapped, so an
+    # unknown one (or 1.1 without Flash) keeps its own spelling rather than borrowing a rate.
+    mmai = re.match(r"mai[\s\-]code[\s\-](1\.1|2)(?:[\s\-](flash))?$", low)
+    if mmai:
+        ver, flash = mmai.groups()
+        if ver == "1.1" and flash:
+            return "MAI-Code-1.1-Flash"
+        if ver == "2":
+            return "MAI Code 2" + (" Flash" if flash else "")
 
     # o-series (o3, o4-mini)
     mo = re.match(r"o\d+(?:-mini)?", low)

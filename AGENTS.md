@@ -571,6 +571,17 @@ existing guarded `GET /api/local-servers` for the separate local server list.
   only). It has a free tier, which the logs cannot tell apart, so it is priced at the paid
   rate like every other model. A new Gemini 4 name needs its word in `_canonicalize`'s
   Gemini rule as well as a `PRICING` row, or every tool keeps the raw id at $0.
+- **MAI Code 2 and MAI Code 2 Flash are promotional until 2027-05-17.** GitHub's
+  [models and pricing](https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing)
+  lists $0.50 / $2.50 and $0.05 / $0.25 per 1M input/output tokens (cached $0.025 and $0.005),
+  verified 2026-11-18, then $1.00 / $5.00 and $0.10 / $0.50 (cached $0.05 and $0.01) from
+  2027-05-17. On that day move both current tuples into `PRICE_HISTORY` dated 2027-05-16 and
+  put the new rates in `PRICING` — never before. `_canonicalize` maps `mai-code-2`,
+  `microsoft/mai-code-2-flash` and the like onto the two names, and the same for
+  `MAI-Code-1.1-Flash`; an unlisted MAI version keeps its own spelling and prices at $0.
+- **GPT-6.2 Astra ($8 / $40) and Sol ($2 / $10)** launched 2026-11-17 and are priced from
+  OpenAI's pricing page at the short-context rate, like 6.1; the >272K, Fast and Ultrafast
+  rows are not modeled (Ultrafast is 3x Standard through 2027-02-28, then 6x).
 - **Claude's advisor iterations** (`usage.iterations[].type == "advisor_message"`) are not
   priced separately — none exist in any log seen, so their shape can't be verified. Every
   iteration here is a plain `message`, already covered by the response's own `usage`.

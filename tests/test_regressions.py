@@ -61,6 +61,52 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(P._normalize_opencode("gpt-6.1-terra", "openai"), "GPT-6.1 Terra")
         self.assertEqual(P.price_of("GPT-6.1 Sol", "2026-10-30"), (2, 10, 2.50, 0, 0.10), "Sol unchanged")
 
+    def test_gpt_6_2_astra_and_sol_are_named_and_priced_from_every_source(self):
+        # Verified against developers.openai.com/api/docs/pricing and the model pages (2026-11-18):
+        # launched 2026-11-17. Astra $8 / $40, cached $0.40, 30-minute cache write $10; Sol $2 / $10,
+        # cached $0.10, write $2.50, unchanged from 6.1. Short context. Both priced at $0 before.
+        rates = {"Astra": (8, 40, 10.00, 0, 0.40), "Sol": (2, 10, 2.50, 0, 0.10)}
+        for tier, rate in rates.items():
+            name = f"GPT-6.2 {tier}"
+            for raw in (f"gpt-6.2-{tier.lower()}", f"openai/gpt-6.2-{tier.lower()}", name, f"OpenAI: {name}"):
+                with self.subTest(raw=raw):
+                    self.assertEqual(P._canonicalize(raw), name)
+                    self.assertEqual(P.price_of(raw, "2026-11-18"), rate)
+            self.assertEqual(P.normalize_codex(f"gpt-6.2-{tier.lower()}"), name)
+            self.assertEqual(P.normalize_copilot(f"gpt-6.2-{tier.lower()}", ""), name)
+            self.assertEqual(P._normalize_opencode(f"gpt-6.2-{tier.lower()}", "openai"), name)
+        self.assertEqual(P.price_of("GPT-6 Astra", "2026-11-18"), (10, 50, 12.50, 0, 1), "GPT-6 Astra unchanged")
+        self.assertEqual(P.price_of("GPT-6.1 Sol", "2026-11-18"), (2, 10, 2.50, 0, 0.10), "6.1 Sol unchanged")
+
+    def test_mai_code_models_are_named_and_priced_from_every_source(self):
+        # GitHub's models-and-pricing page (2026-11-18): MAI Code 2 $0.50 / $2.50, cached $0.025 and
+        # MAI Code 2 Flash $0.05 / $0.25, cached $0.005, both promotional until 2027-05-17 (the later
+        # rate is not encoded ahead of time); MAI-Code-1.1-Flash $0.20 / $1.20, cached $0.02. Only the
+        # exact "MAI-Code-1.1-Flash" spelling priced before; OpenCode's lower-case id read $0.
+        expected = {
+            "MAI Code 2": (0.50, 2.50, 0, 0, 0.025),
+            "MAI Code 2 Flash": (0.05, 0.25, 0, 0, 0.005),
+            "MAI-Code-1.1-Flash": (0.20, 1.20, 0, 0, 0.02),
+        }
+        aliases = {
+            "MAI Code 2": ("MAI Code 2", "mai-code-2", "MAI-Code-2", "microsoft/mai-code-2"),
+            "MAI Code 2 Flash": ("MAI Code 2 Flash", "mai-code-2-flash", "MAI-Code-2-Flash",
+                                 "microsoft/mai-code-2-flash"),
+            "MAI-Code-1.1-Flash": ("MAI-Code-1.1-Flash", "mai-code-1.1-flash", "MAI Code 1.1 Flash",
+                                   "microsoft/mai-code-1.1-flash"),
+        }
+        for name, spellings in aliases.items():
+            for raw in spellings:
+                with self.subTest(raw=raw):
+                    self.assertEqual(P._canonicalize(raw), name)
+                    self.assertEqual(P._normalize_opencode(raw, "microsoft"), name)
+                    self.assertEqual(P.normalize_copilot(raw, ""), name)
+                    self.assertEqual(P.price_of(raw, "2026-11-18"), expected[name])
+        # a version with no price row keeps its own spelling instead of borrowing another's rate
+        for raw in ("MAI-Code-1-Flash", "MAI-Code-1.1", "MAI Code 3"):
+            with self.subTest(raw=raw):
+                self.assertEqual(P.price_of(raw, "2026-11-18"), (0, 0, 0, 0, 0))
+
     def test_fable_and_mythos_5_2_are_named_and_priced_from_every_source(self):
         # Verified against platform.claude.com pricing and release notes (2026-11-10): launched
         # 2026-11-09 at $8 / $40, cache writes $10 / $16, cache read $0.20 (0.025x input); fast
