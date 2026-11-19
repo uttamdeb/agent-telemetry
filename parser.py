@@ -337,6 +337,10 @@ PRICING = {
     # (2026-11-13): $1.50 / $7.50 / $0.075 cached, one rate (no prompt-size tier, no dated
     # change). Implicit caching only.
     "Gemini 4 Hydrogen": (1.50, 7.50, 0, 0, 0.075),
+    # Gemini 4 Neon — gemini-4-neon, launched 2026-11-18; verified against
+    # aistudio.google.com/docs/pricing (2026-11-19): $3 / $15 / $0.15 cached, one rate (no
+    # prompt-size tier, no dated change, not on the free tier). Implicit caching only.
+    "Gemini 4 Neon": (3.00, 15.00, 0, 0, 0.15),
     # 3.6 to 3.8 Flash are a promo "through December 31, 2026" and double on 2027-01-01:
     # then move these tuples into PRICE_HISTORY dated 2026-12-31 and put the doubled
     # ones here ($1.50 / $7.50, cache read $0.15).
@@ -511,14 +515,14 @@ def _canonicalize(name):
             ver = nums[0]
         return f"Claude {tier} {ver}".strip()
 
-    # Gemini — "gemini-3.1-pro-preview", "Google: Gemini 4 Argon", "gemini-4-hydrogen"
+    # Gemini — "gemini-3.1-pro-preview", "Google: Gemini 4 Argon", "gemini-4-neon"
     # → one display name. Preview/date/effort suffixes drop; Live, TTS, image, embedding and
     # the like are different products with their own rates, so they keep their own spelling.
-    mgm = re.match(r"(?:models/)?gemini-?\s*(\d+(?:\.\d+)?)-?\s*(argon|carbon|hydrogen|pro|flash[\s\-]*lite|flash|computer-use)\b(.*)$", low)
+    mgm = re.match(r"(?:models/)?gemini-?\s*(\d+(?:\.\d+)?)-?\s*(argon|carbon|hydrogen|neon|pro|flash[\s\-]*lite|flash|computer-use)\b(.*)$", low)
     if mgm and not re.search(r"live|tts|image|audio|embed|transcribe|translate|robot|omni",
                              mgm.group(3)):
-        kind = {"argon": "Argon", "carbon": "Carbon", "hydrogen": "Hydrogen", "pro": "Pro",
-                "flash": "Flash", "computer-use": "Computer Use"}.get(
+        kind = {"argon": "Argon", "carbon": "Carbon", "hydrogen": "Hydrogen", "neon": "Neon",
+                "pro": "Pro", "flash": "Flash", "computer-use": "Computer Use"}.get(
             mgm.group(2), "Flash-Lite")
         return f"Gemini {mgm.group(1)} {kind}"
 

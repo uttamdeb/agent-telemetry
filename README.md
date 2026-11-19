@@ -509,6 +509,8 @@ dollars**, so cost is always derived. Rates live in `parser.py → PRICING` as
 - **Gemini 4 Hydrogen** (`gemini-4-hydrogen`) uses Google's paid rate: $1.50 input, $7.50 output
   and $0.075 cached input per 1M tokens. Its free tier can't be told apart in logs, so usage
   is shown at the paid rate.
+- **Gemini 4 Neon** (`gemini-4-neon`) uses Google's Standard rate: $3 input, $15 output and
+  $0.15 cached input per 1M tokens. Batch, Flex and Priority tiers are not modeled.
 
 ## Note on log retention
 

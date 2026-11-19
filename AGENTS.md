@@ -571,6 +571,11 @@ existing guarded `GET /api/local-servers` for the separate local server list.
   only). It has a free tier, which the logs cannot tell apart, so it is priced at the paid
   rate like every other model. A new Gemini 4 name needs its word in `_canonicalize`'s
   Gemini rule as well as a `PRICING` row, or every tool keeps the raw id at $0.
+- **Gemini 4 Neon (`gemini-4-neon`, launched 2026-11-18) is $3/$15 and $0.15 cached**, one
+  rate with no prompt-size tier and no dated change, not on the free tier, verified against
+  Google's [pricing page](https://aistudio.google.com/docs/pricing) on 2026-11-19 (implicit
+  caching only, so no cache write). Batch/Flex ($1.50/$7.50) and Priority ($5.40/$27) tiers
+  are not modeled, like every other vendor's non-standard tiers.
 - **MAI Code 2 and MAI Code 2 Flash are promotional until 2027-05-17.** GitHub's
   [models and pricing](https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing)
   lists $0.50 / $2.50 and $0.05 / $0.25 per 1M input/output tokens (cached $0.025 and $0.005),
