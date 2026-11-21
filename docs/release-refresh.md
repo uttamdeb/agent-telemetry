@@ -59,3 +59,6 @@ without `--pre-release`) and PyPI package all 2.3.0. Betas after it start at 2.3
 
 The 2.3.1 betas (`v2.3.1-beta.<n>`) ship the app and the extension as **2.3.1**, the extension as a pre-release on
 both stores. The stable extension that follows must be 2.3.2 or later.
+
+The 2.3.2 betas (`v2.3.2-beta.<n>`) ship the app and the extension as **2.3.2**, the extension as a pre-release on
+both stores. The stable extension that follows must be 2.3.3 or later.
