@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.3.2 (pre-release)
+
+- The bundled AgentTelemetry 2.3.2 backend: prices for GPT-6.2 Astra and Sol, MAI Code 2 and MAI Code 2 Flash, and Gemini 4 Neon, which showed $0 before. Every spelling of the Microsoft models is recognized.
+
 ## 2.3.1 (pre-release)
 
 - The bundled AgentTelemetry 2.3.1 backend: renaming a Claude Code session that is still running now explains that Claude Code would put its old name back, and suggests `/rename` in Claude Code, instead of saving a name that does not last.
